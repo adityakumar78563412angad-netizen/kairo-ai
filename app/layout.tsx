@@ -19,3 +19,18 @@ export const metadata: Metadata = {
     google: "L1BTfuJSNKz-nvLpgAHLOuKRdvn1grRo16EPq7GTMLQ",
   },
 };
+
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
+  return (
+    <html
+      lang="en"
+      className={`${geistSans.variable} ${geistMono.variable}`}
+    >
+      <body>{children}</body>
+    </html>
+  );
+}
