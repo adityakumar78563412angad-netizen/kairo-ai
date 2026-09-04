@@ -136,7 +136,6 @@ export default function Home() {
 
   const [chats, setChats] = useState<Chat[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
-
   const [activeChat, setActiveChat] =
     useState<string | null>(null);
 
@@ -171,10 +170,6 @@ export default function Home() {
   const bottomRef =
     useRef<HTMLDivElement>(null);
 
-  // ============================================================
-  // THEME
-  // ============================================================
-
   useEffect(() => {
     const saved =
       localStorage.getItem("kairo-theme");
@@ -196,10 +191,6 @@ export default function Home() {
       return next;
     });
   }
-
-  // ============================================================
-  // AUTH
-  // ============================================================
 
   useEffect(() => {
     initializeUser();
@@ -251,7 +242,10 @@ export default function Home() {
         );
       }
     } catch (error) {
-      console.error("Auth error:", error);
+      console.error(
+        "Auth error:",
+        error
+      );
     } finally {
       setAuthReady(true);
     }
@@ -300,10 +294,6 @@ export default function Home() {
     return again.data.user;
   }
 
-  // ============================================================
-  // CHATS
-  // ============================================================
-
   async function loadChats(userId: string) {
     const { data, error } =
       await supabase
@@ -319,7 +309,6 @@ export default function Home() {
         "Load chats:",
         error
       );
-
       return;
     }
 
@@ -582,10 +571,6 @@ export default function Home() {
     setMenuOpen(null);
   }
 
-  // ============================================================
-  // BACKBLAZE B2 UPLOAD
-  // ============================================================
-
   async function uploadFiles(
     files: FileList | null
   ) {
@@ -692,19 +677,13 @@ export default function Home() {
     }
   }
 
-  function removeAttachment(
-    index: number
-  ) {
+  function removeAttachment(index: number) {
     setAttachments((previous) =>
       previous.filter(
         (_, i) => i !== index
       )
     );
   }
-
-  // ============================================================
-  // STREAMING AI
-  // ============================================================
 
   async function streamAI(
     chatId: string,
@@ -906,10 +885,6 @@ export default function Home() {
     }
   }
 
-  // ============================================================
-  // SEND
-  // ============================================================
-
   async function sendMessage() {
     if (loading || uploading) {
       return;
@@ -933,10 +908,6 @@ export default function Home() {
     setLoading(true);
 
     try {
-      // ========================================================
-      // EDIT MODE
-      // ========================================================
-
       if (editingId) {
         const editedIndex =
           messages.findIndex(
@@ -1026,10 +997,6 @@ export default function Home() {
         }
       }
 
-      // ========================================================
-      // NORMAL MESSAGE
-      // ========================================================
-
       let chatId =
         activeChat;
 
@@ -1111,10 +1078,6 @@ export default function Home() {
     }
   }
 
-  // ============================================================
-  // CHAT UPDATE
-  // ============================================================
-
   async function updateChatTime(
     chatId: string
   ) {
@@ -1193,10 +1156,6 @@ export default function Home() {
     );
   }
 
-  // ============================================================
-  // ACTIONS
-  // ============================================================
-
   async function copyMessage(
     text: string
   ) {
@@ -1205,7 +1164,9 @@ export default function Home() {
         text
       );
 
-      alert("Copied to clipboard.");
+      alert(
+        "Copied to clipboard."
+      );
     } catch {
       const textarea =
         document.createElement(
@@ -1299,7 +1260,6 @@ export default function Home() {
     }
 
     setLoading(true);
-
     setMessages(
       previousMessages
     );
@@ -1373,12 +1333,17 @@ export default function Home() {
       (chat) => chat.archived
     );
 
-  // ============================================================
-  // UI
-  // ============================================================
-
   return (
-    <>
+    <div
+      className={`kairo-app ${
+        lightMode ? "light" : ""
+      }`}
+      onClick={() => {
+        if (menuOpen) {
+          setMenuOpen(null);
+        }
+      }}
+    >
       <style jsx global>{`
         * {
           box-sizing: border-box;
@@ -1416,10 +1381,10 @@ export default function Home() {
           --bg2: #090b10;
           --panel: rgba(12, 14, 20, 0.82);
           --panel-solid: #0d1017;
-          --panel-soft: rgba(255,255,255,.045);
-          --panel-hover: rgba(255,255,255,.07);
-          --line: rgba(255,255,255,.085);
-          --line-soft: rgba(255,255,255,.055);
+          --panel-soft: rgba(255, 255, 255, 0.045);
+          --panel-hover: rgba(255, 255, 255, 0.07);
+          --line: rgba(255, 255, 255, 0.085);
+          --line-soft: rgba(255, 255, 255, 0.055);
           --text: #f7f8fc;
           --muted: #9198aa;
           --muted2: #5f6779;
@@ -1428,7 +1393,7 @@ export default function Home() {
           --pink: #d946ef;
           --green: #34d399;
           --danger: #fb7185;
-          --shadow: rgba(0,0,0,.45);
+          --shadow: rgba(0, 0, 0, 0.45);
 
           width: 100vw;
           height: 100vh;
@@ -1439,12 +1404,12 @@ export default function Home() {
           background:
             radial-gradient(
               circle at 55% -15%,
-              rgba(139,92,246,.12),
+              rgba(139, 92, 246, 0.12),
               transparent 32%
             ),
             radial-gradient(
               circle at 90% 90%,
-              rgba(59,130,246,.07),
+              rgba(59, 130, 246, 0.07),
               transparent 30%
             ),
             linear-gradient(
@@ -1454,45 +1419,26 @@ export default function Home() {
             );
 
           transition:
-            background .35s ease,
-            color .35s ease;
+            background 0.35s ease,
+            color 0.35s ease;
         }
 
         .kairo-app.light {
           --bg: #f5f7fb;
           --bg2: #eef1f7;
-          --panel: rgba(255,255,255,.84);
+          --panel: rgba(255, 255, 255, 0.84);
           --panel-solid: #ffffff;
-          --panel-soft: rgba(20,27,45,.045);
-          --panel-hover: rgba(20,27,45,.07);
+          --panel-soft: rgba(20, 27, 45, 0.045);
+          --panel-hover: rgba(20, 27, 45, 0.07);
           --line: #e2e6ee;
           --line-soft: #edf0f5;
           --text: #171b26;
           --muted: #697286;
           --muted2: #99a1b1;
-          --shadow: rgba(25,35,55,.11);
-
-          background:
-            radial-gradient(
-              circle at 55% -15%,
-              rgba(124,58,237,.09),
-              transparent 34%
-            ),
-            radial-gradient(
-              circle at 90% 90%,
-              rgba(59,130,246,.055),
-              transparent 30%
-            ),
-            linear-gradient(
-              145deg,
-              #f8f9fc,
-              #eef1f7
-            );
+          --shadow: rgba(25, 35, 55, 0.11);
         }
 
-        /* =====================================================
-           SIDEBAR
-        ===================================================== */
+        /* SIDEBAR */
 
         .kairo-sidebar {
           width: 300px;
@@ -1501,16 +1447,17 @@ export default function Home() {
           background: var(--panel);
           border-right: 1px solid var(--line);
           backdrop-filter: blur(32px);
-          overflow: hidden;
+          overflow: visible;
           transition:
-            width .3s ease,
-            transform .3s ease;
+            width 0.3s ease,
+            transform 0.3s ease;
           z-index: 40;
         }
 
         .kairo-sidebar.closed {
           width: 0;
           border-right: 0;
+          overflow: hidden;
         }
 
         .kairo-sidebar-inner {
@@ -1551,7 +1498,7 @@ export default function Home() {
               #3b82f6
             );
           box-shadow:
-            0 10px 35px rgba(124,58,237,.3);
+            0 10px 35px rgba(124, 58, 237, 0.3);
           position: relative;
         }
 
@@ -1565,12 +1512,12 @@ export default function Home() {
           width: 24px;
           height: 24px;
           border-radius: 50%;
-          border: 1px solid rgba(255,255,255,.65);
+          border: 1px solid rgba(255, 255, 255, 0.65);
           display: flex;
           align-items: center;
           justify-content: center;
           box-shadow:
-            inset 0 0 14px rgba(255,255,255,.18);
+            inset 0 0 14px rgba(255, 255, 255, 0.18);
         }
 
         .kairo-mark-dot {
@@ -1585,14 +1532,14 @@ export default function Home() {
         .kairo-brand-name {
           font-size: 16px;
           font-weight: 800;
-          letter-spacing: -.04em;
+          letter-spacing: -0.04em;
         }
 
         .kairo-brand-sub {
           margin-top: 2px;
           font-size: 9px;
           color: var(--muted2);
-          letter-spacing: .16em;
+          letter-spacing: 0.16em;
           text-transform: uppercase;
         }
 
@@ -1606,7 +1553,7 @@ export default function Home() {
           color: var(--muted);
           background: transparent;
           border: 1px solid transparent;
-          transition: .2s ease;
+          transition: 0.2s ease;
         }
 
         .kairo-icon-button:hover {
@@ -1619,7 +1566,7 @@ export default function Home() {
           width: 100%;
           height: 48px;
           margin-top: 20px;
-          border: 1px solid rgba(139,92,246,.22);
+          border: 1px solid rgba(139, 92, 246, 0.22);
           border-radius: 15px;
           color: white;
           font-size: 13px;
@@ -1628,30 +1575,27 @@ export default function Home() {
           align-items: center;
           justify-content: center;
           gap: 9px;
-
           background:
             linear-gradient(
               135deg,
-              rgba(139,92,246,.95),
-              rgba(99,102,241,.9)
+              rgba(139, 92, 246, 0.95),
+              rgba(99, 102, 241, 0.9)
             );
-
           box-shadow:
-            0 12px 32px rgba(99,102,241,.2);
-
+            0 12px 32px rgba(99, 102, 241, 0.2);
           transition:
-            transform .2s ease,
-            box-shadow .2s ease;
+            transform 0.2s ease,
+            box-shadow 0.2s ease;
         }
 
         .kairo-new-button:hover {
           transform: translateY(-1px);
           box-shadow:
-            0 16px 40px rgba(99,102,241,.3);
+            0 16px 40px rgba(99, 102, 241, 0.3);
         }
 
         .kairo-new-button:disabled {
-          opacity: .45;
+          opacity: 0.45;
           cursor: not-allowed;
           transform: none;
         }
@@ -1669,7 +1613,7 @@ export default function Home() {
 
         .kairo-history::-webkit-scrollbar-thumb,
         .kairo-messages::-webkit-scrollbar-thumb {
-          background: rgba(128,135,150,.22);
+          background: rgba(128, 135, 150, 0.22);
           border-radius: 99px;
         }
 
@@ -1680,7 +1624,7 @@ export default function Home() {
           justify-content: space-between;
           font-size: 9px;
           font-weight: 800;
-          letter-spacing: .16em;
+          letter-spacing: 0.16em;
           color: var(--muted2);
           text-transform: uppercase;
         }
@@ -1699,7 +1643,7 @@ export default function Home() {
           border: 1px solid transparent;
           color: var(--muted);
           background: transparent;
-          transition: .18s ease;
+          transition: 0.18s ease;
         }
 
         .kairo-chat:hover {
@@ -1713,11 +1657,27 @@ export default function Home() {
           background:
             linear-gradient(
               135deg,
-              rgba(139,92,246,.13),
-              rgba(99,102,241,.06)
+              rgba(139, 92, 246, 0.13),
+              rgba(99, 102, 241, 0.06)
             );
           border-color:
-            rgba(139,92,246,.2);
+            rgba(139, 92, 246, 0.2);
+        }
+
+        .kairo-chat-open {
+          position: absolute;
+          inset: 0;
+          width: 100%;
+          border: 0;
+          background: transparent;
+          z-index: 1;
+        }
+
+        .kairo-chat-icon,
+        .kairo-chat-title {
+          position: relative;
+          z-index: 2;
+          pointer-events: none;
         }
 
         .kairo-chat-icon {
@@ -1734,7 +1694,7 @@ export default function Home() {
 
         .kairo-chat.active .kairo-chat-icon {
           color: #a78bfa;
-          background: rgba(139,92,246,.14);
+          background: rgba(139, 92, 246, 0.14);
         }
 
         .kairo-chat-title {
@@ -1748,8 +1708,11 @@ export default function Home() {
         }
 
         .kairo-chat-more {
+          position: relative;
+          z-index: 20;
           width: 30px;
           height: 30px;
+          flex-shrink: 0;
           border: 0;
           border-radius: 9px;
           color: var(--muted2);
@@ -1758,7 +1721,7 @@ export default function Home() {
           display: flex;
           align-items: center;
           justify-content: center;
-          transition: .18s ease;
+          transition: 0.18s ease;
         }
 
         .kairo-chat:hover .kairo-chat-more,
@@ -1769,6 +1732,55 @@ export default function Home() {
         .kairo-chat-more:hover {
           color: var(--text);
           background: var(--panel-soft);
+        }
+
+        .kairo-menu {
+          position: absolute;
+          right: 6px;
+          top: 47px;
+          z-index: 99999;
+          width: 170px;
+          padding: 5px;
+          border: 1px solid var(--line);
+          border-radius: 14px;
+          background: var(--panel-solid);
+          box-shadow:
+            0 25px 70px var(--shadow);
+          backdrop-filter: blur(25px);
+          pointer-events: auto;
+        }
+
+        .kairo-menu button {
+          position: relative;
+          z-index: 100000;
+          width: 100%;
+          height: 36px;
+          padding: 0 10px;
+          border: 0;
+          border-radius: 9px;
+          color: var(--muted);
+          background: transparent;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          text-align: left;
+          font-size: 10px;
+          cursor: pointer;
+          pointer-events: auto;
+        }
+
+        .kairo-menu button:hover {
+          color: var(--text);
+          background: var(--panel-hover);
+        }
+
+        .kairo-menu .danger-item {
+          color: var(--danger);
+        }
+
+        .kairo-menu .danger-item:hover {
+          color: #fff;
+          background: rgba(251, 113, 133, 0.12);
         }
 
         .kairo-empty-history {
@@ -1865,8 +1877,8 @@ export default function Home() {
           background:
             linear-gradient(
               135deg,
-              rgba(139,92,246,.2),
-              rgba(59,130,246,.12)
+              rgba(139, 92, 246, 0.2),
+              rgba(59, 130, 246, 0.12)
             );
         }
 
@@ -1888,12 +1900,10 @@ export default function Home() {
           border-radius: 50%;
           background: var(--green);
           box-shadow:
-            0 0 12px rgba(52,211,153,.7);
+            0 0 12px rgba(52, 211, 153, 0.7);
         }
 
-        /* =====================================================
-           MAIN
-        ===================================================== */
+        /* MAIN */
 
         .kairo-main {
           min-width: 0;
@@ -1910,13 +1920,13 @@ export default function Home() {
           align-items: center;
           padding: 0 20px;
           border-bottom: 1px solid var(--line);
-          background: rgba(5,6,8,.4);
+          background: rgba(5, 6, 8, 0.4);
           backdrop-filter: blur(30px);
           z-index: 20;
         }
 
         .light .kairo-topbar {
-          background: rgba(255,255,255,.65);
+          background: rgba(255, 255, 255, 0.65);
         }
 
         .kairo-topbar-left {
@@ -1933,7 +1943,7 @@ export default function Home() {
         .kairo-topbar-name {
           font-size: 13px;
           font-weight: 750;
-          letter-spacing: -.02em;
+          letter-spacing: -0.02em;
         }
 
         .kairo-topbar-status {
@@ -1951,7 +1961,7 @@ export default function Home() {
           border-radius: 50%;
           background: var(--green);
           box-shadow:
-            0 0 9px rgba(52,211,153,.8);
+            0 0 9px rgba(52, 211, 153, 0.8);
         }
 
         .kairo-topbar-actions {
@@ -1970,7 +1980,7 @@ export default function Home() {
           display: flex;
           align-items: center;
           justify-content: center;
-          transition: .2s ease;
+          transition: 0.2s ease;
         }
 
         .kairo-top-action:hover {
@@ -1978,10 +1988,6 @@ export default function Home() {
           background: var(--panel-hover);
           transform: translateY(-1px);
         }
-
-        /* =====================================================
-           WELCOME
-        ===================================================== */
 
         .kairo-messages {
           flex: 1;
@@ -2011,7 +2017,7 @@ export default function Home() {
           color: var(--muted);
           font-size: 9px;
           font-weight: 700;
-          letter-spacing: .07em;
+          letter-spacing: 0.07em;
         }
 
         .badge-dot {
@@ -2020,7 +2026,7 @@ export default function Home() {
           border-radius: 50%;
           background: #a78bfa;
           box-shadow:
-            0 0 12px rgba(167,139,250,.8);
+            0 0 12px rgba(167, 139, 250, 0.8);
         }
 
         .kairo-welcome-orb {
@@ -2034,13 +2040,12 @@ export default function Home() {
           background:
             linear-gradient(
               145deg,
-              rgba(255,255,255,.08),
-              rgba(255,255,255,.018)
+              rgba(255, 255, 255, 0.08),
+              rgba(255, 255, 255, 0.018)
             );
           border: 1px solid var(--line);
           box-shadow:
-            0 30px 90px rgba(0,0,0,.25);
-          position: relative;
+            0 30px 90px rgba(0, 0, 0, 0.25);
         }
 
         .light .kairo-welcome-orb {
@@ -2051,7 +2056,7 @@ export default function Home() {
               #f1f3f8
             );
           box-shadow:
-            0 25px 75px rgba(45,55,75,.1);
+            0 25px 75px rgba(45, 55, 75, 0.1);
         }
 
         .kairo-orb-inner {
@@ -2092,34 +2097,14 @@ export default function Home() {
           background: white;
           box-shadow:
             0 0 25px white;
-          position: relative;
-        }
-
-        .kairo-orb-core::after {
-          content: "";
-          position: absolute;
-          inset: 5px;
-          border-radius: 50%;
-          background:
-            linear-gradient(
-              135deg,
-              #8b5cf6,
-              #3b82f6
-            );
-        }
-
-        @keyframes kairo-spin {
-          to {
-            transform: rotate(360deg);
-          }
         }
 
         .kairo-welcome-title {
           margin: 18px 0 0;
           font-size: clamp(43px, 7vw, 78px);
-          line-height: .95;
+          line-height: 0.95;
           font-weight: 850;
-          letter-spacing: -.075em;
+          letter-spacing: -0.075em;
           text-align: center;
         }
 
@@ -2184,15 +2169,15 @@ export default function Home() {
             0 15px 45px var(--shadow);
           backdrop-filter: blur(25px);
           transition:
-            transform .2s ease,
-            border-color .2s ease,
-            background .2s ease;
+            transform 0.2s ease,
+            border-color 0.2s ease,
+            background 0.2s ease;
         }
 
         .kairo-prompt:hover {
           transform: translateY(-4px);
           border-color:
-            rgba(139,92,246,.3);
+            rgba(139, 92, 246, 0.3);
           background: var(--panel-hover);
         }
 
@@ -2205,7 +2190,7 @@ export default function Home() {
           justify-content: center;
           color: #a78bfa;
           background:
-            rgba(139,92,246,.1);
+            rgba(139, 92, 246, 0.1);
           margin-bottom: 25px;
         }
 
@@ -2213,7 +2198,7 @@ export default function Home() {
           font-size: 8px;
           font-weight: 800;
           color: #a78bfa;
-          letter-spacing: .18em;
+          letter-spacing: 0.18em;
         }
 
         .kairo-prompt-title {
@@ -2234,9 +2219,7 @@ export default function Home() {
           font-size: 9px;
         }
 
-        /* =====================================================
-           CHAT MESSAGES
-        ===================================================== */
+        /* MESSAGES */
 
         .kairo-message-list {
           width: min(900px, 100%);
@@ -2248,19 +2231,7 @@ export default function Home() {
           display: flex;
           margin-bottom: 30px;
           animation:
-            kairo-message-in .22s ease;
-        }
-
-        @keyframes kairo-message-in {
-          from {
-            opacity: 0;
-            transform: translateY(5px);
-          }
-
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
+            kairo-message-in 0.22s ease;
         }
 
         .kairo-message.user {
@@ -2270,13 +2241,15 @@ export default function Home() {
         .kairo-user-bubble {
           max-width: min(720px, 85%);
           padding: 14px 17px;
-          border-radius: 20px 20px 6px 20px;
-          border: 1px solid rgba(139,92,246,.22);
+          border-radius:
+            20px 20px 6px 20px;
+          border: 1px solid
+            rgba(139, 92, 246, 0.22);
           background:
             linear-gradient(
               135deg,
-              rgba(139,92,246,.16),
-              rgba(99,102,241,.1)
+              rgba(139, 92, 246, 0.16),
+              rgba(99, 102, 241, 0.1)
             );
           box-shadow:
             0 12px 40px var(--shadow);
@@ -2291,14 +2264,16 @@ export default function Home() {
             );
           border-color: #ded7f5;
           box-shadow:
-            0 10px 30px rgba(45,55,80,.06);
+            0 10px 30px
+              rgba(45, 55, 80, 0.06);
         }
 
-        .kairo-message-text {
+        .kairo-message-text,
+        .kairo-assistant-text {
           white-space: pre-wrap;
           word-break: break-word;
           font-size: 14px;
-          line-height: 1.75;
+          line-height: 1.8;
         }
 
         .kairo-assistant-message {
@@ -2323,7 +2298,8 @@ export default function Home() {
               #3b82f6
             );
           box-shadow:
-            0 9px 25px rgba(124,58,237,.2);
+            0 9px 25px
+              rgba(124, 58, 237, 0.2);
         }
 
         .kairo-assistant-mark-inner {
@@ -2357,19 +2333,17 @@ export default function Home() {
           padding: 3px 6px;
           border-radius: 6px;
           color: #a78bfa;
-          background: rgba(139,92,246,.09);
-          border: 1px solid rgba(139,92,246,.12);
+          background:
+            rgba(139, 92, 246, 0.09);
+          border: 1px solid
+            rgba(139, 92, 246, 0.12);
           font-size: 7px;
           font-weight: 800;
-          letter-spacing: .1em;
+          letter-spacing: 0.1em;
         }
 
         .kairo-assistant-text {
-          white-space: pre-wrap;
-          word-break: break-word;
           color: var(--text);
-          font-size: 14px;
-          line-height: 1.8;
         }
 
         .kairo-thinking {
@@ -2385,27 +2359,16 @@ export default function Home() {
           border-radius: 50%;
           background: #8b5cf6;
           animation:
-            thinking 1s infinite ease-in-out;
+            thinking 1s infinite
+              ease-in-out;
         }
 
         .kairo-thinking span:nth-child(2) {
-          animation-delay: .12s;
+          animation-delay: 0.12s;
         }
 
         .kairo-thinking span:nth-child(3) {
-          animation-delay: .24s;
-        }
-
-        @keyframes thinking {
-          0%, 60%, 100% {
-            transform: translateY(0);
-            opacity: .35;
-          }
-
-          30% {
-            transform: translateY(-4px);
-            opacity: 1;
-          }
+          animation-delay: 0.24s;
         }
 
         .kairo-actions {
@@ -2433,12 +2396,10 @@ export default function Home() {
         }
 
         .kairo-message-action:disabled {
-          opacity: .3;
+          opacity: 0.3;
         }
 
-        /* =====================================================
-           ATTACHMENTS
-        ===================================================== */
+        /* FILES */
 
         .kairo-files {
           display: flex;
@@ -2469,7 +2430,7 @@ export default function Home() {
           justify-content: center;
           color: #a78bfa;
           background:
-            rgba(139,92,246,.1);
+            rgba(139, 92, 246, 0.1);
         }
 
         .kairo-file-info {
@@ -2490,9 +2451,7 @@ export default function Home() {
           font-size: 8px;
         }
 
-        /* =====================================================
-           COMPOSER
-        ===================================================== */
+        /* COMPOSER */
 
         .kairo-composer-area {
           flex-shrink: 0;
@@ -2517,9 +2476,11 @@ export default function Home() {
           justify-content: space-between;
           padding: 9px 12px;
           margin-bottom: 7px;
-          border: 1px solid rgba(139,92,246,.2);
+          border: 1px solid
+            rgba(139, 92, 246, 0.2);
           border-radius: 13px;
-          background: rgba(139,92,246,.07);
+          background:
+            rgba(139, 92, 246, 0.07);
           font-size: 10px;
         }
 
@@ -2568,7 +2529,8 @@ export default function Home() {
           justify-content: center;
           border-radius: 8px;
           color: #a78bfa;
-          background: rgba(139,92,246,.1);
+          background:
+            rgba(139, 92, 246, 0.1);
         }
 
         .kairo-pending-name {
@@ -2598,7 +2560,8 @@ export default function Home() {
 
         .kairo-remove:hover {
           color: var(--danger);
-          background: rgba(251,113,133,.08);
+          background:
+            rgba(251, 113, 133, 0.08);
         }
 
         .kairo-composer {
@@ -2613,16 +2576,15 @@ export default function Home() {
           box-shadow:
             0 18px 65px var(--shadow);
           backdrop-filter: blur(30px);
-          transition: .2s ease;
         }
 
         .kairo-composer:focus-within {
           border-color:
-            rgba(139,92,246,.32);
+            rgba(139, 92, 246, 0.32);
           box-shadow:
             0 20px 70px var(--shadow),
             0 0 0 3px
-              rgba(139,92,246,.055);
+              rgba(139, 92, 246, 0.055);
         }
 
         .kairo-tool {
@@ -2636,7 +2598,6 @@ export default function Home() {
           display: flex;
           align-items: center;
           justify-content: center;
-          transition: .18s ease;
         }
 
         .kairo-tool:hover {
@@ -2645,7 +2606,7 @@ export default function Home() {
         }
 
         .kairo-tool:disabled {
-          opacity: .3;
+          opacity: 0.3;
           cursor: not-allowed;
         }
 
@@ -2684,21 +2645,14 @@ export default function Home() {
               #8b5cf6,
               #6366f1
             );
-          box-shadow:
-            0 8px 25px
-              rgba(99,102,241,.28);
-          transition: .2s ease;
         }
 
         .kairo-send:hover:not(:disabled) {
           transform: translateY(-1px);
-          box-shadow:
-            0 12px 30px
-              rgba(99,102,241,.38);
         }
 
         .kairo-send:disabled {
-          opacity: .22;
+          opacity: 0.22;
           box-shadow: none;
           cursor: not-allowed;
         }
@@ -2713,1244 +2667,1164 @@ export default function Home() {
           font-size: 8px;
         }
 
-        /* =====================================================
-           MENU
-        ===================================================== */
-
-        .kairo-menu {
-          position: absolute;
-          right: 6px;
-          top: 47px;
-          z-index: 100;
-          width: 170px;
-          padding: 5px;
-          border: 1px solid var(--line);
-          border-radius: 14px;
-          background: var(--panel-solid);
-          box-shadow:
-            0 25px 70px var(--shadow);
-          backdrop-filter: blur(25px);
+        @keyframes kairo-spin {
+          to {
+            transform: rotate(360deg);
+          }
         }
 
-        .kairo-menu button {
-          width: 100%;
-          height: 36px;
-          padding: 0 10px;
-          border: 0;
-          border-radius: 9px;
-          color: var(--muted);
-          background: transparent;
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          text-align: left;
-          font-size: 10px;
+        @keyframes kairo-message-in {
+          from {
+            opacity: 0;
+            transform: translateY(5px);
+          }
+
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
         }
 
-        .kairo-menu button:hover {
-          color: var(--text);
-          background: var(--panel-soft);
+        @keyframes thinking {
+          0%,
+          60%,
+          100% {
+            transform: translateY(0);
+            opacity: 0.35;
+          }
+
+          30% {
+            transform: translateY(-4px);
+            opacity: 1;
+          }
         }
 
-        .kairo-menu .danger-item {
-          color: #fb7185;
-        }
-
-        /* =====================================================
-           MOBILE
-        ===================================================== */
-
-        @media (max-width: 850px) {
+        @media (max-width: 900px) {
           .kairo-sidebar {
             position: fixed;
             left: 0;
             top: 0;
             bottom: 0;
             box-shadow:
-              25px 0 80px rgba(0,0,0,.35);
+              20px 0 60px
+                rgba(0, 0, 0, 0.35);
           }
 
           .kairo-sidebar.closed {
-            width: 0;
-          }
-
-          .kairo-topbar {
-            padding: 0 13px;
-          }
-
-          .kairo-message-list {
-            padding:
-              24px 13px 35px;
-          }
-
-          .kairo-user-bubble {
-            max-width: 91%;
-          }
-
-          .kairo-composer-area {
-            padding:
-              7px 9px 12px;
+            transform: translateX(-100%);
+            width: 300px;
           }
 
           .kairo-prompts {
             grid-template-columns:
               1fr;
-            max-width: 470px;
-          }
-
-          .kairo-prompt {
-            min-height: 105px;
-          }
-
-          .kairo-prompt-icon {
-            margin-bottom: 13px;
           }
 
           .kairo-welcome {
             padding:
-              35px 16px 25px;
+              35px 18px 25px;
+          }
+
+          .kairo-composer-area {
+            padding:
+              8px 10px 12px;
+          }
+
+          .kairo-message-list {
+            padding:
+              25px 14px 35px;
+          }
+        }
+
+        @media (max-width: 600px) {
+          .kairo-topbar {
+            padding: 0 12px;
+          }
+
+          .kairo-topbar-status {
+            display: none;
+          }
+
+          .kairo-welcome-title {
+            font-size: 48px;
           }
 
           .kairo-welcome-copy {
             font-size: 12px;
           }
-        }
-
-        @media (max-width: 480px) {
-          .kairo-brand-sub {
-            display: none;
-          }
-
-          .kairo-topbar-name {
-            font-size: 12px;
-          }
-
-          .kairo-topbar-status {
-            font-size: 8px;
-          }
-
-          .kairo-welcome-title {
-            font-size: 47px;
-          }
-
-          .kairo-welcome-orb {
-            width: 88px;
-            height: 88px;
-            border-radius: 27px;
-          }
-
-          .kairo-orb-inner {
-            width: 52px;
-            height: 52px;
-          }
-
-          .kairo-message {
-            margin-bottom: 25px;
-          }
-
-          .kairo-assistant-message {
-            gap: 9px;
-          }
-
-          .kairo-assistant-mark {
-            width: 32px;
-            height: 32px;
-            border-radius: 10px;
-          }
-
-          .kairo-assistant-text,
-          .kairo-message-text {
-            font-size: 13px;
-          }
-
-          .kairo-file-card {
-            max-width: 100%;
-          }
 
           .kairo-tool {
-            width: 36px;
+            width: 34px;
           }
 
           .kairo-send {
             width: 38px;
-            height: 38px;
+          }
+
+          .kairo-user-bubble {
+            max-width: 92%;
           }
         }
       `}</style>
 
-      <main
-        className={`kairo-app ${
-          lightMode ? "light" : ""
+      {/* SIDEBAR */}
+
+      <aside
+        className={`kairo-sidebar ${
+          sidebar ? "" : "closed"
         }`}
+        onClick={(event) =>
+          event.stopPropagation()
+        }
       >
-        {/* ====================================================
-            SIDEBAR
-        ==================================================== */}
+        <div className="kairo-sidebar-inner">
+          <div className="kairo-side-top">
+            <div className="kairo-brand-row">
+              <div className="kairo-brand">
+                <KairoMark />
 
-        <aside
-          className={`kairo-sidebar ${
-            sidebar ? "" : "closed"
-          }`}
-        >
-          <div className="kairo-sidebar-inner">
-            <div className="kairo-side-top">
-              <div className="kairo-brand-row">
-                <div className="kairo-brand">
-                  <KairoMark />
+                <div>
+                  <div className="kairo-brand-name">
+                    KAIRO
+                  </div>
 
-                  <div>
-                    <div className="kairo-brand-name">
-                      KAIRO
-                    </div>
-
-                    <div className="kairo-brand-sub">
-                      AI workspace
-                    </div>
+                  <div className="kairo-brand-sub">
+                    AI workspace
                   </div>
                 </div>
-
-                <button
-                  className="kairo-icon-button"
-                  onClick={() =>
-                    setSidebar(false)
-                  }
-                  title="Close sidebar"
-                >
-                  <Icon size={17}>
-                    <path d="M18 6 6 18" />
-                    <path d="m6 6 12 12" />
-                  </Icon>
-                </button>
               </div>
 
               <button
-                className="kairo-new-button"
-                disabled={!authReady}
+                className="kairo-icon-button"
                 onClick={() =>
-                  createChat()
+                  setSidebar(false)
                 }
+                title="Close sidebar"
               >
-                <Icon size={16}>
-                  <path d="M12 5v14" />
-                  <path d="M5 12h14" />
+                <Icon size={17}>
+                  <path d="M18 6 6 18" />
+                  <path d="m6 6 12 12" />
                 </Icon>
-
-                New conversation
               </button>
             </div>
 
-            <div className="kairo-history">
-              <div className="kairo-section-label">
-                <span>
-                  Conversations
-                </span>
+            <button
+              className="kairo-new-button"
+              disabled={!authReady}
+              onClick={() =>
+                createChat()
+              }
+            >
+              <Icon size={16}>
+                <path d="M12 5v14" />
+                <path d="M5 12h14" />
+              </Icon>
 
-                <span>
-                  {activeChats.length}
-                </span>
-              </div>
+              New conversation
+            </button>
+          </div>
 
-              {activeChats.length ===
-                0 && (
-                <div className="kairo-empty-history">
-                  <Icon size={20}>
-                    <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4Z" />
-                  </Icon>
+          <div className="kairo-history">
+            <div className="kairo-section-label">
+              <span>
+                Conversations
+              </span>
 
-                  <div
-                    style={{
-                      marginTop: 9,
-                    }}
-                  >
-                    Start a conversation and
-                    it will appear here.
-                  </div>
-                </div>
-              )}
+              <span>
+                {activeChats.length}
+              </span>
+            </div>
 
-              {activeChats.map(
-                (chat) => (
-                  <div
-                    key={chat.id}
-                    className={`kairo-chat ${
-                      activeChat ===
-                      chat.id
-                        ? "active"
-                        : ""
-                    }`}
-                  >
-                    <button
-                      onClick={() =>
-                        openChat(
-                          chat.id
-                        )
-                      }
-                      style={{
-                        position:
-                          "absolute",
-                        inset: 0,
-                        width: "100%",
-                        border: 0,
-                        background:
-                          "transparent",
-                      }}
-                      aria-label={`Open ${chat.title}`}
-                    />
+            {activeChats.length ===
+              0 && (
+              <div className="kairo-empty-history">
+                <Icon size={20}>
+                  <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4Z" />
+                </Icon>
 
-                    <div className="kairo-chat-icon">
-                      <Icon size={15}>
-                        <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4Z" />
-                      </Icon>
-                    </div>
-
-                    <div className="kairo-chat-title">
-                      {chat.title}
-                    </div>
-
-                    <button
-                      className="kairo-chat-more"
-                      onClick={() =>
-                        setMenuOpen(
-                          menuOpen ===
-                            chat.id
-                            ? null
-                            : chat.id
-                        )
-                      }
-                      title="Options"
-                    >
-                      <Icon
-                        size={15}
-                        strokeWidth={2}
-                      >
-                        <circle
-                          cx="5"
-                          cy="12"
-                          r="1"
-                        />
-                        <circle
-                          cx="12"
-                          cy="12"
-                          r="1"
-                        />
-                        <circle
-                          cx="19"
-                          cy="12"
-                          r="1"
-                        />
-                      </Icon>
-                    </button>
-
-                    {menuOpen ===
-                      chat.id && (
-                      <div className="kairo-menu">
-                        <button
-                          onClick={() =>
-                            renameChat(
-                              chat.id
-                            )
-                          }
-                        >
-                          <Icon size={14}>
-                            <path d="M12 20h9" />
-                            <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z" />
-                          </Icon>
-
-                          Rename
-                        </button>
-
-                        <button
-                          onClick={() =>
-                            archiveChat(
-                              chat.id
-                            )
-                          }
-                        >
-                          <Icon size={14}>
-                            <path d="M4 7h16" />
-                            <path d="M6 7v11a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7" />
-                            <path d="M8 4h8l1 3H7l1-3Z" />
-                          </Icon>
-
-                          Archive
-                        </button>
-
-                        <button
-                          className="danger-item"
-                          onClick={() =>
-                            deleteChat(
-                              chat.id
-                            )
-                          }
-                        >
-                          <Icon size={14}>
-                            <path d="M3 6h18" />
-                            <path d="M8 6V4h8v2" />
-                            <path d="M19 6l-1 14H6L5 6" />
-                            <path d="M10 11v5" />
-                            <path d="M14 11v5" />
-                          </Icon>
-
-                          Delete
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                )
-              )}
-
-              <button
-                className="kairo-archive-toggle"
-                onClick={() =>
-                  setArchiveOpen(
-                    !archiveOpen
-                  )
-                }
-              >
-                <span
+                <div
                   style={{
-                    display: "flex",
-                    alignItems:
-                      "center",
-                    gap: 8,
-                    fontSize: 11,
+                    marginTop: 9,
                   }}
                 >
-                  <Icon size={15}>
-                    <path d="M4 7h16" />
-                    <path d="M6 7v11a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7" />
-                    <path d="M8 4h8l1 3H7l1-3Z" />
-                  </Icon>
+                  Start a conversation and
+                  it will appear here.
+                </div>
+              </div>
+            )}
 
-                  Archived
-                </span>
-
-                <Icon size={14}>
-                  {archiveOpen ? (
-                    <path d="m6 15 6-6 6 6" />
-                  ) : (
-                    <path d="m6 9 6 6 6-6" />
-                  )}
-                </Icon>
-              </button>
-
-              {archiveOpen && (
-                <div>
-                  {archivedChats.length ===
-                  0 ? (
-                    <div
-                      style={{
-                        padding:
-                          "10px",
-                        color:
-                          "var(--muted2)",
-                        fontSize: 10,
-                      }}
-                    >
-                      No archived
-                      conversations.
-                    </div>
-                  ) : (
-                    archivedChats.map(
-                      (chat) => (
-                        <div
-                          key={chat.id}
-                          className="kairo-archive-item"
-                        >
-                          <div className="kairo-archive-name">
-                            {
-                              chat.title
-                            }
-                          </div>
-
-                          <div className="kairo-archive-actions">
-                            <button
-                              className="restore"
-                              onClick={() =>
-                                restoreChat(
-                                  chat.id
-                                )
-                              }
-                            >
-                              Restore
-                            </button>
-
-                            <button
-                              className="delete"
-                              onClick={() =>
-                                deleteChat(
-                                  chat.id
-                                )
-                              }
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        </div>
+            {activeChats.map(
+              (chat) => (
+                <div
+                  key={chat.id}
+                  className={`kairo-chat ${
+                    activeChat ===
+                    chat.id
+                      ? "active"
+                      : ""
+                  }`}
+                >
+                  <button
+                    className="kairo-chat-open"
+                    onClick={() =>
+                      openChat(
+                        chat.id
                       )
-                    )
+                    }
+                    aria-label={`Open ${chat.title}`}
+                  />
+
+                  <div className="kairo-chat-icon">
+                    <Icon size={15}>
+                      <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4Z" />
+                    </Icon>
+                  </div>
+
+                  <div className="kairo-chat-title">
+                    {chat.title}
+                  </div>
+
+                  <button
+                    className="kairo-chat-more"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+
+                      setMenuOpen(
+                        (current) =>
+                          current ===
+                          chat.id
+                            ? null
+                            : chat.id
+                      );
+                    }}
+                    title="Options"
+                    aria-label="Conversation options"
+                  >
+                    <Icon
+                      size={15}
+                      strokeWidth={2}
+                    >
+                      <circle
+                        cx="5"
+                        cy="12"
+                        r="1"
+                      />
+                      <circle
+                        cx="12"
+                        cy="12"
+                        r="1"
+                      />
+                      <circle
+                        cx="19"
+                        cy="12"
+                        r="1"
+                      />
+                    </Icon>
+                  </button>
+
+                  {menuOpen ===
+                    chat.id && (
+                    <div
+                      className="kairo-menu"
+                      onClick={(event) =>
+                        event.stopPropagation()
+                      }
+                    >
+                      <button
+                        onClick={() =>
+                          renameChat(
+                            chat.id
+                          )
+                        }
+                      >
+                        <Icon size={14}>
+                          <path d="M12 20h9" />
+                          <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z" />
+                        </Icon>
+
+                        Rename
+                      </button>
+
+                      <button
+                        onClick={() =>
+                          archiveChat(
+                            chat.id
+                          )
+                        }
+                      >
+                        <Icon size={14}>
+                          <path d="M4 7h16" />
+                          <path d="M6 7v11a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7" />
+                          <path d="M8 4h8l1 3H7l1-3Z" />
+                        </Icon>
+
+                        Archive
+                      </button>
+
+                      <button
+                        className="danger-item"
+                        onClick={() =>
+                          deleteChat(
+                            chat.id
+                          )
+                        }
+                      >
+                        <Icon size={14}>
+                          <path d="M3 6h18" />
+                          <path d="M8 6V4h8v2" />
+                          <path d="M19 6l-1 14H6L5 6" />
+                          <path d="M10 11v5" />
+                          <path d="M14 11v5" />
+                        </Icon>
+
+                        Delete
+                      </button>
+                    </div>
                   )}
                 </div>
-              )}
-            </div>
+              )
+            )}
 
-            <div className="kairo-side-bottom">
-              <div className="kairo-account-card">
-                <div className="kairo-account-row">
-                  <div className="kairo-account-avatar">
-                    <KairoMark small />
+            <button
+              className="kairo-archive-toggle"
+              onClick={() =>
+                setArchiveOpen(
+                  !archiveOpen
+                )
+              }
+            >
+              <span
+                style={{
+                  display: "flex",
+                  alignItems:
+                    "center",
+                  gap: 8,
+                  fontSize: 11,
+                }}
+              >
+                <Icon size={15}>
+                  <path d="M4 7h16" />
+                  <path d="M6 7v11a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7" />
+                  <path d="M8 4h8l1 3H7l1-3Z" />
+                </Icon>
+
+                Archived
+              </span>
+
+              <Icon size={14}>
+                {archiveOpen ? (
+                  <path d="m6 15 6-6 6 6" />
+                ) : (
+                  <path d="m6 9 6 6 6-6" />
+                )}
+              </Icon>
+            </button>
+
+            {archiveOpen && (
+              <div>
+                {archivedChats.length ===
+                0 ? (
+                  <div
+                    style={{
+                      padding:
+                        "10px",
+                      color:
+                        "var(--muted2)",
+                      fontSize: 10,
+                    }}
+                  >
+                    No archived
+                    conversations.
                   </div>
+                ) : (
+                  archivedChats.map(
+                    (chat) => (
+                      <div
+                        key={chat.id}
+                        className="kairo-archive-item"
+                      >
+                        <div className="kairo-archive-name">
+                          {
+                            chat.title
+                          }
+                        </div>
 
-                  <div>
-                    <div className="kairo-account-title">
-                      KAIRO AI
-                    </div>
+                        <div className="kairo-archive-actions">
+                          <button
+                            className="restore"
+                            onClick={() =>
+                              restoreChat(
+                                chat.id
+                              )
+                            }
+                          >
+                            Restore
+                          </button>
 
-                    <div className="kairo-account-sub">
-                      Intelligent companion
-                    </div>
-                  </div>
+                          <button
+                            className="delete"
+                            onClick={() =>
+                              deleteChat(
+                                chat.id
+                              )
+                            }
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  )
+                )}
+              </div>
+            )}
+          </div>
 
-                  <div className="kairo-online" />
+          <div className="kairo-side-bottom">
+            <div className="kairo-account-card">
+              <div className="kairo-account-row">
+                <div className="kairo-account-avatar">
+                  <KairoMark small />
                 </div>
+
+                <div>
+                  <div className="kairo-account-title">
+                    KAIRO AI
+                  </div>
+
+                  <div className="kairo-account-sub">
+                    Intelligent companion
+                  </div>
+                </div>
+
+                <div className="kairo-online" />
               </div>
             </div>
           </div>
-        </aside>
+        </div>
+      </aside>
 
-        {/* ====================================================
-            MAIN
-        ==================================================== */}
+      {/* MAIN */}
 
-        <section className="kairo-main">
-          {/* TOP BAR */}
-
-          <header className="kairo-topbar">
-            <div className="kairo-topbar-left">
-              {!sidebar && (
-                <button
-                  className="kairo-top-action"
-                  onClick={() =>
-                    setSidebar(true)
-                  }
-                  title="Open sidebar"
-                >
-                  <Icon size={17}>
-                    <path d="M4 6h16" />
-                    <path d="M4 12h16" />
-                    <path d="M4 18h16" />
-                  </Icon>
-                </button>
-              )}
-
-              <KairoMark small />
-
-              <div className="kairo-topbar-info">
-                <div className="kairo-topbar-name">
-                  KAIRO AI
-                </div>
-
-                <div className="kairo-topbar-status">
-                  <span className="status-dot" />
-                  Online · Groq intelligence
-                </div>
-              </div>
-            </div>
-
-            <div className="kairo-topbar-actions">
+      <section className="kairo-main">
+        <header className="kairo-topbar">
+          <div className="kairo-topbar-left">
+            {!sidebar && (
               <button
                 className="kairo-top-action"
-                onClick={
-                  toggleTheme
-                }
-                title={
-                  lightMode
-                    ? "Dark mode"
-                    : "Light mode"
-                }
-              >
-                {lightMode ? (
-                  <Icon size={17}>
-                    <circle
-                      cx="12"
-                      cy="12"
-                      r="4"
-                    />
-                    <path d="M12 2v2" />
-                    <path d="M12 20v2" />
-                    <path d="m4.93 4.93 1.42 1.42" />
-                    <path d="m17.65 17.65 1.42 1.42" />
-                    <path d="M2 12h2" />
-                    <path d="M20 12h2" />
-                    <path d="m6.35 17.65-1.42 1.42" />
-                    <path d="m19.07 4.93-1.42 1.42" />
-                  </Icon>
-                ) : (
-                  <Icon size={17}>
-                    <path d="M21 12.8A8.5 8.5 0 1 1 11.2 3 6.6 6.6 0 0 0 21 12.8Z" />
-                  </Icon>
-                )}
-              </button>
-
-              <button
-                className="kairo-top-action"
-                disabled={!authReady}
                 onClick={() =>
-                  createChat()
+                  setSidebar(true)
                 }
-                title="New conversation"
+                title="Open sidebar"
               >
                 <Icon size={17}>
-                  <path d="M12 5v14" />
-                  <path d="M5 12h14" />
+                  <path d="M4 6h16" />
+                  <path d="M4 12h16" />
+                  <path d="M4 18h16" />
                 </Icon>
               </button>
+            )}
+
+            <KairoMark small />
+
+            <div className="kairo-topbar-info">
+              <div className="kairo-topbar-name">
+                KAIRO AI
+              </div>
+
+              <div className="kairo-topbar-status">
+                <span className="status-dot" />
+                Online · Groq intelligence
+              </div>
             </div>
-          </header>
+          </div>
 
-          {/* MESSAGES */}
+          <div className="kairo-topbar-actions">
+            <button
+              className="kairo-top-action"
+              onClick={
+                toggleTheme
+              }
+              title={
+                lightMode
+                  ? "Dark mode"
+                  : "Light mode"
+              }
+            >
+              {lightMode ? (
+                <Icon size={17}>
+                  <circle
+                    cx="12"
+                    cy="12"
+                    r="4"
+                  />
+                  <path d="M12 2v2" />
+                  <path d="M12 20v2" />
+                  <path d="m4.93 4.93 1.42 1.42" />
+                  <path d="m17.65 17.65 1.42 1.42" />
+                  <path d="M2 12h2" />
+                  <path d="M20 12h2" />
+                  <path d="m6.35 17.65-1.42 1.42" />
+                  <path d="m19.07 4.93-1.42 1.42" />
+                </Icon>
+              ) : (
+                <Icon size={17}>
+                  <path d="M21 12.8A8.5 8.5 0 1 1 11.2 3 6.6 6.6 0 0 0 21 12.8Z" />
+                </Icon>
+              )}
+            </button>
 
-          <div className="kairo-messages">
-            {messages.length ===
-            0 ? (
-              <div className="kairo-welcome">
-                <div className="kairo-welcome-orb">
-                  <div className="kairo-orb-inner">
-                    <div className="kairo-orb-center">
-                      <div className="kairo-orb-core" />
-                    </div>
+            <button
+              className="kairo-top-action"
+              disabled={!authReady}
+              onClick={() =>
+                createChat()
+              }
+              title="New conversation"
+            >
+              <Icon size={17}>
+                <path d="M12 5v14" />
+                <path d="M5 12h14" />
+              </Icon>
+            </button>
+          </div>
+        </header>
+
+        <div className="kairo-messages">
+          {messages.length ===
+          0 ? (
+            <div className="kairo-welcome">
+              <div className="kairo-welcome-orb">
+                <div className="kairo-orb-inner">
+                  <div className="kairo-orb-center">
+                    <div className="kairo-orb-core" />
                   </div>
                 </div>
-
-                <div className="kairo-welcome-badge">
-                  <span className="badge-dot" />
-                  Your private AI workspace
-                </div>
-
-                <h1 className="kairo-welcome-title">
-                  Meet{" "}
-                  <span className="kairo-gradient">
-                    KAIRO
-                  </span>
-                </h1>
-
-                <p className="kairo-welcome-copy">
-                  Think, build, learn and create
-                  with an intelligent AI companion
-                  designed to turn your ideas into
-                  action.
-                </p>
-
-                <div className="kairo-pills">
-                  <span className="kairo-pill">
-                    Ask anything
-                  </span>
-
-                  <span className="kairo-pill">
-                    Upload files
-                  </span>
-
-                  <span className="kairo-pill">
-                    Analyze ideas
-                  </span>
-
-                  <span className="kairo-pill">
-                    Build projects
-                  </span>
-                </div>
-
-                <div className="kairo-prompts">
-                  <button
-                    className="kairo-prompt"
-                    onClick={() =>
-                      setInput(
-                        "Explain quantum physics in a simple way"
-                      )
-                    }
-                  >
-                    <div className="kairo-prompt-icon">
-                      <Icon size={17}>
-                        <circle
-                          cx="12"
-                          cy="12"
-                          r="8"
-                        />
-                        <path d="M12 8v4l3 2" />
-                      </Icon>
-                    </div>
-
-                    <div className="kairo-prompt-label">
-                      LEARN
-                    </div>
-
-                    <div className="kairo-prompt-title">
-                      Explain something difficult
-                      in a simple way.
-                    </div>
-
-                    <div className="kairo-prompt-arrow">
-                      <Icon size={15}>
-                        <path d="M5 12h14" />
-                        <path d="m13 6 6 6-6 6" />
-                      </Icon>
-                    </div>
-                  </button>
-
-                  <button
-                    className="kairo-prompt"
-                    onClick={() =>
-                      setInput(
-                        "Help me build a modern website"
-                      )
-                    }
-                  >
-                    <div className="kairo-prompt-icon">
-                      <Icon size={17}>
-                        <path d="m8 9-4 3 4 3" />
-                        <path d="m16 9 4 3-4 3" />
-                        <path d="m14 5-4 14" />
-                      </Icon>
-                    </div>
-
-                    <div className="kairo-prompt-label">
-                      BUILD
-                    </div>
-
-                    <div className="kairo-prompt-title">
-                      Turn an idea into a real
-                      project.
-                    </div>
-
-                    <div className="kairo-prompt-arrow">
-                      <Icon size={15}>
-                        <path d="M5 12h14" />
-                        <path d="m13 6 6 6-6 6" />
-                      </Icon>
-                    </div>
-                  </button>
-
-                  <button
-                    className="kairo-prompt"
-                    onClick={() =>
-                      setInput(
-                        "Give me a creative idea for a new project"
-                      )
-                    }
-                  >
-                    <div className="kairo-prompt-icon">
-                      <Icon size={17}>
-                        <path d="M9 18h6" />
-                        <path d="M10 22h4" />
-                        <path d="M8.5 14.5A6 6 0 1 1 15.5 14c-.9.7-1.5 1.5-1.5 2.5h-4c0-1-.6-1.8-1.5-2.5Z" />
-                      </Icon>
-                    </div>
-
-                    <div className="kairo-prompt-label">
-                      CREATE
-                    </div>
-
-                    <div className="kairo-prompt-title">
-                      Explore a fresh idea and make
-                      it real.
-                    </div>
-
-                    <div className="kairo-prompt-arrow">
-                      <Icon size={15}>
-                        <path d="M5 12h14" />
-                        <path d="m13 6 6 6-6 6" />
-                      </Icon>
-                    </div>
-                  </button>
-                </div>
-
-                <div className="kairo-welcome-footer">
-                  KAIRO · Think beyond the obvious
-                </div>
               </div>
-            ) : (
-              <div className="kairo-message-list">
-                {messages.map(
-                  (message) => {
-                    const files =
-                      message.attachments ||
-                      [];
 
-                    if (
-                      message.role ===
-                      "user"
-                    ) {
-                      return (
-                        <div
-                          key={
-                            message.id
-                          }
-                          className="kairo-message user"
-                        >
-                          <div className="kairo-user-bubble">
-                            {message.content && (
-                              <div className="kairo-message-text">
-                                {
-                                  message.content
-                                }
-                              </div>
-                            )}
+              <div className="kairo-welcome-badge">
+                <span className="badge-dot" />
+                Your private AI workspace
+              </div>
 
-                            {files.length >
-                              0 && (
-                              <div className="kairo-files">
-                                {files.map(
-                                  (
-                                    file,
-                                    index
-                                  ) => (
-                                    <div
-                                      className="kairo-file-card"
-                                      key={`${file.name}-${index}`}
-                                    >
-                                      <div className="kairo-file-icon">
-                                        <Icon
-                                          size={
-                                            15
-                                          }
-                                        >
-                                          <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-                                        </Icon>
-                                      </div>
+              <h1 className="kairo-welcome-title">
+                Meet{" "}
+                <span className="kairo-gradient">
+                  KAIRO
+                </span>
+              </h1>
 
-                                      <div className="kairo-file-info">
-                                        <div className="kairo-file-name">
-                                          {
-                                            file.name
-                                          }
-                                        </div>
+              <p className="kairo-welcome-copy">
+                Think, build, learn and create
+                with an intelligent AI companion
+                designed to turn your ideas into
+                action.
+              </p>
 
-                                        <div className="kairo-file-size">
-                                          {
-                                            file.size
-                                              ? formatFileSize(
-                                                  file.size
-                                                )
-                                              : "Attached file"
-                                          }
-                                        </div>
-                                      </div>
-                                    </div>
-                                  )
-                                )}
-                              </div>
-                            )}
+              <div className="kairo-pills">
+                <span className="kairo-pill">
+                  Ask anything
+                </span>
 
-                            <div
-                              style={{
-                                display:
-                                  "flex",
-                                justifyContent:
-                                  "flex-end",
-                                marginTop:
-                                  6,
-                              }}
-                            >
-                              <button
-                                className="kairo-message-action"
-                                onClick={() =>
-                                  editMessage(
-                                    message
-                                  )
-                                }
-                              >
-                                <Icon
-                                  size={12}
-                                >
-                                  <path d="M12 20h9" />
-                                  <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z" />
-                                </Icon>
+                <span className="kairo-pill">
+                  Upload files
+                </span>
 
-                                Edit
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    }
+                <span className="kairo-pill">
+                  Analyze ideas
+                </span>
 
+                <span className="kairo-pill">
+                  Build projects
+                </span>
+              </div>
+
+              <div className="kairo-prompts">
+                <button
+                  className="kairo-prompt"
+                  onClick={() =>
+                    setInput(
+                      "Explain quantum physics in a simple way"
+                    )
+                  }
+                >
+                  <div className="kairo-prompt-icon">
+                    <Icon size={17}>
+                      <circle
+                        cx="12"
+                        cy="12"
+                        r="8"
+                      />
+                      <path d="M12 8v4l3 2" />
+                    </Icon>
+                  </div>
+
+                  <div className="kairo-prompt-label">
+                    LEARN
+                  </div>
+
+                  <div className="kairo-prompt-title">
+                    Explain something difficult
+                    in a simple way.
+                  </div>
+
+                  <div className="kairo-prompt-arrow">
+                    <Icon size={15}>
+                      <path d="M5 12h14" />
+                      <path d="m13 6 6 6-6 6" />
+                    </Icon>
+                  </div>
+                </button>
+
+                <button
+                  className="kairo-prompt"
+                  onClick={() =>
+                    setInput(
+                      "Help me build a modern website"
+                    )
+                  }
+                >
+                  <div className="kairo-prompt-icon">
+                    <Icon size={17}>
+                      <path d="m8 9-4 3 4 3" />
+                      <path d="m16 9 4 3-4 3" />
+                      <path d="m14 5-4 14" />
+                    </Icon>
+                  </div>
+
+                  <div className="kairo-prompt-label">
+                    BUILD
+                  </div>
+
+                  <div className="kairo-prompt-title">
+                    Turn an idea into a real
+                    project.
+                  </div>
+
+                  <div className="kairo-prompt-arrow">
+                    <Icon size={15}>
+                      <path d="M5 12h14" />
+                      <path d="m13 6 6 6-6 6" />
+                    </Icon>
+                  </div>
+                </button>
+
+                <button
+                  className="kairo-prompt"
+                  onClick={() =>
+                    setInput(
+                      "Give me a creative idea for a new project"
+                    )
+                  }
+                >
+                  <div className="kairo-prompt-icon">
+                    <Icon size={17}>
+                      <path d="M9 18h6" />
+                      <path d="M10 22h4" />
+                      <path d="M8.5 14.5A6 6 0 1 1 15.5 14c-.9.7-1.5 1.5-1.5 2.5h-4c0-1-.6-1.8-1.5-2.5Z" />
+                    </Icon>
+                  </div>
+
+                  <div className="kairo-prompt-label">
+                    CREATE
+                  </div>
+
+                  <div className="kairo-prompt-title">
+                    Explore a fresh idea and make
+                    it real.
+                  </div>
+
+                  <div className="kairo-prompt-arrow">
+                    <Icon size={15}>
+                      <path d="M5 12h14" />
+                      <path d="m13 6 6 6-6 6" />
+                    </Icon>
+                  </div>
+                </button>
+              </div>
+
+              <div className="kairo-welcome-footer">
+                KAIRO · Think beyond the obvious
+              </div>
+            </div>
+          ) : (
+            <div className="kairo-message-list">
+              {messages.map(
+                (message) => {
+                  const files =
+                    message.attachments ||
+                    [];
+
+                  if (
+                    message.role ===
+                    "user"
+                  ) {
                     return (
                       <div
                         key={
                           message.id
                         }
-                        className="kairo-message"
+                        className="kairo-message user"
                       >
-                        <div className="kairo-assistant-message">
-                          <div className="kairo-assistant-mark">
-                            <div className="kairo-assistant-mark-inner" />
-                          </div>
-
-                          <div className="kairo-assistant-content">
-                            <div className="kairo-assistant-header">
-                              <span className="kairo-assistant-name">
-                                KAIRO
-                              </span>
-
-                              <span className="kairo-ai-badge">
-                                AI
-                              </span>
+                        <div className="kairo-user-bubble">
+                          {message.content && (
+                            <div className="kairo-message-text">
+                              {
+                                message.content
+                              }
                             </div>
+                          )}
 
-                            {message.content ? (
-                              <div className="kairo-assistant-text">
-                                {
-                                  message.content
-                                }
-                              </div>
-                            ) : loading ? (
-                              <div className="kairo-thinking">
-                                <span />
-                                <span />
-                                <span />
-                                <span
-                                  style={{
-                                    marginLeft: 5,
-                                  }}
-                                >
-                                  Thinking
-                                </span>
-                              </div>
-                            ) : null}
+                          {files.length >
+                            0 && (
+                            <div className="kairo-files">
+                              {files.map(
+                                (
+                                  file,
+                                  index
+                                ) => (
+                                  <div
+                                    className="kairo-file-card"
+                                    key={`${file.name}-${index}`}
+                                  >
+                                    <div className="kairo-file-icon">
+                                      <Icon
+                                        size={
+                                          15
+                                        }
+                                      >
+                                        <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                                      </Icon>
+                                    </div>
 
-                            {files.length >
-                              0 && (
-                              <div className="kairo-files">
-                                {files.map(
-                                  (
-                                    file,
-                                    index
-                                  ) => (
-                                    <div
-                                      className="kairo-file-card"
-                                      key={`${file.name}-${index}`}
-                                    >
-                                      <div className="kairo-file-icon">
-                                        <Icon
-                                          size={
-                                            15
-                                          }
-                                        >
-                                          <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-                                        </Icon>
+                                    <div className="kairo-file-info">
+                                      <div className="kairo-file-name">
+                                        {
+                                          file.name
+                                        }
                                       </div>
 
-                                      <div className="kairo-file-info">
-                                        <div className="kairo-file-name">
-                                          {
-                                            file.name
-                                          }
-                                        </div>
-
-                                        <div className="kairo-file-size">
-                                          {
-                                            file.size
-                                              ? formatFileSize(
-                                                  file.size
-                                                )
-                                              : "Attached file"
-                                          }
-                                        </div>
+                                      <div className="kairo-file-size">
+                                        {file.size
+                                          ? formatFileSize(
+                                              file.size
+                                            )
+                                          : "Attached file"}
                                       </div>
                                     </div>
-                                  )
-                                )}
-                              </div>
-                            )}
-
-                            {message.content &&
-                              !message.content.startsWith(
-                                "⚠️"
-                              ) && (
-                                <div className="kairo-actions">
-                                  <button
-                                    className="kairo-message-action"
-                                    onClick={() =>
-                                      copyMessage(
-                                        message.content
-                                      )
-                                    }
-                                  >
-                                    <Icon
-                                      size={
-                                        12
-                                      }
-                                    >
-                                      <rect
-                                        x="9"
-                                        y="9"
-                                        width="11"
-                                        height="11"
-                                        rx="2"
-                                      />
-                                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                                    </Icon>
-
-                                    Copy
-                                  </button>
-
-                                  <button
-                                    className="kairo-message-action"
-                                    disabled={
-                                      loading
-                                    }
-                                    onClick={() =>
-                                      regenerate(
-                                        message
-                                      )
-                                    }
-                                  >
-                                    <Icon
-                                      size={
-                                        12
-                                      }
-                                    >
-                                      <path d="M20 11a8.1 8.1 0 0 0-15.5-2M4 5v4h4" />
-                                      <path d="M4 13a8.1 8.1 0 0 0 15.5 2M20 19v-4h-4" />
-                                    </Icon>
-
-                                    Regenerate
-                                  </button>
-                                </div>
+                                  </div>
+                                )
                               )}
+                            </div>
+                          )}
+
+                          <div
+                            style={{
+                              display:
+                                "flex",
+                              justifyContent:
+                                "flex-end",
+                              marginTop:
+                                6,
+                            }}
+                          >
+                            <button
+                              className="kairo-message-action"
+                              onClick={() =>
+                                editMessage(
+                                  message
+                                )
+                              }
+                            >
+                              <Icon
+                                size={12}
+                              >
+                                <path d="M12 20h9" />
+                                <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z" />
+                              </Icon>
+
+                              Edit
+                            </button>
                           </div>
                         </div>
                       </div>
                     );
                   }
-                )}
 
-                <div ref={bottomRef} />
+                  return (
+                    <div
+                      key={
+                        message.id
+                      }
+                      className="kairo-message"
+                    >
+                      <div className="kairo-assistant-message">
+                        <div className="kairo-assistant-mark">
+                          <div className="kairo-assistant-mark-inner" />
+                        </div>
+
+                        <div className="kairo-assistant-content">
+                          <div className="kairo-assistant-header">
+                            <span className="kairo-assistant-name">
+                              KAIRO
+                            </span>
+
+                            <span className="kairo-ai-badge">
+                              AI
+                            </span>
+                          </div>
+
+                          {message.content ? (
+                            <div className="kairo-assistant-text">
+                              {
+                                message.content
+                              }
+                            </div>
+                          ) : loading ? (
+                            <div className="kairo-thinking">
+                              <span />
+                              <span />
+                              <span />
+                              <span
+                                style={{
+                                  marginLeft: 5,
+                                }}
+                              >
+                                Thinking
+                              </span>
+                            </div>
+                          ) : null}
+
+                          {files.length >
+                            0 && (
+                            <div className="kairo-files">
+                              {files.map(
+                                (
+                                  file,
+                                  index
+                                ) => (
+                                  <div
+                                    className="kairo-file-card"
+                                    key={`${file.name}-${index}`}
+                                  >
+                                    <div className="kairo-file-icon">
+                                      <Icon
+                                        size={
+                                          15
+                                        }
+                                      >
+                                        <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                                      </Icon>
+                                    </div>
+
+                                    <div className="kairo-file-info">
+                                      <div className="kairo-file-name">
+                                        {
+                                          file.name
+                                        }
+                                      </div>
+
+                                      <div className="kairo-file-size">
+                                        {file.size
+                                          ? formatFileSize(
+                                              file.size
+                                            )
+                                          : "Attached file"}
+                                      </div>
+                                    </div>
+                                  </div>
+                                )
+                              )}
+                            </div>
+                          )}
+
+                          {message.content &&
+                            !message.content.startsWith(
+                              "⚠️"
+                            ) && (
+                              <div className="kairo-actions">
+                                <button
+                                  className="kairo-message-action"
+                                  onClick={() =>
+                                    copyMessage(
+                                      message.content
+                                    )
+                                  }
+                                >
+                                  <Icon
+                                    size={
+                                      12
+                                    }
+                                  >
+                                    <rect
+                                      x="9"
+                                      y="9"
+                                      width="11"
+                                      height="11"
+                                      rx="2"
+                                    />
+                                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                                  </Icon>
+
+                                  Copy
+                                </button>
+
+                                <button
+                                  className="kairo-message-action"
+                                  disabled={
+                                    loading
+                                  }
+                                  onClick={() =>
+                                    regenerate(
+                                      message
+                                    )
+                                  }
+                                >
+                                  <Icon
+                                    size={
+                                      12
+                                    }
+                                  >
+                                    <path d="M20 11a8.1 8.1 0 0 0-15.5-2M4 5v4h4" />
+                                    <path d="M4 13a8.1 8.1 0 0 0 15.5 2M20 19v-4h-4" />
+                                  </Icon>
+
+                                  Regenerate
+                                </button>
+                              </div>
+                            )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
+              )}
+
+              <div ref={bottomRef} />
+            </div>
+          )}
+        </div>
+
+        {/* COMPOSER */}
+
+        <div className="kairo-composer-area">
+          <div className="kairo-composer-width">
+            {editingId && (
+              <div className="kairo-edit-bar">
+                <div className="kairo-edit-label">
+                  <Icon size={13}>
+                    <path d="M12 20h9" />
+                    <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z" />
+                  </Icon>
+
+                  Editing message
+                </div>
+
+                <button
+                  className="kairo-cancel"
+                  onClick={
+                    cancelEdit
+                  }
+                >
+                  Cancel
+                </button>
               </div>
             )}
-          </div>
 
-          {/* ====================================================
-              COMPOSER
-          ==================================================== */}
-
-          <div className="kairo-composer-area">
-            <div className="kairo-composer-width">
-              {editingId && (
-                <div className="kairo-edit-bar">
-                  <div className="kairo-edit-label">
-                    <Icon size={13}>
-                      <path d="M12 20h9" />
-                      <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z" />
-                    </Icon>
-
-                    Editing message
-                  </div>
-
-                  <button
-                    className="kairo-cancel"
-                    onClick={
-                      cancelEdit
-                    }
-                  >
-                    Cancel
-                  </button>
-                </div>
-              )}
-
-              {attachments.length >
-                0 && (
-                <div className="kairo-pending-files">
-                  {attachments.map(
-                    (
-                      file,
-                      index
-                    ) => (
-                      <div
-                        className="kairo-pending"
-                        key={`${file.name}-${index}`}
-                      >
-                        <div className="kairo-pending-icon">
-                          <Icon size={13}>
-                            <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-                          </Icon>
-                        </div>
-
-                        <div
-                          style={{
-                            minWidth: 0,
-                          }}
-                        >
-                          <div className="kairo-pending-name">
-                            {
-                              file.name
-                            }
-                          </div>
-
-                          <div className="kairo-pending-size">
-                            {file.size
-                              ? formatFileSize(
-                                  file.size
-                                )
-                              : "Uploaded"}
-                          </div>
-                        </div>
-
-                        <button
-                          className="kairo-remove"
-                          onClick={() =>
-                            removeAttachment(
-                              index
-                            )
-                          }
-                        >
-                          <Icon size={12}>
-                            <path d="M18 6 6 18" />
-                            <path d="m6 6 12 12" />
-                          </Icon>
-                        </button>
-                      </div>
-                    )
-                  )}
-                </div>
-              )}
-
-              <div className="kairo-composer">
-                <button
-                  className="kairo-tool"
-                  disabled={
-                    uploading ||
-                    loading
-                  }
-                  onClick={() =>
-                    fileInput.current?.click()
-                  }
-                  title="Attach files"
-                >
-                  <Icon size={19}>
-                    <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-                  </Icon>
-                </button>
-
-                <button
-                  className="kairo-tool"
-                  disabled={
-                    uploading ||
-                    loading
-                  }
-                  onClick={() =>
-                    folderInput.current?.click()
-                  }
-                  title="Attach folder"
-                >
-                  <Icon size={18}>
-                    <path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" />
-                  </Icon>
-                </button>
-
-                <input
-                  ref={fileInput}
-                  type="file"
-                  multiple
-                  hidden
-                  accept="image/*,video/*,.pdf,.txt,.csv,.json,.doc,.docx,.xls,.xlsx,.zip"
-                  onChange={(event) =>
-                    uploadFiles(
-                      event.target.files
-                    )
-                  }
-                />
-
-                <input
-                  ref={folderInput}
-                  type="file"
-                  multiple
-                  hidden
-                  {...({
-                    webkitdirectory: "",
-                    directory: "",
-                  } as any)}
-                  onChange={(event) =>
-                    uploadFiles(
-                      event.target.files
-                    )
-                  }
-                />
-
-                <textarea
-                  className="kairo-textarea"
-                  value={input}
-                  onChange={(event) =>
-                    setInput(
-                      event.target.value
-                    )
-                  }
-                  onKeyDown={
-                    handleKeyDown
-                  }
-                  rows={1}
-                  disabled={
-                    uploading
-                  }
-                  placeholder={
-                    uploading
-                      ? "Uploading to secure storage..."
-                      : editingId
-                      ? "Edit your message..."
-                      : "Message KAIRO..."
-                  }
-                />
-
-                <button
-                  className="kairo-send"
-                  disabled={
-                    loading ||
-                    uploading ||
-                    (!input.trim() &&
-                      attachments.length ===
-                        0)
-                  }
-                  onClick={() =>
-                    sendMessage()
-                  }
-                  title="Send"
-                >
-                  {loading ? (
-                    <span
-                      style={{
-                        width: 15,
-                        height: 15,
-                        border:
-                          "2px solid rgba(255,255,255,.3)",
-                        borderTopColor:
-                          "white",
-                        borderRadius:
-                          "50%",
-                        animation:
-                          "kairo-spin 1s linear infinite",
-                      }}
-                    />
-                  ) : (
-                    <Icon
-                      size={17}
-                      strokeWidth={2}
+            {attachments.length >
+              0 && (
+              <div className="kairo-pending-files">
+                {attachments.map(
+                  (
+                    file,
+                    index
+                  ) => (
+                    <div
+                      className="kairo-pending"
+                      key={`${file.name}-${index}`}
                     >
-                      <path d="M22 2 11 13" />
-                      <path d="m22 2-7 20-4-9-9-4Z" />
-                    </Icon>
-                  )}
-                </button>
-              </div>
+                      <div className="kairo-pending-icon">
+                        <Icon size={13}>
+                          <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                        </Icon>
+                      </div>
 
-              <div className="kairo-disclaimer">
-                <span>✦</span>
-                KAIRO can make mistakes. Check
-                important information.
-                <span>✦</span>
+                      <div
+                        style={{
+                          minWidth: 0,
+                        }}
+                      >
+                        <div className="kairo-pending-name">
+                          {
+                            file.name
+                          }
+                        </div>
+
+                        <div className="kairo-pending-size">
+                          {file.size
+                            ? formatFileSize(
+                                file.size
+                              )
+                            : "Uploaded"}
+                        </div>
+                      </div>
+
+                      <button
+                        className="kairo-remove"
+                        onClick={() =>
+                          removeAttachment(
+                            index
+                          )
+                        }
+                      >
+                        <Icon size={12}>
+                          <path d="M18 6 6 18" />
+                          <path d="m6 6 12 12" />
+                        </Icon>
+                      </button>
+                    </div>
+                  )
+                )}
               </div>
+            )}
+
+            <div className="kairo-composer">
+              <button
+                className="kairo-tool"
+                disabled={
+                  uploading ||
+                  loading
+                }
+                onClick={() =>
+                  fileInput.current?.click()
+                }
+                title="Attach files"
+              >
+                <Icon size={19}>
+                  <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                </Icon>
+              </button>
+
+              <button
+                className="kairo-tool"
+                disabled={
+                  uploading ||
+                  loading
+                }
+                onClick={() =>
+                  folderInput.current?.click()
+                }
+                title="Attach folder"
+              >
+                <Icon size={18}>
+                  <path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" />
+                </Icon>
+              </button>
+
+              <input
+                ref={fileInput}
+                type="file"
+                multiple
+                hidden
+                accept="image/*,video/*,.pdf,.txt,.csv,.json,.doc,.docx,.xls,.xlsx,.zip"
+                onChange={(event) =>
+                  uploadFiles(
+                    event.target.files
+                  )
+                }
+              />
+
+              <input
+                ref={folderInput}
+                type="file"
+                multiple
+                hidden
+                {...({
+                  webkitdirectory: "",
+                  directory: "",
+                } as any)}
+                onChange={(event) =>
+                  uploadFiles(
+                    event.target.files
+                  )
+                }
+              />
+
+              <textarea
+                className="kairo-textarea"
+                value={input}
+                onChange={(event) =>
+                  setInput(
+                    event.target.value
+                  )
+                }
+                onKeyDown={
+                  handleKeyDown
+                }
+                rows={1}
+                disabled={
+                  uploading
+                }
+                placeholder={
+                  uploading
+                    ? "Uploading to secure storage..."
+                    : editingId
+                    ? "Edit your message..."
+                    : "Message KAIRO..."
+                }
+              />
+
+              <button
+                className="kairo-send"
+                disabled={
+                  loading ||
+                  uploading ||
+                  (!input.trim() &&
+                    attachments.length ===
+                      0)
+                }
+                onClick={() =>
+                  sendMessage()
+                }
+                title="Send"
+              >
+                {loading ? (
+                  <span
+                    style={{
+                      width: 15,
+                      height: 15,
+                      border:
+                        "2px solid rgba(255,255,255,.3)",
+                      borderTopColor:
+                        "white",
+                      borderRadius:
+                        "50%",
+                      animation:
+                        "kairo-spin 1s linear infinite",
+                    }}
+                  />
+                ) : (
+                  <Icon
+                    size={17}
+                    strokeWidth={2}
+                  >
+                    <path d="M22 2 11 13" />
+                    <path d="m22 2-7 20-4-9-9-4Z" />
+                  </Icon>
+                )}
+              </button>
+            </div>
+
+            <div className="kairo-disclaimer">
+              <span>✦</span>
+              KAIRO can make mistakes. Check
+              important information.
+              <span>✦</span>
             </div>
           </div>
-        </section>
-      </main>
-    </>
+        </div>
+      </section>
+    </div>
   );
 }
