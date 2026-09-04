@@ -66,12 +66,32 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const structuredData = {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    name: "Kairo AI",
+    description:
+      "Kairo AI is your intelligent AI companion for chatting, creating, learning, brainstorming, writing code, analyzing information, and getting things done.",
+    url: "https://kairo-ai-alpha.vercel.app/",
+    applicationCategory: "BusinessApplication",
+    operatingSystem: "Web",
+  };
+
   return (
     <html
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable}`}
     >
-      <body>{children}</body>
+      <body>
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify(structuredData),
+          }}
+        />
+
+        {children}
+      </body>
     </html>
   );
 }
