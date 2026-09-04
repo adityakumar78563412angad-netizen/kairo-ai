@@ -1,5 +1,5 @@
 "use client";
-
+import { useRouter } from "next/navigation";
 import {
   useEffect,
   useRef,
@@ -120,6 +120,7 @@ function getFileIcon(name: string, type: string) {
 }
 
 export default function Home() {
+  const router = useRouter();
   const [user, setUser] = useState<any>(null);
   const [authReady, setAuthReady] = useState(false);
 
@@ -196,10 +197,16 @@ export default function Home() {
     });
   }
 
-  function selectAgent(agent: string) {
-    setSelectedAgent(agent);
-    setAgentOpen(false);
+ function selectAgent(agent: string) {
+  setAgentOpen(false);
+
+  if (agent === "Website Builder") {
+    router.push("/website-builder");
+    return;
   }
+
+  setSelectedAgent(agent);
+}
 
   async function initializeUser() {
     try {
