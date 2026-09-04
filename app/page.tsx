@@ -49,11 +49,15 @@ export default function Home() {
 
   const [editingId, setEditingId] = useState<string | null>(null);
 
-  // --------------------------------------------------
-  // THEME
-  // --------------------------------------------------
-
   const [lightMode, setLightMode] = useState(false);
+
+  const fileInput = useRef<HTMLInputElement>(null);
+  const folderInput = useRef<HTMLInputElement>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  // ============================================================
+  // THEME
+  // ============================================================
 
   useEffect(() => {
     const savedTheme = localStorage.getItem("kairo-theme");
@@ -76,13 +80,9 @@ export default function Home() {
     });
   }
 
-  const fileInput = useRef<HTMLInputElement>(null);
-  const folderInput = useRef<HTMLInputElement>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
-
-  // --------------------------------------------------
+  // ============================================================
   // AUTH
-  // --------------------------------------------------
+  // ============================================================
 
   useEffect(() => {
     initializeUser();
@@ -178,9 +178,9 @@ export default function Home() {
     return again.data.user;
   }
 
-  // --------------------------------------------------
+  // ============================================================
   // CHATS
-  // --------------------------------------------------
+  // ============================================================
 
   async function loadChats(userId: string) {
     const { data, error } =
@@ -448,9 +448,9 @@ export default function Home() {
     setMenuOpen(null);
   }
 
-  // --------------------------------------------------
+  // ============================================================
   // FILES
-  // --------------------------------------------------
+  // ============================================================
 
   async function uploadFiles(
     files: FileList | null
@@ -548,9 +548,9 @@ export default function Home() {
     );
   }
 
-  // --------------------------------------------------
+  // ============================================================
   // STREAMING
-  // --------------------------------------------------
+  // ============================================================
 
   async function streamAI(
     chatId: string,
@@ -751,9 +751,9 @@ export default function Home() {
     }
   }
 
-  // --------------------------------------------------
+  // ============================================================
   // SEND
-  // --------------------------------------------------
+  // ============================================================
 
   async function sendMessage() {
     if (loading || uploading)
@@ -776,8 +776,6 @@ export default function Home() {
     setLoading(true);
 
     try {
-      // EDIT MODE
-
       if (editingId) {
         const editedIndex =
           messages.findIndex(
@@ -865,8 +863,6 @@ export default function Home() {
         }
       }
 
-      // NORMAL MESSAGE
-
       let chatId =
         activeChat;
 
@@ -949,9 +945,9 @@ export default function Home() {
     }
   }
 
-  // --------------------------------------------------
+  // ============================================================
   // CHAT UPDATE
-  // --------------------------------------------------
+  // ============================================================
 
   async function updateChatTime(
     chatId: string
@@ -1031,9 +1027,9 @@ export default function Home() {
     );
   }
 
-  // --------------------------------------------------
-  // COPY
-  // --------------------------------------------------
+  // ============================================================
+  // ACTIONS
+  // ============================================================
 
   async function copyMessage(
     text: string
@@ -1066,10 +1062,6 @@ export default function Home() {
     }
   }
 
-  // --------------------------------------------------
-  // EDIT
-  // --------------------------------------------------
-
   function editMessage(
     message: Message
   ) {
@@ -1087,10 +1079,6 @@ export default function Home() {
     setEditingId(null);
     setInput("");
   }
-
-  // --------------------------------------------------
-  // REGENERATE
-  // --------------------------------------------------
 
   async function regenerate(
     message: Message
@@ -1174,10 +1162,6 @@ export default function Home() {
     }
   }
 
-  // --------------------------------------------------
-  // ENTER KEY
-  // --------------------------------------------------
-
   function handleKeyDown(
     e: React.KeyboardEvent<HTMLTextAreaElement>
   ) {
@@ -1198,16 +1182,10 @@ export default function Home() {
     }
   }
 
-  // --------------------------------------------------
-  // SCROLL
-  // --------------------------------------------------
-
   useEffect(() => {
-    bottomRef.current?.scrollIntoView(
-      {
-        behavior: "smooth",
-      }
-    );
+    bottomRef.current?.scrollIntoView({
+      behavior: "smooth",
+    });
   }, [messages]);
 
   const activeChats =
@@ -1220,684 +1198,722 @@ export default function Home() {
       (chat) => chat.archived
     );
 
-  // --------------------------------------------------
+  // ============================================================
   // UI
-  // --------------------------------------------------
+  // ============================================================
 
   return (
     <>
-     <style jsx global>{`
-  /* ==================================================
-     KAIRO THEME SYSTEM
-     Dark mode remains unchanged.
-     Light mode gets a proper native light UI.
-     ================================================== */
-
-  .kairo-theme-toggle {
-    position: relative;
-    overflow: hidden;
-  }
-
-  .kairo-theme-icon {
-    transition:
-      transform 0.35s ease,
-      opacity 0.25s ease;
-  }
-
-  .kairo-theme-toggle:hover .kairo-theme-icon {
-    transform: rotate(25deg) scale(1.08);
-  }
-
-  /* ==================================================
-     LIGHT MODE
-     ================================================== */
-
-  main.kairo-light {
-    background: #f7f8fc !important;
-    color: #111318 !important;
-    filter: none !important;
-  }
-
-  /* ---------- MAIN AREAS ---------- */
-
-  main.kairo-light > aside {
-    background:
-      linear-gradient(
-        180deg,
-        #ffffff 0%,
-        #f8f9fc 100%
-      ) !important;
-
-    border-color: #e7e9ef !important;
-  }
-
-  main.kairo-light > section {
-    background:
-      radial-gradient(
-        circle at 50% -10%,
-        rgba(124, 58, 237, 0.035),
-        transparent 38%
-      ),
-      #f9fafc !important;
-  }
-
-  main.kairo-light section header {
-    background: rgba(255, 255, 255, 0.86) !important;
-    border-color: #e7e9ef !important;
-    backdrop-filter: blur(20px);
-  }
-
-  /* ---------- GENERAL TEXT ---------- */
-
-  main.kairo-light [class*="text-white"] {
-    color: #171923 !important;
-  }
-
-  main.kairo-light [class*="text-white\\/90"] {
-    color: #171923 !important;
-  }
-
-  main.kairo-light [class*="text-white\\/85"] {
-    color: #252936 !important;
-  }
-
-  main.kairo-light [class*="text-white\\/70"] {
-    color: #4b5060 !important;
-  }
-
-  main.kairo-light [class*="text-white\\/65"] {
-    color: #555b6d !important;
-  }
-
-  main.kairo-light [class*="text-white\\/60"] {
-    color: #5f6575 !important;
-  }
-
-  main.kairo-light [class*="text-white\\/55"] {
-    color: #686e7e !important;
-  }
-
-  main.kairo-light [class*="text-white\\/50"] {
-    color: #707687 !important;
-  }
-
-  main.kairo-light [class*="text-white\\/45"] {
-    color: #747a8a !important;
-  }
-
-  main.kairo-light [class*="text-white\\/40"] {
-    color: #7b8190 !important;
-  }
-
-  main.kairo-light [class*="text-white\\/35"] {
-    color: #858b9a !important;
-  }
-
-  main.kairo-light [class*="text-white\\/30"] {
-    color: #8b91a0 !important;
-  }
-
-  main.kairo-light [class*="text-white\\/25"] {
-    color: #969cab !important;
-  }
-
-  main.kairo-light [class*="text-white\\/20"] {
-    color: #a0a6b4 !important;
-  }
-
-  /* ---------- SIDEBAR ---------- */
-
-  main.kairo-light aside .border-white\\/\\[0\\.07\\] {
-    border-color: #e6e8ee !important;
-  }
-
-  main.kairo-light aside button:hover {
-    background: rgba(15, 23, 42, 0.045) !important;
-  }
-
-  main.kairo-light aside
-    .group.relative.mb-1.rounded-xl.border {
-    background: transparent !important;
-  }
-
-  main.kairo-light aside
-    .group.relative.mb-1.rounded-xl.border:hover {
-    background: #f1f3f7 !important;
-    border-color: #e5e7ed !important;
-  }
-
-  main.kairo-light aside
-    .group.relative.mb-1.rounded-xl.border.bg-white\\/\\[0\\.065\\] {
-    background:
-      linear-gradient(
-        135deg,
-        rgba(124, 58, 237, 0.075),
-        rgba(59, 130, 246, 0.045)
-      ) !important;
-
-    border-color: rgba(124, 58, 237, 0.16) !important;
-  }
-
-  /* ---------- SIDEBAR FOOTER ---------- */
-
-  main.kairo-light aside .bg-white\\/\\[0\\.025\\] {
-    background: #f3f4f8 !important;
-  }
-
-  main.kairo-light aside .bg-white\\/\\[0\\.07\\] {
-    background: #e9ebf1 !important;
-  }
-
-  /* ---------- MENUS ---------- */
-
-  main.kairo-light aside .bg-\\[\\#171a21\\] {
-    background: #ffffff !important;
-    border-color: #e3e5eb !important;
-
-    box-shadow:
-      0 18px 45px rgba(15, 23, 42, 0.14) !important;
-  }
-
-  main.kairo-light aside
-    .bg-\\[\\#171a21\\] button:hover {
-    background: #f2f3f7 !important;
-  }
-
-  /* ---------- NEW CHAT BUTTON ---------- */
-
-  main.kairo-light aside button.bg-white {
-    background:
-      linear-gradient(
-        135deg,
-        #181a22,
-        #272a35
-      ) !important;
-
-    color: #ffffff !important;
-
-    box-shadow:
-      0 8px 20px rgba(15, 23, 42, 0.12);
-  }
-
-  main.kairo-light aside button.bg-white:hover {
-    background:
-      linear-gradient(
-        135deg,
-        #252834,
-        #303442
-      ) !important;
-  }
-
-  /* ---------- HEADER BUTTONS ---------- */
-
-  main.kairo-light header button {
-    color: #73798a !important;
-    border-color: #e2e5eb !important;
-  }
-
-  main.kairo-light header button:hover {
-    color: #1b1e27 !important;
-    background: #f0f1f5 !important;
-  }
-
-  /* ---------- KAIRO HEADER STATUS ---------- */
-
-  main.kairo-light header
-    .text-\\[10px\\].text-white\\/30 {
-    color: #858b9a !important;
-  }
-
-  /* ---------- HERO ---------- */
-
-  main.kairo-light h1 {
-    color: #161821 !important;
-  }
-
-  main.kairo-light h1 span.bg-gradient-to-r {
-    background:
-      linear-gradient(
-        90deg,
-        #171923 0%,
-        #3b3f4c 55%,
-        #8a8f9d 100%
-      ) !important;
-
-    background-clip: text !important;
-    -webkit-background-clip: text !important;
-    -webkit-text-fill-color: transparent !important;
-  }
-
-  main.kairo-light h1 .text-violet-400 {
-    color: #7c3aed !important;
-  }
-
-  /* ---------- HERO DESCRIPTION ---------- */
-
-  main.kairo-light
-    .max-w-2xl
-    p {
-    color: #73798a !important;
-  }
-
-  /* ---------- AI VISUAL ---------- */
-
-  main.kairo-light
-    .relative.w-28.h-28 {
-    border-color: #e1e4eb !important;
-    background:
-      linear-gradient(
-        135deg,
-        rgba(255, 255, 255, 0.95),
-        rgba(244, 245, 249, 0.95)
-      ) !important;
-
-    box-shadow:
-      0 20px 50px rgba(15, 23, 42, 0.08) !important;
-  }
-
-  main.kairo-light
-    .relative.w-28.h-28
-    > .absolute.-top-8 {
-    opacity: 0.35;
-  }
-
-  main.kairo-light
-    .relative.w-28.h-28
-    .bg-\\[\\#0b0c11\\] {
-    background: #ffffff !important;
-  }
-
-  /* ---------- SUGGESTION CARDS ---------- */
-
-  main.kairo-light
-    button.group.text-left.rounded-2xl {
-    background:
-      linear-gradient(
-        145deg,
-        rgba(255, 255, 255, 0.98),
-        rgba(248, 249, 252, 0.98)
-      ) !important;
-
-    border-color: #e3e6ed !important;
-
-    box-shadow:
-      0 8px 25px rgba(15, 23, 42, 0.035) !important;
-  }
-
-  main.kairo-light
-    button.group.text-left.rounded-2xl:hover {
-    background: #ffffff !important;
-    border-color: rgba(124, 58, 237, 0.22) !important;
-
-    box-shadow:
-      0 14px 32px rgba(15, 23, 42, 0.075) !important;
-  }
-
-  main.kairo-light
-    button.group.text-left.rounded-2xl
-    .border-white\\/\\[0\\.07\\] {
-    border-color: #e3e5eb !important;
-  }
-
-  main.kairo-light
-    button.group.text-left.rounded-2xl:hover
-    .border-white\\/\\[0\\.15\\] {
-    border-color: rgba(124, 58, 237, 0.25) !important;
-  }
-
-  /* ---------- CHAT USER MESSAGE ---------- */
-
-  main.kairo-light
-    .bg-\\[\\#1b1e26\\] {
-    background:
-      linear-gradient(
-        135deg,
-        #eeeaff,
-        #f1f4ff
-      ) !important;
-
-    border-color: #dedbea !important;
-
-    color: #20222c !important;
-
-    box-shadow:
-      0 6px 18px rgba(15, 23, 42, 0.045);
-  }
-
-  /* ---------- ASSISTANT MESSAGE ---------- */
-
-  main.kairo-light
-    .whitespace-pre-wrap.leading-7 {
-    color: #292d38 !important;
-  }
-
-  /* ---------- MESSAGE ATTACHMENTS ---------- */
-
-  main.kairo-light
-    .bg-white\\/\\[0\\.05\\] {
-    background: #f0f1f5 !important;
-    border-color: #e1e3e9 !important;
-  }
-
-  main.kairo-light
-    .bg-black\\/20 {
-    background: rgba(15, 23, 42, 0.045) !important;
-    border-color: #dfe2e8 !important;
-  }
-
-  /* ---------- MESSAGE ACTIONS ---------- */
-
-  main.kairo-light
-    .h-8.px-2\\.5.rounded-lg {
-    color: #8a90a0 !important;
-  }
-
-  main.kairo-light
-    .h-8.px-2\\.5.rounded-lg:hover {
-    color: #292d38 !important;
-    background: #eef0f4 !important;
-  }
-
-  /* ---------- EDIT BAR ---------- */
-
-  main.kairo-light
-    .bg-violet-500\\/\\[0\\.07\\] {
-    background:
-      rgba(124, 58, 237, 0.055) !important;
-
-    border-color:
-      rgba(124, 58, 237, 0.14) !important;
-  }
-
-  main.kairo-light
-    .text-violet-200\\/60 {
-    color: #7252ad !important;
-  }
-
-  /* ---------- COMPOSER AREA ---------- */
-
-  main.kairo-light
-    .bg-gradient-to-t {
-    background:
-      linear-gradient(
-        to top,
-        #f9fafc 65%,
-        rgba(249, 250, 252, 0)
-      ) !important;
-  }
-
-  main.kairo-light
-    .rounded-\\[24px\\].bg-\\[\\#11141a\\] {
-    background:
-      rgba(255, 255, 255, 0.96) !important;
-
-    border-color: #dfe2e8 !important;
-
-    box-shadow:
-      0 12px 35px rgba(15, 23, 42, 0.075) !important;
-  }
-
-  main.kairo-light
-    .rounded-\\[24px\\].bg-\\[\\#11141a\\]:focus-within {
-    border-color:
-      rgba(124, 58, 237, 0.32) !important;
-
-    box-shadow:
-      0 12px 35px rgba(15, 23, 42, 0.075),
-      0 0 0 3px rgba(124, 58, 237, 0.055) !important;
-  }
-
-  /* ---------- TEXTAREA ---------- */
-
-  main.kairo-light textarea {
-    color: #1b1e27 !important;
-    caret-color: #7c3aed !important;
-  }
-
-  main.kairo-light textarea::placeholder {
-    color: #a1a6b3 !important;
-  }
-
-  /* ---------- COMPOSER ICON BUTTONS ---------- */
-
-  main.kairo-light
-    .rounded-\\[24px\\]
-    button {
-    color: #858b99 !important;
-  }
-
-  main.kairo-light
-    .rounded-\\[24px\\]
-    button:hover {
-    color: #303440 !important;
-    background: #f0f1f5 !important;
-  }
-
-  /* ---------- SEND BUTTON ---------- */
-
-  main.kairo-light
-    .rounded-\\[24px\\]
-    button.bg-white {
-    background:
-      linear-gradient(
-        135deg,
-        #181a22,
-        #343743
-      ) !important;
-
-    color: #ffffff !important;
-
-    box-shadow:
-      0 6px 16px rgba(15, 23, 42, 0.15);
-  }
-
-  main.kairo-light
-    .rounded-\\[24px\\]
-    button.bg-white:hover {
-    background:
-      linear-gradient(
-        135deg,
-        #282b35,
-        #414450
-      ) !important;
-  }
-
-  /* ---------- ATTACHMENT PREVIEW ---------- */
-
-  main.kairo-light
-    .bg-\\[\\#151820\\] {
-    background: #ffffff !important;
-    border-color: #dfe2e8 !important;
-    color: #626878 !important;
-
-    box-shadow:
-      0 4px 14px rgba(15, 23, 42, 0.045);
-  }
-
-  /* ---------- FOOTER WARNING ---------- */
-
-  main.kairo-light
-    .text-center.text-\\[10px\\] {
-    color: #a0a5b2 !important;
-  }
-
-  /* ---------- ARCHIVED ---------- */
-
-  main.kairo-light
-    .border-dashed {
-    border-color: #e1e4ea !important;
-  }
-
-  /* ---------- SCROLLBAR ---------- */
-
-  main.kairo-light ::-webkit-scrollbar {
-    width: 7px;
-    height: 7px;
-  }
-
-  main.kairo-light ::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  main.kairo-light ::-webkit-scrollbar-thumb {
-    background: #d5d8df;
-    border-radius: 999px;
-  }
-
-  main.kairo-light
-    ::-webkit-scrollbar-thumb:hover {
-    background: #bfc3cd;
-  }
-
-  /* ---------- SMOOTH THEME TRANSITION ---------- */
-
-  main.kairo-light,
-  main.kairo-light aside,
-  main.kairo-light section,
-  main.kairo-light header,
-  main.kairo-light button,
-  main.kairo-light textarea {
-    transition:
-      background-color 0.25s ease,
-      border-color 0.25s ease,
-      color 0.25s ease,
-      box-shadow 0.25s ease;
-  }
-`}</style>
+      <style jsx global>{`
+        * {
+          box-sizing: border-box;
+        }
+
+        html,
+        body {
+          margin: 0;
+          padding: 0;
+          overflow: hidden;
+        }
+
+        .kairo-app {
+          --bg: #07090f;
+          --surface: rgba(15, 18, 27, 0.78);
+          --surface-solid: #10131c;
+          --surface-soft: rgba(255, 255, 255, 0.035);
+          --border: rgba(255, 255, 255, 0.08);
+          --border-soft: rgba(255, 255, 255, 0.055);
+          --text: #f8fafc;
+          --muted: #8d95a8;
+          --muted-2: #626b7e;
+          --accent: #8b5cf6;
+          --accent-2: #6366f1;
+          --input: #0d1017;
+          --shadow: rgba(0, 0, 0, 0.38);
+
+          background:
+            radial-gradient(
+              circle at 70% -20%,
+              rgba(124, 58, 237, 0.11),
+              transparent 35%
+            ),
+            radial-gradient(
+              circle at 15% 80%,
+              rgba(59, 130, 246, 0.055),
+              transparent 30%
+            ),
+            var(--bg);
+
+          color: var(--text);
+          transition:
+            background 0.3s ease,
+            color 0.3s ease;
+        }
+
+        .kairo-app.light {
+          --bg: #f5f7fb;
+          --surface: rgba(255, 255, 255, 0.88);
+          --surface-solid: #ffffff;
+          --surface-soft: #f6f7fa;
+          --border: #e4e7ee;
+          --border-soft: #edf0f4;
+          --text: #171a24;
+          --muted: #687083;
+          --muted-2: #9299a8;
+          --accent: #7c3aed;
+          --accent-2: #4f46e5;
+          --input: #ffffff;
+          --shadow: rgba(35, 43, 60, 0.08);
+
+          background:
+            radial-gradient(
+              circle at 75% -15%,
+              rgba(124, 58, 237, 0.075),
+              transparent 34%
+            ),
+            radial-gradient(
+              circle at 10% 80%,
+              rgba(59, 130, 246, 0.045),
+              transparent 30%
+            ),
+            #f5f7fb;
+        }
+
+        .kairo-sidebar {
+          width: 292px;
+          background: var(--surface);
+          border-right: 1px solid var(--border);
+          backdrop-filter: blur(30px);
+          transition:
+            width 0.3s ease,
+            background 0.3s ease;
+        }
+
+        .kairo-sidebar.closed {
+          width: 0;
+        }
+
+        .kairo-brand-mark {
+          width: 38px;
+          height: 38px;
+          border-radius: 13px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          position: relative;
+          background:
+            linear-gradient(
+              135deg,
+              #8b5cf6,
+              #d946ef 48%,
+              #3b82f6
+            );
+          box-shadow:
+            0 10px 30px rgba(124, 58, 237, 0.22);
+        }
+
+        .kairo-brand-core {
+          width: 12px;
+          height: 12px;
+          border-radius: 50%;
+          background: white;
+          box-shadow:
+            0 0 18px rgba(255, 255, 255, 0.9);
+        }
+
+        .kairo-new-chat {
+          border: 1px solid var(--border);
+          background:
+            linear-gradient(
+              135deg,
+              rgba(124, 58, 237, 0.13),
+              rgba(99, 102, 241, 0.07)
+            );
+          color: var(--text);
+          box-shadow:
+            0 10px 30px var(--shadow);
+        }
+
+        .kairo-new-chat:hover {
+          border-color: rgba(124, 58, 237, 0.28);
+          transform: translateY(-1px);
+        }
+
+        .kairo-chat-item {
+          border: 1px solid transparent;
+          color: var(--muted);
+          background: transparent;
+        }
+
+        .kairo-chat-item:hover {
+          background: var(--surface-soft);
+          color: var(--text);
+          border-color: var(--border-soft);
+        }
+
+        .kairo-chat-item.active {
+          background:
+            linear-gradient(
+              135deg,
+              rgba(124, 58, 237, 0.13),
+              rgba(99, 102, 241, 0.055)
+            );
+          border-color: rgba(124, 58, 237, 0.17);
+          color: var(--text);
+        }
+
+        .kairo-menu {
+          background: var(--surface-solid);
+          border: 1px solid var(--border);
+          box-shadow:
+            0 24px 70px var(--shadow);
+          backdrop-filter: blur(25px);
+        }
+
+        .kairo-menu button:hover {
+          background: var(--surface-soft);
+        }
+
+        .kairo-sidebar-footer {
+          background: var(--surface-soft);
+          border: 1px solid var(--border-soft);
+        }
+
+        .kairo-main {
+          background: transparent;
+        }
+
+        .kairo-header {
+          height: 68px;
+          background: rgba(7, 9, 15, 0.52);
+          border-bottom: 1px solid var(--border);
+          backdrop-filter: blur(28px);
+        }
+
+        .light .kairo-header {
+          background: rgba(255, 255, 255, 0.7);
+        }
+
+        .kairo-header-button {
+          border: 1px solid var(--border);
+          background: var(--surface-soft);
+          color: var(--muted);
+        }
+
+        .kairo-header-button:hover {
+          color: var(--text);
+          background: var(--surface);
+          border-color: var(--border);
+        }
+
+        .kairo-status-dot {
+          width: 6px;
+          height: 6px;
+          border-radius: 50%;
+          background: #34d399;
+          box-shadow:
+            0 0 10px rgba(52, 211, 153, 0.8);
+        }
+
+        .kairo-hero-orb {
+          width: 122px;
+          height: 122px;
+          border-radius: 38px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          position: relative;
+          background:
+            linear-gradient(
+              145deg,
+              rgba(255, 255, 255, 0.075),
+              rgba(255, 255, 255, 0.018)
+            );
+          border: 1px solid var(--border);
+          box-shadow:
+            0 30px 90px rgba(0, 0, 0, 0.18);
+          backdrop-filter: blur(25px);
+        }
+
+        .light .kairo-hero-orb {
+          background:
+            linear-gradient(
+              145deg,
+              #ffffff,
+              #f3f4f8
+            );
+          box-shadow:
+            0 25px 70px rgba(50, 60, 80, 0.1);
+        }
+
+        .kairo-hero-core {
+          width: 66px;
+          height: 66px;
+          border-radius: 50%;
+          padding: 1px;
+          background:
+            linear-gradient(
+              135deg,
+              #8b5cf6,
+              #d946ef,
+              #3b82f6
+            );
+          box-shadow:
+            0 0 45px rgba(139, 92, 246, 0.3);
+        }
+
+        .kairo-hero-inner {
+          width: 100%;
+          height: 100%;
+          border-radius: 50%;
+          background: var(--bg);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+
+        .light .kairo-hero-inner {
+          background: #ffffff;
+        }
+
+        .kairo-core-dot {
+          width: 26px;
+          height: 26px;
+          border-radius: 50%;
+          background: white;
+          position: relative;
+          box-shadow:
+            0 0 22px rgba(255, 255, 255, 0.75);
+        }
+
+        .kairo-core-dot::after {
+          content: "";
+          position: absolute;
+          inset: 5px;
+          border-radius: 50%;
+          background:
+            linear-gradient(
+              135deg,
+              #8b5cf6,
+              #3b82f6
+            );
+        }
+
+        .kairo-title {
+          letter-spacing: -0.055em;
+          line-height: 1;
+        }
+
+        .kairo-gradient-text {
+          background:
+            linear-gradient(
+              90deg,
+              var(--text),
+              #8b5cf6 58%,
+              #6366f1
+            );
+          background-clip: text;
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
+        }
+
+        .kairo-suggestion {
+          border: 1px solid var(--border);
+          background: var(--surface);
+          box-shadow:
+            0 12px 35px var(--shadow);
+          backdrop-filter: blur(22px);
+          transition:
+            transform 0.2s ease,
+            border-color 0.2s ease,
+            box-shadow 0.2s ease;
+        }
+
+        .kairo-suggestion:hover {
+          transform: translateY(-4px);
+          border-color: rgba(124, 58, 237, 0.28);
+          box-shadow:
+            0 20px 45px var(--shadow);
+        }
+
+        .kairo-suggestion-icon {
+          width: 32px;
+          height: 32px;
+          border-radius: 10px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background:
+            linear-gradient(
+              135deg,
+              rgba(124, 58, 237, 0.14),
+              rgba(59, 130, 246, 0.08)
+            );
+          color: #8b5cf6;
+        }
+
+        .kairo-user-message {
+          max-width: min(720px, 86%);
+          background:
+            linear-gradient(
+              135deg,
+              rgba(124, 58, 237, 0.15),
+              rgba(99, 102, 241, 0.09)
+            );
+          border: 1px solid rgba(124, 58, 237, 0.18);
+          border-radius: 24px;
+          box-shadow:
+            0 12px 35px var(--shadow);
+        }
+
+        .light .kairo-user-message {
+          background:
+            linear-gradient(
+              135deg,
+              #f1edff,
+              #eef2ff
+            );
+          border-color: #ddd7f4;
+          box-shadow:
+            0 10px 30px rgba(50, 50, 80, 0.055);
+        }
+
+        .kairo-assistant-avatar {
+          width: 34px;
+          height: 34px;
+          border-radius: 11px;
+          flex-shrink: 0;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background:
+            linear-gradient(
+              135deg,
+              #8b5cf6,
+              #d946ef 48%,
+              #3b82f6
+            );
+          box-shadow:
+            0 8px 25px rgba(124, 58, 237, 0.2);
+        }
+
+        .kairo-assistant-body {
+          color: var(--text);
+        }
+
+        .kairo-action {
+          color: var(--muted-2);
+        }
+
+        .kairo-action:hover {
+          color: var(--text);
+          background: var(--surface-soft);
+        }
+
+        .kairo-attachment {
+          background: var(--surface-soft);
+          border: 1px solid var(--border-soft);
+          color: var(--muted);
+        }
+
+        .kairo-composer-wrap {
+          background:
+            linear-gradient(
+              to top,
+              var(--bg) 55%,
+              transparent
+            );
+        }
+
+        .kairo-editing {
+          border: 1px solid rgba(124, 58, 237, 0.2);
+          background:
+            linear-gradient(
+              135deg,
+              rgba(124, 58, 237, 0.09),
+              rgba(99, 102, 241, 0.045)
+            );
+        }
+
+        .kairo-composer {
+          border: 1px solid var(--border);
+          background: var(--input);
+          box-shadow:
+            0 18px 60px var(--shadow);
+          border-radius: 25px;
+          transition:
+            border-color 0.2s ease,
+            box-shadow 0.2s ease;
+        }
+
+        .kairo-composer:focus-within {
+          border-color: rgba(124, 58, 237, 0.35);
+          box-shadow:
+            0 20px 65px var(--shadow),
+            0 0 0 4px rgba(124, 58, 237, 0.055);
+        }
+
+        .kairo-composer-button {
+          color: var(--muted-2);
+        }
+
+        .kairo-composer-button:hover {
+          color: var(--text);
+          background: var(--surface-soft);
+        }
+
+        .kairo-send {
+          background:
+            linear-gradient(
+              135deg,
+              #8b5cf6,
+              #6366f1
+            );
+          color: white;
+          box-shadow:
+            0 8px 25px rgba(99, 102, 241, 0.28);
+        }
+
+        .kairo-send:hover {
+          transform: translateY(-1px);
+          box-shadow:
+            0 12px 30px rgba(99, 102, 241, 0.35);
+        }
+
+        .kairo-send:disabled {
+          opacity: 0.22;
+          box-shadow: none;
+        }
+
+        .kairo-textarea {
+          color: var(--text);
+        }
+
+        .kairo-textarea::placeholder {
+          color: var(--muted-2);
+        }
+
+        .kairo-scroll::-webkit-scrollbar {
+          width: 7px;
+        }
+
+        .kairo-scroll::-webkit-scrollbar-track {
+          background: transparent;
+        }
+
+        .kairo-scroll::-webkit-scrollbar-thumb {
+          background: rgba(128, 135, 150, 0.25);
+          border-radius: 999px;
+        }
+
+        .kairo-scroll::-webkit-scrollbar-thumb:hover {
+          background: rgba(128, 135, 150, 0.4);
+        }
+
+        .kairo-theme-icon {
+          transition:
+            transform 0.35s ease,
+            opacity 0.25s ease;
+        }
+
+        .kairo-theme-button:hover
+          .kairo-theme-icon {
+          transform: rotate(25deg) scale(1.08);
+        }
+
+        @media (max-width: 760px) {
+          .kairo-sidebar {
+            position: absolute;
+            z-index: 50;
+            height: 100%;
+            left: 0;
+            top: 0;
+            box-shadow:
+              20px 0 70px rgba(0, 0, 0, 0.25);
+          }
+
+          .kairo-sidebar.closed {
+            width: 0;
+          }
+
+          .kairo-user-message {
+            max-width: 92%;
+          }
+
+          .kairo-title {
+            font-size: 40px;
+          }
+        }
+      `}</style>
 
       <main
-        className={`h-screen ${
-          lightMode
-            ? "kairo-light"
-            : ""
-        } bg-[#08090d] text-white flex overflow-hidden`}
+        className={`kairo-app ${
+          lightMode ? "light" : ""
+        } h-screen flex overflow-hidden`}
       >
-        {/* SIDEBAR */}
+        {/* ======================================================
+            SIDEBAR
+        ====================================================== */}
 
         <aside
-          className={`${
-            sidebar
-              ? "w-[285px]"
-              : "w-0"
-          } transition-all duration-300 bg-[#0d0f14] border-r border-white/[0.07] overflow-hidden flex flex-col shrink-0`}
+          className={`kairo-sidebar ${
+            sidebar ? "" : "closed"
+          } shrink-0 overflow-hidden flex flex-col`}
         >
-          <div className="p-5">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3 whitespace-nowrap">
-                <div className="relative w-9 h-9 rounded-xl bg-gradient-to-br from-violet-400 via-fuchsia-500 to-blue-500 flex items-center justify-center shadow-lg shadow-violet-500/10">
-                  <div className="absolute inset-[1px] rounded-[10px] bg-[#0d0f14]/30" />
+          <div className="w-[292px] h-full flex flex-col">
+            {/* BRAND */}
 
-                  <div className="relative w-3 h-3 rounded-full bg-white shadow-[0_0_16px_rgba(255,255,255,0.9)]" />
+            <div className="px-5 pt-5 pb-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="kairo-brand-mark">
+                    <div className="kairo-brand-core" />
+                  </div>
+
+                  <div>
+                    <div className="text-[17px] font-bold tracking-[-0.035em]">
+                      KAIRO
+                    </div>
+
+                    <div className="text-[9px] tracking-[0.18em] uppercase text-[var(--muted-2)]">
+                      AI Intelligence
+                    </div>
+                  </div>
                 </div>
 
-                <span className="text-[19px] font-semibold tracking-[-0.03em]">
-                  KAIRO
-                </span>
+                <button
+                  onClick={() =>
+                    setSidebar(false)
+                  }
+                  className="w-9 h-9 rounded-xl flex items-center justify-center text-[var(--muted-2)] hover:text-[var(--text)] hover:bg-[var(--surface-soft)] transition"
+                  title="Close sidebar"
+                >
+                  <svg
+                    width="17"
+                    height="17"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                  >
+                    <path d="M18 6 6 18" />
+                    <path d="m6 6 12 12" />
+                  </svg>
+                </button>
               </div>
 
               <button
                 onClick={() =>
-                  setSidebar(false)
+                  createChat()
                 }
-                className="w-8 h-8 rounded-lg flex items-center justify-center text-white/35 hover:text-white hover:bg-white/[0.06] transition"
-                title="Close sidebar"
+                disabled={!authReady}
+                className="kairo-new-chat mt-6 w-full h-12 rounded-2xl flex items-center justify-center gap-2.5 text-sm font-semibold transition disabled:opacity-40"
               >
-                <svg
-                  width="18"
-                  height="18"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                >
-                  <path d="M18 6 6 18" />
-                  <path d="m6 6 12 12" />
-                </svg>
+                <span className="w-6 h-6 rounded-lg bg-[var(--accent)]/15 flex items-center justify-center">
+                  <svg
+                    width="15"
+                    height="15"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                  >
+                    <path d="M12 5v14" />
+                    <path d="M5 12h14" />
+                  </svg>
+                </span>
+
+                New conversation
               </button>
             </div>
 
-            <button
-              onClick={() =>
-                createChat()
-              }
-              disabled={!authReady}
-              className="mt-7 w-full h-11 rounded-xl bg-white text-black font-medium text-sm hover:bg-white/90 transition disabled:opacity-40 flex items-center justify-center gap-2"
-            >
-              <svg
-                width="17"
-                height="17"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-              >
-                <path d="M12 5v14" />
-                <path d="M5 12h14" />
-              </svg>
+            {/* CHAT HISTORY */}
 
-              <span>New chat</span>
-            </button>
-          </div>
+            <div className="flex-1 overflow-y-auto kairo-scroll px-3">
+              <div className="flex items-center justify-between px-3 pt-3 pb-2">
+                <div className="text-[9px] font-bold tracking-[0.2em] text-[var(--muted-2)] uppercase">
+                  Conversations
+                </div>
 
-          {/* HISTORY */}
-
-          <div className="flex-1 overflow-y-auto px-3">
-            <div className="flex items-center justify-between px-3 mb-2">
-              <p className="text-[10px] font-semibold tracking-[0.18em] text-white/30">
-                RECENT CHATS
-              </p>
-
-              {activeChats.length >
-                0 && (
-                <span className="text-[10px] text-white/20">
-                  {
-                    activeChats.length
-                  }
-                </span>
-              )}
-            </div>
-
-            {activeChats.length ===
-              0 && (
-              <div className="mx-2 mt-3 rounded-xl border border-dashed border-white/[0.07] p-4">
-                <p className="text-xs text-white/25 text-center">
-                  Your conversations will appear here.
-                </p>
+                {activeChats.length > 0 && (
+                  <span className="text-[10px] text-[var(--muted-2)]">
+                    {activeChats.length}
+                  </span>
+                )}
               </div>
-            )}
 
-            {activeChats.map(
-              (chat) => (
+              {activeChats.length === 0 && (
+                <div className="mx-2 mt-3 rounded-2xl border border-dashed border-[var(--border)] p-5">
+                  <div className="w-9 h-9 rounded-xl bg-[var(--surface-soft)] mx-auto flex items-center justify-center text-[var(--muted-2)]">
+                    <svg
+                      width="17"
+                      height="17"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.7"
+                    >
+                      <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4Z" />
+                    </svg>
+                  </div>
+
+                  <p className="text-[11px] leading-5 text-[var(--muted-2)] text-center mt-3">
+                    Your conversations will appear here.
+                  </p>
+                </div>
+              )}
+
+              {activeChats.map((chat) => (
                 <div
                   key={chat.id}
-                  className={`group relative mb-1 rounded-xl border ${
-                    activeChat ===
-                    chat.id
-                      ? "bg-white/[0.065] border-white/[0.08]"
-                      : "border-transparent hover:bg-white/[0.035] hover:border-white/[0.05]"
-                  } transition`}
+                  className={`kairo-chat-item ${
+                    activeChat === chat.id
+                      ? "active"
+                      : ""
+                  } group relative rounded-2xl mb-1`}
                 >
                   <button
                     onClick={() =>
-                      openChat(
-                        chat.id
-                      )
+                      openChat(chat.id)
                     }
-                    className="w-full text-left px-3.5 py-3 pr-11 truncate text-[13px] text-white/70 hover:text-white transition"
+                    className="w-full text-left px-3.5 py-3.5 pr-11 truncate text-[13px] transition"
                   >
-                    {chat.title}
+                    <div className="flex items-center gap-3">
+                      <span
+                        className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
+                          activeChat ===
+                          chat.id
+                            ? "bg-violet-500/15 text-violet-400"
+                            : "bg-[var(--surface-soft)] text-[var(--muted-2)]"
+                        }`}
+                      >
+                        <svg
+                          width="14"
+                          height="14"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.7"
+                        >
+                          <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4Z" />
+                        </svg>
+                      </span>
+
+                      <span className="truncate">
+                        {chat.title}
+                      </span>
+                    </div>
                   </button>
 
                   <button
                     onClick={() =>
                       setMenuOpen(
-                        menuOpen ===
-                          chat.id
+                        menuOpen === chat.id
                           ? null
                           : chat.id
                       )
                     }
-                    className="absolute right-2 top-2 w-7 h-7 rounded-lg flex items-center justify-center text-white/25 hover:text-white hover:bg-white/[0.08] transition"
+                    className="absolute right-2 top-2.5 w-8 h-8 rounded-xl flex items-center justify-center text-[var(--muted-2)] hover:text-[var(--text)] hover:bg-[var(--surface-soft)] transition"
                     title="Chat options"
                   >
                     <svg
@@ -1926,14 +1942,12 @@ export default function Home() {
 
                   {menuOpen ===
                     chat.id && (
-                    <div className="absolute z-30 right-2 top-11 w-44 rounded-xl bg-[#171a21] border border-white/[0.09] shadow-2xl shadow-black/40 overflow-hidden p-1">
+                    <div className="kairo-menu absolute z-50 right-2 top-12 w-48 rounded-2xl overflow-hidden p-1.5">
                       <button
                         onClick={() =>
-                          renameChat(
-                            chat.id
-                          )
+                          renameChat(chat.id)
                         }
-                        className="w-full flex items-center gap-3 text-left px-3 py-2.5 rounded-lg text-sm text-white/65 hover:text-white hover:bg-white/[0.07] transition"
+                        className="w-full flex items-center gap-3 text-left px-3 py-2.5 rounded-xl text-sm text-[var(--muted)] hover:text-[var(--text)] transition"
                       >
                         <svg
                           width="15"
@@ -1951,11 +1965,9 @@ export default function Home() {
 
                       <button
                         onClick={() =>
-                          archiveChat(
-                            chat.id
-                          )
+                          archiveChat(chat.id)
                         }
-                        className="w-full flex items-center gap-3 text-left px-3 py-2.5 rounded-lg text-sm text-white/65 hover:text-white hover:bg-white/[0.07] transition"
+                        className="w-full flex items-center gap-3 text-left px-3 py-2.5 rounded-xl text-sm text-[var(--muted)] hover:text-[var(--text)] transition"
                       >
                         <svg
                           width="15"
@@ -1975,11 +1987,9 @@ export default function Home() {
 
                       <button
                         onClick={() =>
-                          deleteChat(
-                            chat.id
-                          )
+                          deleteChat(chat.id)
                         }
-                        className="w-full flex items-center gap-3 text-left px-3 py-2.5 rounded-lg text-sm text-red-400 hover:text-red-300 hover:bg-red-500/[0.08] transition"
+                        className="w-full flex items-center gap-3 text-left px-3 py-2.5 rounded-xl text-sm text-red-400 hover:bg-red-500/10 transition"
                       >
                         <svg
                           width="15"
@@ -2000,145 +2010,149 @@ export default function Home() {
                     </div>
                   )}
                 </div>
-              )
-            )}
+              ))}
 
-            {/* ARCHIVED */}
+              {/* ARCHIVED */}
 
-            <button
-              onClick={() =>
-                setArchiveOpen(
-                  !archiveOpen
-                )
-              }
-              className="w-full flex items-center justify-between text-left px-3 py-3 mt-5 rounded-xl hover:bg-white/[0.04] text-white/45 hover:text-white/75 transition"
-            >
-              <span className="flex items-center gap-3 text-[13px]">
+              <button
+                onClick={() =>
+                  setArchiveOpen(
+                    !archiveOpen
+                  )
+                }
+                className="w-full flex items-center justify-between px-3.5 py-3.5 mt-5 rounded-2xl text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--surface-soft)] transition"
+              >
+                <span className="flex items-center gap-3 text-[12px]">
+                  <span className="w-7 h-7 rounded-lg bg-[var(--surface-soft)] flex items-center justify-center">
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.7"
+                    >
+                      <path d="M4 7h16" />
+                      <path d="M6 7v11a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7" />
+                      <path d="M9 11h6" />
+                      <path d="M8 4h8l1 3H7l1-3Z" />
+                    </svg>
+                  </span>
+
+                  Archived
+                </span>
+
                 <svg
-                  width="16"
-                  height="16"
+                  width="14"
+                  height="14"
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
-                  strokeWidth="1.7"
+                  strokeWidth="1.8"
+                  className={`transition-transform ${
+                    archiveOpen
+                      ? "rotate-180"
+                      : ""
+                  }`}
                 >
-                  <path d="M4 7h16" />
-                  <path d="M6 7v11a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7" />
-                  <path d="M9 11h6" />
-                  <path d="M8 4h8l1 3H7l1-3Z" />
+                  <path d="m6 9 6 6 6-6" />
                 </svg>
+              </button>
 
-                Archived chats
-              </span>
+              {archiveOpen && (
+                <div className="mt-1">
+                  {archivedChats.length ===
+                  0 ? (
+                    <p className="text-[11px] text-[var(--muted-2)] px-4 py-3">
+                      No archived conversations.
+                    </p>
+                  ) : (
+                    archivedChats.map(
+                      (chat) => (
+                        <div
+                          key={chat.id}
+                          className="px-4 py-3 rounded-xl hover:bg-[var(--surface-soft)] transition"
+                        >
+                          <div className="truncate text-xs text-[var(--muted)]">
+                            {chat.title}
+                          </div>
 
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                className={`transition-transform ${
-                  archiveOpen
-                    ? "rotate-180"
-                    : ""
-                }`}
-              >
-                <path d="m6 9 6 6 6-6" />
-              </svg>
-            </button>
+                          <div className="flex gap-4 mt-2">
+                            <button
+                              onClick={() =>
+                                restoreChat(
+                                  chat.id
+                                )
+                              }
+                              className="text-[11px] text-blue-400 hover:text-blue-300"
+                            >
+                              Restore
+                            </button>
 
-            {archiveOpen && (
-              <div className="mt-1">
-                {archivedChats.length ===
-                0 ? (
-                  <p className="text-xs text-white/25 px-3 py-3">
-                    No archived chats
-                  </p>
-                ) : (
-                  archivedChats.map(
-                    (chat) => (
-                      <div
-                        key={chat.id}
-                        className="rounded-xl hover:bg-white/[0.035] px-3 py-3 transition"
-                      >
-                        <div className="truncate text-sm text-white/60">
-                          {
-                            chat.title
-                          }
+                            <button
+                              onClick={() =>
+                                deleteChat(
+                                  chat.id
+                                )
+                              }
+                              className="text-[11px] text-red-400 hover:text-red-300"
+                            >
+                              Delete
+                            </button>
+                          </div>
                         </div>
-
-                        <div className="flex gap-4 mt-2.5">
-                          <button
-                            onClick={() =>
-                              restoreChat(
-                                chat.id
-                              )
-                            }
-                            className="text-xs text-blue-400 hover:text-blue-300 transition"
-                          >
-                            Restore
-                          </button>
-
-                          <button
-                            onClick={() =>
-                              deleteChat(
-                                chat.id
-                              )
-                            }
-                            className="text-xs text-red-400 hover:text-red-300 transition"
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </div>
+                      )
                     )
-                  )
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* SIDEBAR FOOTER */}
-
-          <div className="p-4 border-t border-white/[0.07]">
-            <div className="rounded-xl bg-white/[0.025] border border-white/[0.05] p-3">
-              <div className="flex items-center gap-2.5">
-                <div className="w-7 h-7 rounded-lg bg-white/[0.07] flex items-center justify-center">
-                  <div className="w-2 h-2 rounded-full bg-violet-400 shadow-[0_0_10px_rgba(167,139,250,0.8)]" />
+                  )}
                 </div>
+              )}
+            </div>
 
-                <div>
-                  <p className="text-xs font-medium text-white/65">
-                    KAIRO AI
-                  </p>
+            {/* FOOTER */}
 
-                  <p className="text-[10px] text-white/25">
-                    Intelligent AI companion
-                  </p>
+            <div className="p-4">
+              <div className="kairo-sidebar-footer rounded-2xl p-3.5">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-500/15 to-blue-500/10 flex items-center justify-center">
+                    <div className="w-2.5 h-2.5 rounded-full bg-violet-400 shadow-[0_0_12px_rgba(139,92,246,0.8)]" />
+                  </div>
+
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold text-[var(--text)]">
+                      KAIRO AI
+                    </p>
+
+                    <p className="text-[10px] text-[var(--muted-2)] mt-0.5 truncate">
+                      Intelligent AI companion
+                    </p>
+                  </div>
+
+                  <span className="ml-auto w-2 h-2 rounded-full bg-emerald-400" />
                 </div>
               </div>
             </div>
           </div>
         </aside>
 
-        {/* MAIN CHAT */}
+        {/* ======================================================
+            MAIN
+        ====================================================== */}
 
-        <section className="flex-1 flex flex-col min-w-0 bg-[#08090d]">
+        <section className="kairo-main flex-1 min-w-0 flex flex-col">
           {/* HEADER */}
 
-          <header className="h-16 border-b border-white/[0.07] flex items-center px-4 md:px-6 shrink-0 bg-[#08090d]/90 backdrop-blur-xl">
+          <header className="kairo-header shrink-0 flex items-center px-4 md:px-7">
             {!sidebar && (
               <button
                 onClick={() =>
                   setSidebar(true)
                 }
-                className="mr-3 w-9 h-9 rounded-xl flex items-center justify-center text-white/50 hover:text-white hover:bg-white/[0.06] transition"
+                className="kairo-header-button mr-3 w-10 h-10 rounded-xl flex items-center justify-center transition"
                 title="Open sidebar"
               >
                 <svg
-                  width="19"
-                  height="19"
+                  width="18"
+                  height="18"
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
@@ -2152,34 +2166,27 @@ export default function Home() {
             )}
 
             <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-violet-400 via-fuchsia-500 to-blue-500 flex items-center justify-center">
-                <div className="w-2.5 h-2.5 rounded-full bg-white shadow-[0_0_12px_rgba(255,255,255,0.9)]" />
+              <div className="kairo-brand-mark w-9 h-9 rounded-xl">
+                <div className="kairo-brand-core w-2.5 h-2.5" />
               </div>
 
               <div>
-                <div className="font-semibold tracking-tight text-sm">
+                <div className="font-bold tracking-tight text-sm">
                   KAIRO AI
                 </div>
 
-                <div className="flex items-center gap-1.5 text-[10px] text-white/30">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_7px_rgba(52,211,153,0.7)]" />
-                  Powered by Groq
+                <div className="flex items-center gap-1.5 text-[10px] text-[var(--muted-2)]">
+                  <span className="kairo-status-dot" />
+                  Online · Powered by Groq
                 </div>
               </div>
             </div>
 
             <div className="ml-auto flex items-center gap-2">
-              {/* THEME TOGGLE */}
-
               <button
                 onClick={toggleTheme}
-                className="kairo-theme-toggle w-9 h-9 rounded-xl border border-white/[0.08] hover:bg-white/[0.06] flex items-center justify-center text-white/55 hover:text-white transition"
+                className="kairo-header-button kairo-theme-button w-10 h-10 rounded-xl flex items-center justify-center transition"
                 title={
-                  lightMode
-                    ? "Switch to dark mode"
-                    : "Switch to light mode"
-                }
-                aria-label={
                   lightMode
                     ? "Switch to dark mode"
                     : "Switch to light mode"
@@ -2199,7 +2206,7 @@ export default function Home() {
                     <path d="M12 3v2" />
                     <path d="M12 19v2" />
                     <path d="m4.22 4.22 1.42 1.42" />
-                    <path d="m18.36 18.36 1.42 1.42" />
+                    <path d="M18.36 18.36 19.78 19.78" />
                     <path d="M3 12h2" />
                     <path d="M19 12h2" />
                     <path d="m4.22 19.78 1.42-1.42" />
@@ -2219,22 +2226,18 @@ export default function Home() {
                     fill="none"
                     stroke="currentColor"
                     strokeWidth="1.8"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
                   >
                     <path d="M21 12.8A8.5 8.5 0 1 1 11.2 3 6.6 6.6 0 0 0 21 12.8Z" />
                   </svg>
                 )}
               </button>
 
-              {/* NEW CHAT */}
-
               <button
                 onClick={() =>
                   createChat()
                 }
                 disabled={!authReady}
-                className="w-9 h-9 rounded-xl border border-white/[0.08] hover:bg-white/[0.06] flex items-center justify-center text-white/55 hover:text-white transition disabled:opacity-40"
+                className="kairo-header-button w-10 h-10 rounded-xl flex items-center justify-center transition disabled:opacity-40"
                 title="New chat"
               >
                 <svg
@@ -2252,74 +2255,117 @@ export default function Home() {
             </div>
           </header>
 
-          {/* MESSAGES */}
+          {/* ====================================================
+              MESSAGES
+          ==================================================== */}
 
-          <div className="flex-1 overflow-y-auto">
-            {messages.length ===
-            0 ? (
-              <div className="min-h-full flex flex-col items-center justify-center px-5 text-center pb-8">
-                {/* AI VISUAL */}
+          <div className="flex-1 overflow-y-auto kairo-scroll">
+            {messages.length === 0 ? (
+              <div className="min-h-full flex flex-col items-center justify-center px-5 py-12">
+                {/* HERO VISUAL */}
 
-                <div className="relative mb-8">
-                  <div className="absolute -inset-10 rounded-full bg-violet-500/[0.08] blur-3xl" />
+                <div className="relative mb-9">
+                  <div className="absolute -inset-16 rounded-full bg-violet-500/10 blur-3xl" />
 
-                  <div className="absolute -inset-5 rounded-full border border-violet-400/[0.08] animate-pulse" />
+                  <div className="absolute -inset-7 rounded-[44px] border border-violet-400/10 animate-pulse" />
 
-                  <div className="relative w-28 h-28 rounded-[32px] border border-white/[0.1] bg-gradient-to-br from-white/[0.09] to-white/[0.025] backdrop-blur-xl shadow-2xl flex items-center justify-center overflow-hidden">
-                    <div className="absolute -top-8 -right-8 w-20 h-20 rounded-full bg-blue-500/20 blur-2xl" />
-
-                    <div className="absolute -bottom-8 -left-8 w-20 h-20 rounded-full bg-fuchsia-500/20 blur-2xl" />
-
-                    <div className="relative w-16 h-16 rounded-full bg-gradient-to-br from-violet-400 via-fuchsia-500 to-blue-500 p-[1px] shadow-[0_0_35px_rgba(139,92,246,0.3)]">
-                      <div className="w-full h-full rounded-full bg-[#0b0c11] flex items-center justify-center">
-                        <div className="relative w-7 h-7 rounded-full bg-white">
-                          <div className="absolute inset-0 rounded-full bg-white blur-md opacity-60" />
-
-                          <div className="absolute inset-[5px] rounded-full bg-gradient-to-br from-violet-400 to-blue-500" />
-                        </div>
+                  <div className="kairo-hero-orb">
+                    <div className="kairo-hero-core">
+                      <div className="kairo-hero-inner">
+                        <div className="kairo-core-dot" />
                       </div>
                     </div>
                   </div>
                 </div>
 
-                {/* HERO */}
+                {/* HERO TEXT */}
 
-                <div className="max-w-2xl">
-                  <h1 className="text-4xl md:text-6xl font-semibold tracking-[-0.055em] leading-[1.05]">
+                <div className="text-center max-w-3xl">
+                  <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-[var(--border)] bg-[var(--surface-soft)] text-[10px] text-[var(--muted)] mb-5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-violet-400" />
+                    Your intelligent workspace
+                  </div>
+
+                  <h1 className="kairo-title text-5xl md:text-7xl font-bold">
                     Hello, I&apos;m{" "}
-                    <span className="bg-gradient-to-r from-white via-white to-white/55 bg-clip-text text-transparent">
+                    <span className="kairo-gradient-text">
                       KAIRO
                     </span>
-                    <span className="text-violet-400">
+                    <span className="text-violet-500">
                       .
                     </span>
                   </h1>
 
-                  <p className="text-white/40 mt-5 max-w-xl mx-auto text-sm md:text-base leading-7">
-                    Your intelligent AI companion for thinking,
-                    creating, learning, coding, and getting things
-                    done.
+                  <p className="mt-6 max-w-xl mx-auto text-sm md:text-base leading-7 text-[var(--muted)]">
+                    Think smarter, create faster, learn
+                    anything and turn ideas into reality
+                    with your AI companion.
                   </p>
                 </div>
 
-                {/* SUGGESTIONS */}
+                {/* QUICK ACTIONS */}
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-10 max-w-3xl w-full">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-11 max-w-4xl w-full">
                   {[
                     {
                       label: "LEARN",
                       title:
                         "Explain quantum physics simply",
+                      icon: (
+                        <svg
+                          width="16"
+                          height="16"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.7"
+                        >
+                          <circle
+                            cx="12"
+                            cy="12"
+                            r="8"
+                          />
+                          <path d="M12 8v4l3 2" />
+                        </svg>
+                      ),
                     },
                     {
                       label: "BUILD",
                       title:
                         "Help me build a website",
+                      icon: (
+                        <svg
+                          width="16"
+                          height="16"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.7"
+                        >
+                          <path d="m8 9-4 3 4 3" />
+                          <path d="m16 9 4 3-4 3" />
+                          <path d="m14 5-4 14" />
+                        </svg>
+                      ),
                     },
                     {
                       label: "CREATE",
                       title:
                         "Give me a creative idea",
+                      icon: (
+                        <svg
+                          width="16"
+                          height="16"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.7"
+                        >
+                          <path d="M9 18h6" />
+                          <path d="M10 22h4" />
+                          <path d="M8.5 14.5A6 6 0 1 1 15.5 14c-.9.7-1.5 1.5-1.5 2.5h-4c0-1-.6-1.8-1.5-2.5Z" />
+                        </svg>
+                      ),
                     },
                   ].map((item) => (
                     <button
@@ -2329,184 +2375,84 @@ export default function Home() {
                           item.title
                         )
                       }
-                      className="group text-left rounded-2xl border border-white/[0.07] bg-white/[0.025] p-4.5 transition-all duration-200 hover:bg-white/[0.055] hover:border-white/[0.14] hover:-translate-y-0.5"
+                      className="kairo-suggestion text-left rounded-3xl p-5"
                     >
-                      <div className="flex items-center justify-between mb-4">
-                        <span className="text-[9px] font-semibold tracking-[0.2em] text-white/25 group-hover:text-violet-300/60 transition">
-                          {
-                            item.label
-                          }
-                        </span>
+                      <div className="flex items-center justify-between mb-7">
+                        <div className="kairo-suggestion-icon">
+                          {item.icon}
+                        </div>
 
-                        <span className="w-6 h-6 rounded-full border border-white/[0.07] flex items-center justify-center text-white/20 group-hover:text-white/70 group-hover:border-white/15 transition">
-                          <svg
-                            width="13"
-                            height="13"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="1.8"
-                          >
-                            <path d="M5 12h14" />
-                            <path d="m13 6 6 6-6 6" />
-                          </svg>
-                        </span>
+                        <svg
+                          width="15"
+                          height="15"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.7"
+                          className="text-[var(--muted-2)]"
+                        >
+                          <path d="M5 12h14" />
+                          <path d="m13 6 6 6-6 6" />
+                        </svg>
                       </div>
 
-                      <p className="text-sm text-white/60 group-hover:text-white/85 leading-6 transition">
-                        {
-                          item.title
-                        }
-                      </p>
+                      <div className="text-[9px] font-bold tracking-[0.2em] text-violet-400 mb-2">
+                        {item.label}
+                      </div>
+
+                      <div className="text-sm leading-6 font-medium text-[var(--text)]">
+                        {item.title}
+                      </div>
                     </button>
                   ))}
                 </div>
+
+                <div className="mt-9 text-[10px] text-[var(--muted-2)]">
+                  Ask anything · Upload files · Build ideas
+                </div>
               </div>
             ) : (
-              <div className="max-w-4xl mx-auto px-4 py-8 md:py-10">
+              <div className="max-w-4xl mx-auto px-4 md:px-6 py-9">
                 {messages.map(
                   (message) => (
                     <div
                       key={message.id}
-                      className={`flex mb-8 ${
+                      className={`flex mb-9 ${
                         message.role ===
                         "user"
                           ? "justify-end"
                           : "justify-start"
                       }`}
                     >
-                      <div
-                        className={`${
-                          message.role ===
-                          "user"
-                            ? "max-w-[85%] bg-[#1b1e26] border border-white/[0.06] rounded-[22px] px-5 py-3.5"
-                            : "w-full"
-                        }`}
-                      >
-                        {message.role ===
-                          "assistant" && (
-                          <div className="flex items-start gap-3">
-                            <div className="shrink-0 mt-1 w-7 h-7 rounded-lg bg-gradient-to-br from-violet-400 via-fuchsia-500 to-blue-500 flex items-center justify-center">
-                              <div className="w-2 h-2 rounded-full bg-white" />
-                            </div>
-
-                            <div className="min-w-0 flex-1">
-                              <div className="whitespace-pre-wrap leading-7 text-[14px] md:text-[15px] text-white/85">
-                                {message.content ||
-                                  (loading
-                                    ? "Thinking..."
-                                    : "")}
-                              </div>
-
-                              {message.attachments &&
-                                message.attachments.length >
-                                  0 && (
-                                  <div className="mt-3 flex flex-wrap gap-2">
-                                    {message.attachments.map(
-                                      (
-                                        file,
-                                        index
-                                      ) => (
-                                        <div
-                                          key={`${file.name}-${index}`}
-                                          className="text-xs bg-white/[0.05] border border-white/[0.06] rounded-lg px-3 py-2 text-white/50 flex items-center gap-2"
-                                        >
-                                          <svg
-                                            width="13"
-                                            height="13"
-                                            viewBox="0 0 24 24"
-                                            fill="none"
-                                            stroke="currentColor"
-                                            strokeWidth="1.7"
-                                          >
-                                            <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-                                          </svg>
-
-                                          {
-                                            file.name
-                                          }
-                                        </div>
-                                      )
-                                    )}
-                                  </div>
-                                )}
-
-                              {message.content &&
-                                !message.content.startsWith(
-                                  "⚠️"
-                                ) && (
-                                  <div className="flex gap-1.5 mt-4">
-                                    <button
-                                      onClick={() =>
-                                        copyMessage(
-                                          message.content
-                                        )
-                                      }
-                                      className="h-8 px-2.5 rounded-lg text-[11px] text-white/30 hover:text-white/75 hover:bg-white/[0.05] transition flex items-center gap-2"
-                                    >
-                                      <svg
-                                        width="14"
-                                        height="14"
-                                        viewBox="0 0 24 24"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        strokeWidth="1.7"
-                                      >
-                                        <rect
-                                          x="9"
-                                          y="9"
-                                          width="11"
-                                          height="11"
-                                          rx="2"
-                                        />
-                                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                                      </svg>
-                                      Copy
-                                    </button>
-
-                                    <button
-                                      onClick={() =>
-                                        regenerate(
-                                          message
-                                        )
-                                      }
-                                      disabled={
-                                        loading
-                                      }
-                                      className="h-8 px-2.5 rounded-lg text-[11px] text-white/30 hover:text-white/75 hover:bg-white/[0.05] transition disabled:opacity-30 flex items-center gap-2"
-                                    >
-                                      <svg
-                                        width="14"
-                                        height="14"
-                                        viewBox="0 0 24 24"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        strokeWidth="1.7"
-                                      >
-                                        <path d="M20 11a8.1 8.1 0 0 0-15.5-2M4 5v4h4" />
-                                        <path d="M4 13a8.1 8.1 0 0 0 15.5 2M20 19v-4h-4" />
-                                      </svg>
-                                      Regenerate
-                                    </button>
-                                  </div>
-                                )}
-                            </div>
+                      {message.role ===
+                      "assistant" ? (
+                        <div className="w-full flex items-start gap-3.5">
+                          <div className="kairo-assistant-avatar">
+                            <div className="w-2.5 h-2.5 rounded-full bg-white shadow-[0_0_12px_rgba(255,255,255,0.8)]" />
                           </div>
-                        )}
 
-                        {message.role ===
-                          "user" && (
-                          <>
-                            <div className="whitespace-pre-wrap leading-7 text-[14px] md:text-[15px] text-white/90">
-                              {
-                                message.content
-                              }
+                          <div className="min-w-0 flex-1 pt-1">
+                            <div className="flex items-center gap-2 mb-2">
+                              <span className="text-xs font-semibold text-[var(--text)]">
+                                KAIRO
+                              </span>
+
+                              <span className="text-[9px] px-2 py-0.5 rounded-full bg-[var(--surface-soft)] border border-[var(--border-soft)] text-[var(--muted-2)]">
+                                AI
+                              </span>
+                            </div>
+
+                            <div className="kairo-assistant-body whitespace-pre-wrap leading-7 text-[14px] md:text-[15px]">
+                              {message.content ||
+                                (loading
+                                  ? "Thinking..."
+                                  : "")}
                             </div>
 
                             {message.attachments &&
                               message.attachments.length >
                                 0 && (
-                                <div className="mt-3 flex flex-wrap gap-2">
+                                <div className="mt-4 flex flex-wrap gap-2">
                                   {message.attachments.map(
                                     (
                                       file,
@@ -2514,7 +2460,7 @@ export default function Home() {
                                     ) => (
                                       <div
                                         key={`${file.name}-${index}`}
-                                        className="text-xs bg-black/20 border border-white/[0.05] rounded-lg px-3 py-2 text-white/50 flex items-center gap-2"
+                                        className="kairo-attachment rounded-xl px-3 py-2 text-xs flex items-center gap-2"
                                       >
                                         <svg
                                           width="13"
@@ -2527,22 +2473,123 @@ export default function Home() {
                                           <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
                                         </svg>
 
-                                        {
-                                          file.name
-                                        }
+                                        <span className="max-w-[220px] truncate">
+                                          {file.name}
+                                        </span>
                                       </div>
                                     )
                                   )}
                                 </div>
                               )}
 
+                            {message.content &&
+                              !message.content.startsWith(
+                                "⚠️"
+                              ) && (
+                                <div className="flex gap-1.5 mt-4">
+                                  <button
+                                    onClick={() =>
+                                      copyMessage(
+                                        message.content
+                                      )
+                                    }
+                                    className="kairo-action h-8 px-2.5 rounded-lg text-[11px] transition flex items-center gap-2"
+                                  >
+                                    <svg
+                                      width="14"
+                                      height="14"
+                                      viewBox="0 0 24 24"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      strokeWidth="1.7"
+                                    >
+                                      <rect
+                                        x="9"
+                                        y="9"
+                                        width="11"
+                                        height="11"
+                                        rx="2"
+                                      />
+                                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                                    </svg>
+                                    Copy
+                                  </button>
+
+                                  <button
+                                    onClick={() =>
+                                      regenerate(
+                                        message
+                                      )
+                                    }
+                                    disabled={
+                                      loading
+                                    }
+                                    className="kairo-action h-8 px-2.5 rounded-lg text-[11px] transition disabled:opacity-30 flex items-center gap-2"
+                                  >
+                                    <svg
+                                      width="14"
+                                      height="14"
+                                      viewBox="0 0 24 24"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      strokeWidth="1.7"
+                                    >
+                                      <path d="M20 11a8.1 8.1 0 0 0-15.5-2M4 5v4h4" />
+                                      <path d="M4 13a8.1 8.1 0 0 0 15.5 2M20 19v-4h-4" />
+                                    </svg>
+                                    Regenerate
+                                  </button>
+                                </div>
+                              )}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="kairo-user-message px-5 py-4">
+                          <div className="whitespace-pre-wrap leading-7 text-[14px] md:text-[15px] text-[var(--text)]">
+                            {message.content}
+                          </div>
+
+                          {message.attachments &&
+                            message.attachments.length >
+                              0 && (
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                {message.attachments.map(
+                                  (
+                                    file,
+                                    index
+                                  ) => (
+                                    <div
+                                      key={`${file.name}-${index}`}
+                                      className="kairo-attachment rounded-xl px-3 py-2 text-xs flex items-center gap-2"
+                                    >
+                                      <svg
+                                        width="13"
+                                        height="13"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="1.7"
+                                      >
+                                        <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                                      </svg>
+
+                                      <span className="max-w-[220px] truncate">
+                                        {file.name}
+                                      </span>
+                                    </div>
+                                  )
+                                )}
+                              </div>
+                            )}
+
+                          <div className="flex justify-end mt-2">
                             <button
                               onClick={() =>
                                 editMessage(
                                   message
                                 )
                               }
-                              className="mt-2 h-7 px-2 rounded-lg text-[11px] text-white/25 hover:text-white/65 hover:bg-white/[0.05] transition flex items-center gap-1.5"
+                              className="kairo-action h-7 px-2 rounded-lg text-[10px] transition flex items-center gap-1.5"
                             >
                               <svg
                                 width="12"
@@ -2557,9 +2604,9 @@ export default function Home() {
                               </svg>
                               Edit
                             </button>
-                          </>
-                        )}
-                      </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )
                 )}
@@ -2569,15 +2616,17 @@ export default function Home() {
             )}
           </div>
 
-          {/* COMPOSER */}
+          {/* ====================================================
+              COMPOSER
+          ==================================================== */}
 
-          <div className="p-3 md:p-5 shrink-0 bg-gradient-to-t from-[#08090d] via-[#08090d] to-transparent">
+          <div className="kairo-composer-wrap shrink-0 px-3 md:px-5 pt-3 pb-4">
             <div className="max-w-4xl mx-auto">
-              {/* EDITING BAR */}
+              {/* EDITING */}
 
               {editingId && (
-                <div className="mb-2.5 flex items-center justify-between rounded-xl bg-violet-500/[0.07] border border-violet-400/[0.12] px-4 py-2.5">
-                  <span className="text-xs text-violet-200/60 flex items-center gap-2">
+                <div className="kairo-editing mb-2.5 rounded-2xl px-4 py-3 flex items-center justify-between">
+                  <span className="text-xs text-violet-400 flex items-center gap-2">
                     <svg
                       width="14"
                       height="14"
@@ -2596,7 +2645,7 @@ export default function Home() {
                     onClick={
                       cancelEdit
                     }
-                    className="text-xs text-white/35 hover:text-white transition"
+                    className="text-[11px] text-[var(--muted)] hover:text-[var(--text)]"
                   >
                     Cancel
                   </button>
@@ -2615,7 +2664,7 @@ export default function Home() {
                     ) => (
                       <div
                         key={`${file.name}-${index}`}
-                        className="bg-[#151820] border border-white/[0.08] rounded-xl px-3 py-2 text-xs flex items-center gap-2 text-white/55"
+                        className="kairo-attachment rounded-xl px-3 py-2 text-xs flex items-center gap-2"
                       >
                         <svg
                           width="13"
@@ -2628,10 +2677,8 @@ export default function Home() {
                           <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
                         </svg>
 
-                        <span className="max-w-[180px] truncate">
-                          {
-                            file.name
-                          }
+                        <span className="max-w-[190px] truncate">
+                          {file.name}
                         </span>
 
                         <button
@@ -2640,11 +2687,11 @@ export default function Home() {
                               index
                             )
                           }
-                          className="w-5 h-5 rounded-md flex items-center justify-center text-white/30 hover:text-white hover:bg-white/[0.07] transition"
+                          className="w-5 h-5 rounded-md flex items-center justify-center text-[var(--muted-2)] hover:text-[var(--text)] hover:bg-[var(--surface-soft)] transition"
                         >
                           <svg
-                            width="13"
-                            height="13"
+                            width="12"
+                            height="12"
                             viewBox="0 0 24 24"
                             fill="none"
                             stroke="currentColor"
@@ -2660,9 +2707,7 @@ export default function Home() {
                 </div>
               )}
 
-              {/* COMPOSER BOX */}
-
-              <div className="rounded-[24px] border border-white/[0.09] bg-[#11141a] p-2 shadow-2xl shadow-black/20 focus-within:border-white/[0.15] transition">
+              <div className="kairo-composer p-2">
                 <div className="flex items-end gap-1.5">
                   {/* FILE */}
 
@@ -2674,7 +2719,7 @@ export default function Home() {
                       uploading ||
                       loading
                     }
-                    className="w-10 h-10 shrink-0 rounded-xl hover:bg-white/[0.06] text-white/35 hover:text-white/80 transition disabled:opacity-30 flex items-center justify-center"
+                    className="kairo-composer-button w-10 h-10 shrink-0 rounded-xl flex items-center justify-center transition disabled:opacity-30"
                     title="Attach files"
                   >
                     <svg
@@ -2699,7 +2744,7 @@ export default function Home() {
                       uploading ||
                       loading
                     }
-                    className="w-10 h-10 shrink-0 rounded-xl hover:bg-white/[0.06] text-white/35 hover:text-white/80 transition disabled:opacity-30 flex items-center justify-center"
+                    className="kairo-composer-button w-10 h-10 shrink-0 rounded-xl flex items-center justify-center transition disabled:opacity-30"
                     title="Attach folder"
                   >
                     <svg
@@ -2722,8 +2767,7 @@ export default function Home() {
                     hidden
                     onChange={(e) =>
                       uploadFiles(
-                        e.target
-                          .files
+                        e.target.files
                       )
                     }
                   />
@@ -2741,13 +2785,12 @@ export default function Home() {
                     } as any)}
                     onChange={(e) =>
                       uploadFiles(
-                        e.target
-                          .files
+                        e.target.files
                       )
                     }
                   />
 
-                  {/* TEXT */}
+                  {/* TEXTAREA */}
 
                   <textarea
                     value={input}
@@ -2764,13 +2807,13 @@ export default function Home() {
                         ? "Uploading files..."
                         : editingId
                         ? "Edit your message..."
-                        : "Message KAIRO..."
+                        : "Ask KAIRO anything..."
                     }
                     disabled={
                       uploading
                     }
                     rows={1}
-                    className="flex-1 min-w-0 resize-none bg-transparent outline-none px-2.5 py-2.5 max-h-40 text-sm text-white placeholder:text-white/25 leading-6"
+                    className="kairo-textarea flex-1 min-w-0 resize-none bg-transparent outline-none px-2.5 py-2.5 max-h-40 text-sm leading-6"
                   />
 
                   {/* SEND */}
@@ -2786,11 +2829,11 @@ export default function Home() {
                         attachments.length ===
                           0)
                     }
-                    className="w-10 h-10 shrink-0 rounded-xl bg-white text-black disabled:opacity-20 font-bold hover:bg-white/90 transition flex items-center justify-center"
+                    className="kairo-send w-10 h-10 shrink-0 rounded-xl font-bold transition flex items-center justify-center"
                     title="Send message"
                   >
                     {loading ? (
-                      <span className="w-4 h-4 rounded-full border-2 border-black/20 border-t-black animate-spin" />
+                      <span className="w-4 h-4 rounded-full border-2 border-white/25 border-t-white animate-spin" />
                     ) : (
                       <svg
                         width="17"
@@ -2808,9 +2851,13 @@ export default function Home() {
                 </div>
               </div>
 
-              <p className="text-center text-[10px] text-white/20 mt-2.5">
-                KAIRO can make mistakes. Check important information.
-              </p>
+              <div className="flex items-center justify-center gap-2 mt-2.5">
+                <span className="w-1 h-1 rounded-full bg-[var(--muted-2)]" />
+                <p className="text-center text-[9px] text-[var(--muted-2)]">
+                  KAIRO can make mistakes. Check important information.
+                </p>
+                <span className="w-1 h-1 rounded-full bg-[var(--muted-2)]" />
+              </div>
             </div>
           </div>
         </section>
