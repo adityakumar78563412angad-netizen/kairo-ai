@@ -13,6 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
+  applicationName: "Kairo AI",
+
   title: {
     default: "Kairo AI — Your Intelligent AI Companion",
     template: "%s | Kairo AI",
@@ -68,13 +70,25 @@ export default function RootLayout({
 }>) {
   const structuredData = {
     "@context": "https://schema.org",
-    "@type": "WebApplication",
-    name: "Kairo AI",
-    description:
-      "Kairo AI is your intelligent AI companion for chatting, creating, learning, brainstorming, writing code, analyzing information, and getting things done.",
-    url: "https://kairo-ai-alpha.vercel.app/",
-    applicationCategory: "BusinessApplication",
-    operatingSystem: "Web",
+    "@graph": [
+      {
+        "@type": "WebSite",
+        "@id": "https://kairo-ai-alpha.vercel.app/#website",
+        name: "Kairo AI",
+        alternateName: "Kairo AI",
+        url: "https://kairo-ai-alpha.vercel.app/",
+      },
+      {
+        "@type": "WebApplication",
+        "@id": "https://kairo-ai-alpha.vercel.app/#app",
+        name: "Kairo AI",
+        description:
+          "Kairo AI is your intelligent AI companion for chatting, creating, learning, brainstorming, writing code, analyzing information, and getting things done.",
+        url: "https://kairo-ai-alpha.vercel.app/",
+        applicationCategory: "BusinessApplication",
+        operatingSystem: "Web",
+      },
+    ],
   };
 
   return (
