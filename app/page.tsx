@@ -66,51 +66,33 @@ function Icon({
 
 function KairoMark({ small = false }: { small?: boolean }) {
   return (
-    <div
-      className={`kairo-mark ${
-        small ? "kairo-mark-small" : ""
-      }`}
-    >
-      <div className="kairo-mark-ring">
-        <div className="kairo-mark-dot" />
-      </div>
+    <div className={`kairo-mark ${small ? "small" : ""}`}>
+      <div className="kairo-mark-inner" />
     </div>
   );
 }
 
-function formatFileSize(size = 0) {
-  if (size < 1024) return `${size} B`;
+function formatFileSize(size: number) {
+  if (!size) return "0 B";
 
-  if (size < 1024 * 1024) {
-    return `${(size / 1024).toFixed(1)} KB`;
-  }
+  const units = ["B", "KB", "MB", "GB"];
+  const index = Math.min(
+    Math.floor(Math.log(size) / Math.log(1024)),
+    units.length - 1
+  );
 
-  if (size < 1024 * 1024 * 1024) {
-    return `${(size / (1024 * 1024)).toFixed(1)} MB`;
-  }
-
-  return `${(
-    size /
-    (1024 * 1024 * 1024)
-  ).toFixed(1)} GB`;
+  return `${(size / Math.pow(1024, index)).toFixed(
+    index === 0 ? 0 : 1
+  )} ${units[index]}`;
 }
 
-function getFileIcon(type: string, name: string) {
+function getFileIcon(name: string, type: string) {
   if (type.startsWith("image/")) return "image";
+
   if (type.startsWith("video/")) return "video";
 
-  if (
-    type.includes("pdf") ||
-    name.toLowerCase().endsWith(".pdf")
-  ) {
+  if (type.includes("pdf") || /\.pdf$/i.test(name)) {
     return "pdf";
-  }
-
-  if (
-    type.includes("zip") ||
-    type.includes("compressed")
-  ) {
-    return "zip";
   }
 
   if (
@@ -127,6 +109,13 @@ function getFileIcon(type: string, name: string) {
     return "doc";
   }
 
+  if (
+    type.includes("zip") ||
+    /\.(zip|rar|7z)$/i.test(name)
+  ) {
+    return "zip";
+  }
+
   return "file";
 }
 
@@ -136,18 +125,25 @@ export default function Home() {
 
   const [chats, setChats] = useState<Chat[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
+
   const [activeChat, setActiveChat] =
     useState<string | null>(null);
 
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-
   const [sidebar, setSidebar] = useState(true);
+
   const [archiveOpen, setArchiveOpen] =
     useState(false);
 
   const [menuOpen, setMenuOpen] =
     useState<string | null>(null);
+
+  const [menuPosition, setMenuPosition] =
+    useState<{
+      top: number;
+      left: number;
+    } | null>(null);
 
   const [attachments, setAttachments] =
     useState<Attachment[]>([]);
@@ -161,6 +157,12 @@ export default function Home() {
   const [lightMode, setLightMode] =
     useState(false);
 
+  const [agentOpen, setAgentOpen] =
+    useState(false);
+
+  const [selectedAgent, setSelectedAgent] =
+    useState("Kairo AI");
+
   const fileInput =
     useRef<HTMLInputElement>(null);
 
@@ -171,10 +173,12 @@ export default function Home() {
     useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const saved =
-      localStorage.getItem("kairo-theme");
+    const savedTheme =
+      window.localStorage.getItem(
+        "kairo-theme"
+      );
 
-    if (saved === "light") {
+    if (savedTheme === "light") {
       setLightMode(true);
     }
   }, []);
@@ -183,7 +187,7 @@ export default function Home() {
     setLightMode((previous) => {
       const next = !previous;
 
-      localStorage.setItem(
+      window.localStorage.setItem(
         "kairo-theme",
         next ? "light" : "dark"
       );
@@ -192,61 +196,43 @@ export default function Home() {
     });
   }
 
-  useEffect(() => {
-    initializeUser();
-  }, []);
+  function selectAgent(agent: string) {
+    setSelectedAgent(agent);
+    setAgentOpen(false);
+  }
 
   async function initializeUser() {
     try {
-      const current =
-        await supabase.auth.getUser();
+      const {
+        data: { user: existingUser },
+      } = await supabase.auth.getUser();
 
-      if (current.data.user) {
-        setUser(current.data.user);
-
-        await loadChats(
-          current.data.user.id
-        );
-
+      if (existingUser) {
+        setUser(existingUser);
+        await loadChats(existingUser.id);
         setAuthReady(true);
         return;
       }
 
-      const anonymous =
-        await supabase.auth.signInAnonymously();
+      const {
+        data,
+        error,
+      } = await supabase.auth.signInAnonymously();
 
-      if (anonymous.error) {
-        console.error(
-          "Anonymous auth error:",
-          anonymous.error
-        );
+      if (error) throw error;
 
-        alert(
-          "KAIRO couldn't connect to Supabase.\n\n" +
-            anonymous.error.message +
-            "\n\nEnable Anonymous Sign-Ins in Supabase."
-        );
-
-        setAuthReady(true);
-        return;
+      if (data.user) {
+        setUser(data.user);
+        await loadChats(data.user.id);
       }
 
-      const newUser =
-        await supabase.auth.getUser();
-
-      if (newUser.data.user) {
-        setUser(newUser.data.user);
-
-        await loadChats(
-          newUser.data.user.id
-        );
-      }
+      setAuthReady(true);
     } catch (error) {
       console.error(
-        "Auth error:",
+        "Authentication initialization failed:",
         error
       );
-    } finally {
+
       setAuthReady(true);
     }
   }
@@ -254,125 +240,118 @@ export default function Home() {
   async function ensureUser() {
     if (user) return user;
 
-    const current =
-      await supabase.auth.getUser();
+    const {
+      data: { user: existingUser },
+    } = await supabase.auth.getUser();
 
-    if (current.data.user) {
-      setUser(current.data.user);
-      return current.data.user;
+    if (existingUser) {
+      setUser(existingUser);
+      return existingUser;
     }
 
-    const anonymous =
-      await supabase.auth.signInAnonymously();
+    const {
+      data,
+      error,
+    } = await supabase.auth.signInAnonymously();
 
-    if (anonymous.error) {
-      alert(
-        "Supabase login failed:\n\n" +
-          anonymous.error.message
+    if (error) throw error;
+
+    if (!data.user) {
+      throw new Error(
+        "Unable to create anonymous session."
       );
-
-      return null;
     }
 
-    const again =
-      await supabase.auth.getUser();
+    setUser(data.user);
 
-    if (!again.data.user) {
-      alert(
-        "KAIRO could not create a user session."
-      );
-
-      return null;
-    }
-
-    setUser(again.data.user);
-
-    await loadChats(
-      again.data.user.id
-    );
-
-    return again.data.user;
+    return data.user;
   }
 
   async function loadChats(userId: string) {
-    const { data, error } =
-      await supabase
-        .from("kairo_chats")
-        .select("*")
-        .eq("user_id", userId)
-        .order("updated_at", {
-          ascending: false,
-        });
+    const {
+      data,
+      error,
+    } = await supabase
+      .from("kairo_chats")
+      .select("*")
+      .eq("user_id", userId)
+      .order("updated_at", {
+        ascending: false,
+      });
 
     if (error) {
       console.error(
-        "Load chats:",
+        "Failed to load chats:",
         error
       );
       return;
     }
 
-    setChats(data || []);
+    setChats((data || []) as Chat[]);
   }
 
-  async function createChat() {
-    const currentUser =
-      await ensureUser();
+  async function createChat(): Promise<string | null> {
+    try {
+      const currentUser =
+        await ensureUser();
 
-    if (!currentUser) return null;
+      const now =
+        new Date().toISOString();
 
-    const { data, error } =
-      await supabase
+      const {
+        data,
+        error,
+      } = await supabase
         .from("kairo_chats")
         .insert({
           user_id: currentUser.id,
           title: "New conversation",
           archived: false,
+          created_at: now,
+          updated_at: now,
         })
-        .select()
+        .select("*")
         .single();
 
-    if (error) {
-      console.error(
-        "Create chat:",
-        error
-      );
+      if (error) throw error;
 
-      alert(
-        "Couldn't create chat:\n\n" +
-          error.message
+      const newChat = data as Chat;
+
+      setChats((previous) => [
+        newChat,
+        ...previous,
+      ]);
+
+      setActiveChat(newChat.id);
+      setMessages([]);
+      setAttachments([]);
+      setEditingId(null);
+      setMenuOpen(null);
+      setMenuPosition(null);
+
+      return newChat.id;
+    } catch (error) {
+      console.error(
+        "Failed to create chat:",
+        error
       );
 
       return null;
     }
-
-    setChats((previous) => [
-      data,
-      ...previous.filter(
-        (chat) => chat.id !== data.id
-      ),
-    ]);
-
-    setActiveChat(data.id);
-    setMessages([]);
-    setAttachments([]);
-    setInput("");
-    setEditingId(null);
-    setMenuOpen(null);
-    setArchiveOpen(false);
-
-    return data.id;
   }
 
   async function openChat(id: string) {
-    setActiveChat(id);
-    setMenuOpen(null);
-    setArchiveOpen(false);
-    setEditingId(null);
-    setAttachments([]);
+    try {
+      setActiveChat(id);
+      setMenuOpen(null);
+      setMenuPosition(null);
+      setAttachments([]);
+      setEditingId(null);
 
-    const { data, error } =
-      await supabase
+      const {
+        data,
+        error,
+      } = await supabase
         .from("kairo_messages")
         .select("*")
         .eq("chat_id", id)
@@ -380,27 +359,22 @@ export default function Home() {
           ascending: true,
         });
 
-    if (error) {
+      if (error) throw error;
+
+      setMessages(
+        ((data || []) as Message[]).map(
+          (message) => ({
+            ...message,
+            attachments:
+              message.attachments || [],
+          })
+        )
+      );
+    } catch (error) {
       console.error(
-        "Open chat:",
+        "Failed to open chat:",
         error
       );
-
-      alert(
-        "Couldn't open this conversation:\n\n" +
-          error.message
-      );
-
-      return;
-    }
-
-    setMessages(data || []);
-
-    if (
-      typeof window !== "undefined" &&
-      window.innerWidth < 900
-    ) {
-      setSidebar(false);
     }
   }
 
@@ -411,82 +385,86 @@ export default function Home() {
 
     if (!chat) return;
 
-    const name = window.prompt(
-      "Rename conversation",
-      chat.title
-    );
-
-    if (!name?.trim()) return;
-
-    const cleanName = name.trim();
-
-    const now =
-      new Date().toISOString();
-
-    const { error } =
-      await supabase
-        .from("kairo_chats")
-        .update({
-          title: cleanName,
-          updated_at: now,
-        })
-        .eq("id", id);
-
-    if (error) {
-      alert(
-        "Couldn't rename chat:\n\n" +
-          error.message
+    const nextTitle =
+      window.prompt(
+        "Rename conversation",
+        chat.title
       );
 
+    if (
+      !nextTitle ||
+      !nextTitle.trim()
+    ) {
+      setMenuOpen(null);
+      setMenuPosition(null);
+      return;
+    }
+
+    const title =
+      nextTitle.trim().slice(0, 100);
+
+    const {
+      error,
+    } = await supabase
+      .from("kairo_chats")
+      .update({
+        title,
+        updated_at:
+          new Date().toISOString(),
+      })
+      .eq("id", id);
+
+    if (error) {
+      console.error(
+        "Failed to rename chat:",
+        error
+      );
       return;
     }
 
     setChats((previous) =>
-      previous.map((chat) =>
-        chat.id === id
+      previous.map((item) =>
+        item.id === id
           ? {
-              ...chat,
-              title: cleanName,
-              updated_at: now,
+              ...item,
+              title,
             }
-          : chat
+          : item
       )
     );
 
     setMenuOpen(null);
+    setMenuPosition(null);
   }
 
   async function archiveChat(id: string) {
-    const now =
-      new Date().toISOString();
-
-    const { error } =
-      await supabase
-        .from("kairo_chats")
-        .update({
-          archived: true,
-          updated_at: now,
-        })
-        .eq("id", id);
+    const {
+      error,
+    } = await supabase
+      .from("kairo_chats")
+      .update({
+        archived: true,
+        updated_at:
+          new Date().toISOString(),
+      })
+      .eq("id", id);
 
     if (error) {
-      alert(
-        "Couldn't archive chat:\n\n" +
-          error.message
+      console.error(
+        "Failed to archive chat:",
+        error
       );
-
       return;
     }
 
     setChats((previous) =>
-      previous.map((chat) =>
-        chat.id === id
+      previous.map((item) =>
+        item.id === id
           ? {
-              ...chat,
+              ...item,
               archived: true,
-              updated_at: now,
             }
-          : chat
+          : item
       )
     );
 
@@ -496,39 +474,37 @@ export default function Home() {
     }
 
     setMenuOpen(null);
+    setMenuPosition(null);
   }
 
   async function restoreChat(id: string) {
-    const now =
-      new Date().toISOString();
-
-    const { error } =
-      await supabase
-        .from("kairo_chats")
-        .update({
-          archived: false,
-          updated_at: now,
-        })
-        .eq("id", id);
+    const {
+      error,
+    } = await supabase
+      .from("kairo_chats")
+      .update({
+        archived: false,
+        updated_at:
+          new Date().toISOString(),
+      })
+      .eq("id", id);
 
     if (error) {
-      alert(
-        "Couldn't restore chat:\n\n" +
-          error.message
+      console.error(
+        "Failed to restore chat:",
+        error
       );
-
       return;
     }
 
     setChats((previous) =>
-      previous.map((chat) =>
-        chat.id === id
+      previous.map((item) =>
+        item.id === id
           ? {
-              ...chat,
+              ...item,
               archived: false,
-              updated_at: now,
             }
-          : chat
+          : item
       )
     );
   }
@@ -539,131 +515,253 @@ export default function Home() {
         "Delete this conversation permanently?"
       );
 
-    if (!confirmed) return;
+    if (!confirmed) {
+      setMenuOpen(null);
+      setMenuPosition(null);
+      return;
+    }
 
-    const { error } =
-      await supabase
-        .from("kairo_chats")
-        .delete()
-        .eq("id", id);
+    const {
+      error,
+    } = await supabase
+      .from("kairo_chats")
+      .delete()
+      .eq("id", id);
 
     if (error) {
-      alert(
-        "Couldn't delete chat:\n\n" +
-          error.message
+      console.error(
+        "Failed to delete chat:",
+        error
       );
-
       return;
     }
 
     setChats((previous) =>
       previous.filter(
-        (chat) => chat.id !== id
+        (item) => item.id !== id
       )
     );
 
     if (activeChat === id) {
       setActiveChat(null);
       setMessages([]);
-      setInput("");
     }
 
     setMenuOpen(null);
+    setMenuPosition(null);
   }
 
-  async function uploadFiles(
-    files: FileList | null
+  function openChatMenu(
+    event: React.MouseEvent<HTMLButtonElement>,
+    chatId: string
   ) {
-    if (!files || files.length === 0) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (menuOpen === chatId) {
+      setMenuOpen(null);
+      setMenuPosition(null);
       return;
     }
 
-    const currentUser =
-      await ensureUser();
+    const rect =
+      event.currentTarget.getBoundingClientRect();
 
-    if (!currentUser) return;
+    const menuWidth = 178;
+    const menuHeight = 145;
 
-    setUploading(true);
+    let left = rect.right - menuWidth;
+    let top = rect.bottom + 6;
+
+    if (
+      left <
+      8
+    ) {
+      left = 8;
+    }
+
+    if (
+      left + menuWidth >
+      window.innerWidth - 8
+    ) {
+      left =
+        window.innerWidth -
+        menuWidth -
+        8;
+    }
+
+    if (
+      top + menuHeight >
+      window.innerHeight - 8
+    ) {
+      top =
+        rect.top -
+        menuHeight -
+        6;
+    }
+
+    setMenuPosition({
+      top,
+      left,
+    });
+
+    setMenuOpen(chatId);
+  }
+
+  useEffect(() => {
+    initializeUser();
+  }, []);
+
+  useEffect(() => {
+    function handleWindowClick() {
+      setMenuOpen(null);
+      setMenuPosition(null);
+      setAgentOpen(false);
+    }
+
+    function handleResize() {
+      setMenuOpen(null);
+      setMenuPosition(null);
+    }
+
+    window.addEventListener(
+      "click",
+      handleWindowClick
+    );
+
+    window.addEventListener(
+      "resize",
+      handleResize
+    );
+
+    window.addEventListener(
+      "scroll",
+      handleResize,
+      true
+    );
+
+    return () => {
+      window.removeEventListener(
+        "click",
+        handleWindowClick
+      );
+
+      window.removeEventListener(
+        "resize",
+        handleResize
+      );
+
+      window.removeEventListener(
+        "scroll",
+        handleResize,
+        true
+      );
+    };
+  }, []);
+
+  async function uploadFiles(
+    fileList: FileList | null
+  ) {
+    if (!fileList?.length) return;
 
     try {
-      const uploaded: Attachment[] = [];
+      setUploading(true);
 
-      for (const file of Array.from(files)) {
-        try {
-          const formData =
-            new FormData();
+      const currentUser =
+        await ensureUser();
 
-          formData.append(
-            "file",
-            file
+      const uploaded: Attachment[] =
+        [];
+
+      for (
+        let index = 0;
+        index < fileList.length;
+        index++
+      ) {
+        const file =
+          fileList.item(index);
+
+        if (!file) continue;
+
+        const formData =
+          new FormData();
+
+        formData.append(
+          "file",
+          file
+        );
+
+        formData.append(
+          "userId",
+          currentUser.id
+        );
+
+        formData.append(
+          "relativePath",
+          (
+            file as File & {
+              webkitRelativePath?: string;
+            }
+          ).webkitRelativePath ||
+            file.name
+        );
+
+        const response =
+          await fetch(
+            "/api/upload",
+            {
+              method: "POST",
+              body: formData,
+            }
           );
 
-          formData.append(
-            "userId",
-            currentUser.id
-          );
+        if (!response.ok) {
+          const text =
+            await response.text();
 
-          formData.append(
-            "relativePath",
+          throw new Error(
+            text ||
+              `Upload failed for ${file.name}`
+          );
+        }
+
+        const result =
+          await response.json();
+
+        uploaded.push({
+          name: file.name,
+          type:
+            file.type ||
+            "application/octet-stream",
+          size: file.size,
+          url: result.url,
+          key: result.key,
+          relativePath:
+            result.relativePath ||
             (
               file as File & {
                 webkitRelativePath?: string;
               }
             ).webkitRelativePath ||
-              file.name
-          );
-
-          const response =
-            await fetch(
-              "/api/upload",
-              {
-                method: "POST",
-                body: formData,
-              }
-            );
-
-          const result =
-            await response.json();
-
-          if (!response.ok) {
-            throw new Error(
-              result?.error ||
-                "Upload failed."
-            );
-          }
-
-          uploaded.push({
-            name: file.name,
-            type:
-              file.type ||
-              "application/octet-stream",
-            size: file.size,
-            url: result.url,
-            key: result.key,
-            relativePath:
-              result.relativePath,
-          });
-        } catch (error: any) {
-          console.error(
-            "B2 upload error:",
-            error
-          );
-
-          alert(
-            `Couldn't upload ${file.name}:\n\n${
-              error?.message ||
-              "Upload failed."
-            }`
-          );
-        }
+            file.name,
+        });
       }
 
-      if (uploaded.length > 0) {
-        setAttachments((previous) => [
-          ...previous,
-          ...uploaded,
-        ]);
-      }
+      setAttachments((previous) => [
+        ...previous,
+        ...uploaded,
+      ]);
+    } catch (error) {
+      console.error(
+        "File upload failed:",
+        error
+      );
+
+      window.alert(
+        error instanceof Error
+          ? error.message
+          : "File upload failed."
+      );
     } finally {
       setUploading(false);
 
@@ -677,10 +775,13 @@ export default function Home() {
     }
   }
 
-  function removeAttachment(index: number) {
+  function removeAttachment(
+    index: number
+  ) {
     setAttachments((previous) =>
       previous.filter(
-        (_, i) => i !== index
+        (_, itemIndex) =>
+          itemIndex !== index
       )
     );
   }
@@ -690,6 +791,8 @@ export default function Home() {
     history: Message[],
     currentAttachments: Attachment[] = []
   ) {
+    setLoading(true);
+
     const assistantId =
       crypto.randomUUID();
 
@@ -699,54 +802,50 @@ export default function Home() {
         id: assistantId,
         role: "assistant",
         content: "",
+        attachments: [],
       },
     ]);
 
-    let answer = "";
-
     try {
       const response =
-        await fetch("/api/chat", {
-          method: "POST",
-          headers: {
-            "Content-Type":
-              "application/json",
-          },
-          body: JSON.stringify({
-            messages: history.map(
-              (message) => ({
-                role: message.role,
-                content:
-                  message.content,
-              })
-            ),
-            attachments:
-              currentAttachments,
-          }),
-        });
+        await fetch(
+          "/api/chat",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+            body: JSON.stringify({
+              messages:
+                history.map(
+                  (message) => ({
+                    role:
+                      message.role,
+                    content:
+                      message.content,
+                  })
+                ),
+              attachments:
+                currentAttachments,
+              agent: selectedAgent,
+            }),
+          }
+        );
 
       if (!response.ok) {
-        let errorMessage =
-          "KAIRO request failed.";
-
-        try {
-          const errorData =
-            await response.json();
-
-          errorMessage =
-            errorData?.details ||
-            errorData?.error ||
-            errorMessage;
-        } catch {}
+        const text =
+          await response.text();
 
         throw new Error(
-          errorMessage
+          text ||
+            "Kairo AI request failed."
         );
       }
 
       if (!response.body) {
         throw new Error(
-          "KAIRO returned an empty response."
+          "AI response stream is unavailable."
         );
       }
 
@@ -757,6 +856,7 @@ export default function Home() {
         new TextDecoder();
 
       let buffer = "";
+      let assistantText = "";
 
       while (true) {
         const {
@@ -784,6 +884,14 @@ export default function Home() {
             line.trim();
 
           if (
+            !trimmed ||
+            trimmed ===
+              "data: [DONE]"
+          ) {
+            continue;
+          }
+
+          if (
             !trimmed.startsWith(
               "data:"
             )
@@ -791,24 +899,19 @@ export default function Home() {
             continue;
           }
 
-          const data =
-            trimmed
-              .slice(5)
-              .trim();
-
-          if (
-            !data ||
-            data === "[DONE]"
-          ) {
-            continue;
-          }
+          const raw =
+            trimmed.slice(5).trim();
 
           try {
             const parsed =
-              JSON.parse(data);
+              JSON.parse(raw);
 
-            if (parsed.text) {
-              answer += parsed.text;
+            if (
+              typeof parsed.text ===
+              "string"
+            ) {
+              assistantText +=
+                parsed.text;
 
               setMessages(
                 (previous) =>
@@ -819,263 +922,156 @@ export default function Home() {
                         ? {
                             ...message,
                             content:
-                              answer,
+                              assistantText,
                           }
                         : message
                   )
               );
             }
-          } catch (error) {
-            console.error(
-              "Stream parsing error:",
-              error
-            );
+          } catch {
+            if (raw) {
+              assistantText += raw;
+
+              setMessages(
+                (previous) =>
+                  previous.map(
+                    (message) =>
+                      message.id ===
+                      assistantId
+                        ? {
+                            ...message,
+                            content:
+                              assistantText,
+                          }
+                        : message
+                  )
+              );
+            }
           }
         }
       }
 
-      if (!answer.trim()) {
-        throw new Error(
-          "KAIRO returned no text."
+      if (!assistantText) {
+        assistantText =
+          "I couldn't generate a response.";
+
+        setMessages(
+          (previous) =>
+            previous.map(
+              (message) =>
+                message.id ===
+                assistantId
+                  ? {
+                      ...message,
+                      content:
+                        assistantText,
+                    }
+                  : message
+            )
         );
       }
 
-      const {
-        error: saveError,
-      } = await supabase
+      await supabase
         .from("kairo_messages")
         .insert({
+          id: assistantId,
           chat_id: chatId,
           role: "assistant",
-          content: answer,
+          content: assistantText,
+          attachments: [],
         });
-
-      if (saveError) {
-        console.error(
-          "Save assistant message:",
-          saveError
-        );
-      }
-
-      return answer;
-    } catch (error: any) {
+    } catch (error) {
       console.error(
-        "AI request:",
+        "AI streaming failed:",
         error
       );
 
-      const errorText =
-        error?.message ||
-        "KAIRO couldn't complete the request.";
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Kairo AI request failed.";
 
-      setMessages((previous) =>
-        previous.map((message) =>
-          message.id === assistantId
-            ? {
-                ...message,
-                content:
-                  "⚠️ " +
-                  errorText,
-              }
-            : message
-        )
+      const errorText =
+        `⚠️ ${message}`;
+
+      setMessages(
+        (previous) =>
+          previous.map(
+            (item) =>
+              item.id === assistantId
+                ? {
+                    ...item,
+                    content:
+                      errorText,
+                  }
+                : item
+          )
       );
 
-      return null;
+      await supabase
+        .from("kairo_messages")
+        .insert({
+          id: assistantId,
+          chat_id: chatId,
+          role: "assistant",
+          content: errorText,
+          attachments: [],
+        });
+    } finally {
+      setLoading(false);
     }
   }
 
-  async function sendMessage() {
-    if (loading || uploading) {
-      return;
-    }
+  async function updateChatTitle(
+    chatId: string,
+    text: string
+  ) {
+    const title =
+      text.trim().slice(0, 60);
 
-    const text =
-      input.trim();
+    if (!title) return;
+
+    const chat = chats.find(
+      (item) => item.id === chatId
+    );
 
     if (
-      !text &&
-      attachments.length === 0
+      chat &&
+      chat.title !==
+        "New conversation"
     ) {
       return;
     }
 
-    const currentUser =
-      await ensureUser();
+    const {
+      error,
+    } = await supabase
+      .from("kairo_chats")
+      .update({
+        title,
+        updated_at:
+          new Date().toISOString(),
+      })
+      .eq("id", chatId);
 
-    if (!currentUser) return;
-
-    setLoading(true);
-
-    try {
-      if (editingId) {
-        const editedIndex =
-          messages.findIndex(
-            (message) =>
-              message.id ===
-              editingId
-          );
-
-        if (editedIndex !== -1) {
-          const editedMessage =
-            messages[
-              editedIndex
-            ];
-
-          const newUserMessage: Message =
-            {
-              ...editedMessage,
-              content: text,
-              attachments:
-                attachments.length > 0
-                  ? attachments
-                  : editedMessage.attachments,
-            };
-
-          const newMessages =
-            messages.slice(
-              0,
-              editedIndex + 1
-            );
-
-          newMessages[
-            editedIndex
-          ] = newUserMessage;
-
-          setMessages(
-            newMessages
-          );
-
-          setInput("");
-          setEditingId(null);
-
-          const chatId =
-            activeChat;
-
-          if (!chatId) {
-            setLoading(false);
-            return;
-          }
-
-          await supabase
-            .from("kairo_messages")
-            .delete()
-            .eq(
-              "chat_id",
-              chatId
-            )
-            .eq(
-              "id",
-              editedMessage.id
-            );
-
-          await supabase
-            .from("kairo_messages")
-            .insert({
-              chat_id: chatId,
-              role: "user",
-              content: text,
-              attachments:
-                newUserMessage.attachments ||
-                [],
-            });
-
-          setAttachments([]);
-
-          await streamAI(
-            chatId,
-            newMessages,
-            newUserMessage.attachments ||
-              []
-          );
-
-          await updateChatTime(
-            chatId
-          );
-
-          return;
-        }
-      }
-
-      let chatId =
-        activeChat;
-
-      if (!chatId) {
-        chatId =
-          await createChat();
-
-        if (!chatId) {
-          setLoading(false);
-          return;
-        }
-      }
-
-      const currentAttachments =
-        [...attachments];
-
-      const userMessage: Message =
-        {
-          id: crypto.randomUUID(),
-          role: "user",
-          content: text,
-          attachments:
-            currentAttachments,
-        };
-
-      const history = [
-        ...messages,
-        userMessage,
-      ];
-
-      setMessages(history);
-      setInput("");
-      setAttachments([]);
-
-      const {
-        error: saveError,
-      } = await supabase
-        .from("kairo_messages")
-        .insert({
-          chat_id: chatId,
-          role: "user",
-          content: text,
-          attachments:
-            currentAttachments,
-        });
-
-      if (saveError) {
-        console.error(
-          "Save user message:",
-          saveError
-        );
-      }
-
-      await updateChatTitle(
-        chatId,
-        text
-      );
-
-      await streamAI(
-        chatId,
-        history,
-        currentAttachments
-      );
-
-      await updateChatTime(
-        chatId
-      );
-    } catch (error) {
+    if (error) {
       console.error(
-        "Send message error:",
+        "Failed to update title:",
         error
       );
-
-      alert(
-        "Something went wrong while sending the message."
-      );
-    } finally {
-      setLoading(false);
+      return;
     }
+
+    setChats((previous) =>
+      previous.map((item) =>
+        item.id === chatId
+          ? {
+              ...item,
+              title,
+            }
+          : item
+      )
+    );
   }
 
   async function updateChatTime(
@@ -1092,14 +1088,14 @@ export default function Home() {
       .eq("id", chatId);
 
     setChats((previous) =>
-      previous
-        .map((chat) =>
-          chat.id === chatId
+      [...previous]
+        .map((item) =>
+          item.id === chatId
             ? {
-                ...chat,
+                ...item,
                 updated_at: now,
               }
-            : chat
+            : item
         )
         .sort(
           (a, b) =>
@@ -1113,188 +1109,248 @@ export default function Home() {
     );
   }
 
-  async function updateChatTitle(
-    chatId: string,
-    text: string
+  async function sendMessage(
+    forcedText?: string
   ) {
-    const chat = chats.find(
-      (item) =>
-        item.id === chatId
-    );
+    if (loading || uploading) {
+      return;
+    }
 
-    if (!chat) return;
+    const text =
+      (
+        forcedText ??
+        input
+      ).trim();
 
     if (
-      chat.title !==
-      "New conversation"
+      !text &&
+      attachments.length === 0
     ) {
       return;
     }
 
-    const title =
-      text.slice(0, 42) ||
-      "File conversation";
-
-    await supabase
-      .from("kairo_chats")
-      .update({
-        title,
-        updated_at:
-          new Date().toISOString(),
-      })
-      .eq("id", chatId);
-
-    setChats((previous) =>
-      previous.map((item) =>
-        item.id === chatId
-          ? {
-              ...item,
-              title,
-            }
-          : item
-      )
-    );
-  }
-
-  async function copyMessage(
-    text: string
-  ) {
     try {
-      await navigator.clipboard.writeText(
-        text
-      );
+      const currentUser =
+        await ensureUser();
 
-      alert(
-        "Copied to clipboard."
-      );
-    } catch {
-      const textarea =
-        document.createElement(
-          "textarea"
+      let chatId =
+        activeChat;
+
+      if (!chatId) {
+        chatId =
+          await createChat();
+
+        if (!chatId) {
+          throw new Error(
+            "Unable to create conversation."
+          );
+        }
+      }
+
+      if (editingId) {
+        const {
+          error,
+        } = await supabase
+          .from("kairo_messages")
+          .update({
+            content: text,
+          })
+          .eq("id", editingId)
+          .eq(
+            "chat_id",
+            chatId
+          );
+
+        if (error) throw error;
+
+        setMessages((previous) =>
+          previous.map(
+            (message) =>
+              message.id ===
+              editingId
+                ? {
+                    ...message,
+                    content: text,
+                  }
+                : message
+          )
         );
 
-      textarea.value = text;
+        setEditingId(null);
+        setInput("");
 
-      document.body.appendChild(
-        textarea
+        await updateChatTime(
+          chatId
+        );
+
+        return;
+      }
+
+      const userMessage: Message = {
+        id: crypto.randomUUID(),
+        role: "user",
+        content: text,
+        attachments:
+          attachments.length
+            ? attachments
+            : [],
+      };
+
+      const historyForAI = [
+        ...messages,
+        userMessage,
+      ];
+
+      const {
+        error,
+      } = await supabase
+        .from("kairo_messages")
+        .insert({
+          id: userMessage.id,
+          chat_id: chatId,
+          role: "user",
+          content: text,
+          attachments:
+            attachments.length
+              ? attachments
+              : [],
+        });
+
+      if (error) throw error;
+
+      setMessages(historyForAI);
+      setInput("");
+
+      const currentAttachments =
+        attachments;
+
+      setAttachments([]);
+
+      await updateChatTitle(
+        chatId,
+        text || "File conversation"
       );
 
-      textarea.select();
-
-      document.execCommand(
-        "copy"
+      await streamAI(
+        chatId,
+        historyForAI,
+        currentAttachments
       );
 
-      textarea.remove();
+      await updateChatTime(
+        chatId
+      );
+
+      void currentUser;
+    } catch (error) {
+      console.error(
+        "Send message failed:",
+        error
+      );
+
+      window.alert(
+        error instanceof Error
+          ? error.message
+          : "Unable to send message."
+      );
+
+      setLoading(false);
     }
+  }
+
+  function copyMessage(
+    content: string
+  ) {
+    navigator.clipboard
+      ?.writeText(content)
+      .catch((error) =>
+        console.error(
+          "Copy failed:",
+          error
+        )
+      );
   }
 
   function editMessage(
     message: Message
   ) {
-    setEditingId(message.id);
     setInput(message.content);
+    setEditingId(message.id);
 
-    if (message.attachments) {
-      setAttachments(
-        message.attachments
-      );
-    }
-
-    setTimeout(() => {
+    requestAnimationFrame(() => {
       const textarea =
         document.querySelector(
           ".kairo-textarea"
         ) as HTMLTextAreaElement | null;
 
-      if (textarea) {
-        textarea.focus();
-      }
-    }, 50);
+      textarea?.focus();
+    });
   }
 
   function cancelEdit() {
     setEditingId(null);
     setInput("");
-    setAttachments([]);
   }
 
   async function regenerate(
     message: Message
   ) {
-    if (loading) return;
-    if (!activeChat) return;
+    if (
+      loading ||
+      !activeChat
+    ) {
+      return;
+    }
 
-    const assistantIndex =
+    const messageIndex =
       messages.findIndex(
         (item) =>
           item.id === message.id
       );
 
-    if (assistantIndex === -1) {
-      return;
-    }
-
-    const previousMessages =
-      messages.slice(
-        0,
-        assistantIndex
-      );
-
     if (
-      previousMessages.length ===
-      0
+      messageIndex === -1
     ) {
       return;
     }
 
-    const lastUser =
-      previousMessages[
-        previousMessages.length - 1
+    const previousUserMessages =
+      messages
+        .slice(0, messageIndex)
+        .filter(
+          (item) =>
+            item.role === "user"
+        );
+
+    const latestUser =
+      previousUserMessages[
+        previousUserMessages.length - 1
       ];
 
-    if (
-      lastUser.role !== "user"
-    ) {
+    if (!latestUser) {
       return;
     }
-
-    setLoading(true);
-    setMessages(
-      previousMessages
-    );
 
     await supabase
       .from("kairo_messages")
       .delete()
-      .eq(
-        "chat_id",
-        activeChat
-      )
-      .eq(
-        "role",
-        "assistant"
-      )
-      .gt(
-        "created_at",
-        lastUser.created_at ||
-          "1970-01-01"
-      );
+      .eq("id", message.id);
 
-    try {
-      await streamAI(
-        activeChat,
-        previousMessages,
-        lastUser.attachments ||
-          []
-      );
+    setMessages((previous) =>
+      previous.filter(
+        (item) =>
+          item.id !== message.id
+      )
+    );
 
-      await updateChatTime(
-        activeChat
-      );
-    } finally {
-      setLoading(false);
-    }
+    await streamAI(
+      activeChat,
+      messages.filter(
+        (item) =>
+          item.id !== message.id
+      ),
+      latestUser.attachments || []
+    );
   }
 
   function handleKeyDown(
@@ -1306,31 +1362,28 @@ export default function Home() {
     ) {
       event.preventDefault();
 
-      if (
-        !loading &&
-        !uploading &&
-        (input.trim() ||
-          attachments.length > 0)
-      ) {
-        sendMessage();
-      }
+      void sendMessage();
     }
   }
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({
-      behavior: "smooth",
-    });
-  }, [messages]);
+    bottomRef.current?.scrollIntoView(
+      {
+        behavior: "smooth",
+      }
+    );
+  }, [messages, loading]);
 
   const activeChats =
     chats.filter(
-      (chat) => !chat.archived
+      (chat) =>
+        !chat.archived
     );
 
   const archivedChats =
     chats.filter(
-      (chat) => chat.archived
+      (chat) =>
+        chat.archived
     );
 
   return (
@@ -1341,6 +1394,11 @@ export default function Home() {
       onClick={() => {
         if (menuOpen) {
           setMenuOpen(null);
+          setMenuPosition(null);
+        }
+
+        if (agentOpen) {
+          setAgentOpen(false);
         }
       }}
     >
@@ -1353,7 +1411,8 @@ export default function Home() {
         body {
           margin: 0;
           padding: 0;
-          overflow: hidden;
+          width: 100%;
+          height: 100%;
         }
 
         body {
@@ -1365,10 +1424,12 @@ export default function Home() {
             BlinkMacSystemFont,
             "Segoe UI",
             sans-serif;
+          background: #050608;
         }
 
         button,
-        textarea {
+        textarea,
+        input {
           font: inherit;
         }
 
@@ -1381,10 +1442,30 @@ export default function Home() {
           --bg2: #090b10;
           --panel: rgba(12, 14, 20, 0.82);
           --panel-solid: #0d1017;
-          --panel-soft: rgba(255, 255, 255, 0.045);
-          --panel-hover: rgba(255, 255, 255, 0.07);
-          --line: rgba(255, 255, 255, 0.085);
-          --line-soft: rgba(255, 255, 255, 0.055);
+          --panel-soft: rgba(
+            255,
+            255,
+            255,
+            0.045
+          );
+          --panel-hover: rgba(
+            255,
+            255,
+            255,
+            0.07
+          );
+          --line: rgba(
+            255,
+            255,
+            255,
+            0.085
+          );
+          --line-soft: rgba(
+            255,
+            255,
+            255,
+            0.055
+          );
           --text: #f7f8fc;
           --muted: #9198aa;
           --muted2: #5f6779;
@@ -1393,61 +1474,143 @@ export default function Home() {
           --pink: #d946ef;
           --green: #34d399;
           --danger: #fb7185;
-          --shadow: rgba(0, 0, 0, 0.45);
+          --shadow: rgba(
+            0,
+            0,
+            0,
+            0.45
+          );
 
-          width: 100vw;
-          height: 100vh;
+          position: fixed;
+          inset: 0;
           display: flex;
           overflow: hidden;
           color: var(--text);
-
           background:
             radial-gradient(
-              circle at 55% -15%,
-              rgba(139, 92, 246, 0.12),
+              circle at 70% 15%,
+              rgba(
+                99,
+                102,
+                241,
+                0.08
+              ),
               transparent 32%
             ),
             radial-gradient(
-              circle at 90% 90%,
-              rgba(59, 130, 246, 0.07),
-              transparent 30%
+              circle at 20% 85%,
+              rgba(
+                139,
+                92,
+                246,
+                0.07
+              ),
+              transparent 28%
             ),
-            linear-gradient(
-              145deg,
-              var(--bg),
-              var(--bg2)
-            );
-
-          transition:
-            background 0.35s ease,
-            color 0.35s ease;
+            var(--bg);
         }
 
         .kairo-app.light {
           --bg: #f5f7fb;
           --bg2: #eef1f7;
-          --panel: rgba(255, 255, 255, 0.84);
+          --panel: rgba(
+            255,
+            255,
+            255,
+            0.84
+          );
           --panel-solid: #ffffff;
-          --panel-soft: rgba(20, 27, 45, 0.045);
-          --panel-hover: rgba(20, 27, 45, 0.07);
+          --panel-soft: rgba(
+            20,
+            27,
+            45,
+            0.045
+          );
+          --panel-hover: rgba(
+            20,
+            27,
+            45,
+            0.07
+          );
           --line: #e2e6ee;
           --line-soft: #edf0f5;
           --text: #171b26;
           --muted: #697286;
           --muted2: #99a1b1;
-          --shadow: rgba(25, 35, 55, 0.11);
+          --shadow: rgba(
+            25,
+            35,
+            55,
+            0.11
+          );
         }
 
-        /* SIDEBAR */
+        .kairo-mark {
+          width: 39px;
+          height: 39px;
+          flex-shrink: 0;
+          border-radius: 13px;
+          padding: 2px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background:
+            conic-gradient(
+              from 20deg,
+              #8b5cf6,
+              #d946ef,
+              #3b82f6,
+              #8b5cf6
+            );
+          box-shadow:
+            0 8px 25px
+              rgba(
+                124,
+                58,
+                237,
+                0.2
+              );
+        }
+
+        .kairo-mark.small {
+          width: 31px;
+          height: 31px;
+          border-radius: 10px;
+        }
+
+        .kairo-mark-inner {
+          width: 100%;
+          height: 100%;
+          border-radius: inherit;
+          background: var(--bg);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+
+        .light .kairo-mark-inner {
+          background: white;
+        }
+
+        .kairo-mark-inner::after {
+          content: "";
+          width: 9px;
+          height: 9px;
+          border-radius: 50%;
+          background: white;
+          box-shadow:
+            0 0 14px white;
+        }
 
         .kairo-sidebar {
+          position: relative;
           width: 300px;
           height: 100%;
           flex-shrink: 0;
           background: var(--panel);
           border-right: 1px solid var(--line);
           backdrop-filter: blur(32px);
-          overflow: visible;
+          overflow: hidden;
           transition:
             width 0.3s ease,
             transform 0.3s ease;
@@ -1457,7 +1620,6 @@ export default function Home() {
         .kairo-sidebar.closed {
           width: 0;
           border-right: 0;
-          overflow: hidden;
         }
 
         .kairo-sidebar-inner {
@@ -1468,165 +1630,142 @@ export default function Home() {
         }
 
         .kairo-side-top {
-          padding: 22px 18px 15px;
+          padding: 18px 14px 12px;
+          flex-shrink: 0;
         }
 
         .kairo-brand-row {
           display: flex;
           align-items: center;
           justify-content: space-between;
+          gap: 10px;
+          margin-bottom: 16px;
         }
 
         .kairo-brand {
           display: flex;
           align-items: center;
-          gap: 11px;
-        }
-
-        .kairo-mark {
-          width: 42px;
-          height: 42px;
-          border-radius: 14px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          background:
-            linear-gradient(
-              135deg,
-              #8b5cf6,
-              #d946ef 48%,
-              #3b82f6
-            );
-          box-shadow:
-            0 10px 35px rgba(124, 58, 237, 0.3);
-          position: relative;
-        }
-
-        .kairo-mark-small {
-          width: 36px;
-          height: 36px;
-          border-radius: 12px;
-        }
-
-        .kairo-mark-ring {
-          width: 24px;
-          height: 24px;
-          border-radius: 50%;
-          border: 1px solid rgba(255, 255, 255, 0.65);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          box-shadow:
-            inset 0 0 14px rgba(255, 255, 255, 0.18);
-        }
-
-        .kairo-mark-dot {
-          width: 8px;
-          height: 8px;
-          border-radius: 50%;
-          background: white;
-          box-shadow:
-            0 0 15px white;
+          gap: 10px;
         }
 
         .kairo-brand-name {
-          font-size: 16px;
-          font-weight: 800;
-          letter-spacing: -0.04em;
+          font-size: 13px;
+          font-weight: 850;
+          letter-spacing: 0.12em;
         }
 
         .kairo-brand-sub {
           margin-top: 2px;
-          font-size: 9px;
           color: var(--muted2);
-          letter-spacing: 0.16em;
-          text-transform: uppercase;
+          font-size: 8px;
+          letter-spacing: 0.08em;
         }
 
         .kairo-icon-button {
-          width: 36px;
-          height: 36px;
-          border-radius: 11px;
+          width: 34px;
+          height: 34px;
+          border: 1px solid var(--line);
+          border-radius: 10px;
+          color: var(--muted);
+          background: var(--panel-soft);
           display: flex;
           align-items: center;
           justify-content: center;
-          color: var(--muted);
-          background: transparent;
-          border: 1px solid transparent;
-          transition: 0.2s ease;
         }
 
         .kairo-icon-button:hover {
           color: var(--text);
           background: var(--panel-hover);
-          border-color: var(--line);
         }
 
         .kairo-new-button {
           width: 100%;
-          height: 48px;
-          margin-top: 20px;
-          border: 1px solid rgba(139, 92, 246, 0.22);
-          border-radius: 15px;
+          min-height: 43px;
+          border: 1px solid
+            rgba(
+              139,
+              92,
+              246,
+              0.22
+            );
+          border-radius: 12px;
           color: white;
-          font-size: 13px;
-          font-weight: 700;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 9px;
           background:
             linear-gradient(
               135deg,
-              rgba(139, 92, 246, 0.95),
-              rgba(99, 102, 241, 0.9)
+              rgba(
+                139,
+                92,
+                246,
+                0.9
+              ),
+              rgba(
+                99,
+                102,
+                241,
+                0.9
+              )
             );
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          font-size: 11px;
+          font-weight: 700;
           box-shadow:
-            0 12px 32px rgba(99, 102, 241, 0.2);
-          transition:
-            transform 0.2s ease,
-            box-shadow 0.2s ease;
+            0 12px 35px
+              rgba(
+                99,
+                102,
+                241,
+                0.16
+              );
         }
 
-        .kairo-new-button:hover {
+        .kairo-new-button:hover:not(:disabled) {
           transform: translateY(-1px);
-          box-shadow:
-            0 16px 40px rgba(99, 102, 241, 0.3);
         }
 
         .kairo-new-button:disabled {
-          opacity: 0.45;
+          opacity: 0.35;
           cursor: not-allowed;
-          transform: none;
         }
 
         .kairo-history {
           flex: 1;
+          min-height: 0;
           overflow-y: auto;
-          padding: 6px 11px;
+          overflow-x: hidden;
+          padding: 6px 11px 16px;
         }
 
-        .kairo-history::-webkit-scrollbar,
-        .kairo-messages::-webkit-scrollbar {
-          width: 6px;
+        .kairo-history::-webkit-scrollbar {
+          width: 5px;
         }
 
-        .kairo-history::-webkit-scrollbar-thumb,
-        .kairo-messages::-webkit-scrollbar-thumb {
-          background: rgba(128, 135, 150, 0.22);
-          border-radius: 99px;
+        .kairo-history::-webkit-scrollbar-thumb {
+          background: var(--line);
+          border-radius: 20px;
         }
 
         .kairo-section-label {
-          padding: 13px 9px 9px;
           display: flex;
           align-items: center;
           justify-content: space-between;
-          font-size: 9px;
-          font-weight: 800;
-          letter-spacing: 0.16em;
+          padding: 10px 7px 8px;
           color: var(--muted2);
+          font-size: 8px;
+          font-weight: 800;
+          letter-spacing: 0.14em;
           text-transform: uppercase;
+        }
+
+        .kairo-empty-history {
+          padding: 35px 15px;
+          text-align: center;
+          color: var(--muted2);
+          font-size: 10px;
+          line-height: 1.7;
         }
 
         .kairo-chat {
@@ -1647,21 +1786,14 @@ export default function Home() {
         }
 
         .kairo-chat:hover {
-          background: var(--panel-hover);
           color: var(--text);
-          border-color: var(--line-soft);
+          background: var(--panel-soft);
         }
 
         .kairo-chat.active {
           color: var(--text);
-          background:
-            linear-gradient(
-              135deg,
-              rgba(139, 92, 246, 0.13),
-              rgba(99, 102, 241, 0.06)
-            );
-          border-color:
-            rgba(139, 92, 246, 0.2);
+          border-color: var(--line);
+          background: var(--panel-soft);
         }
 
         .kairo-chat-open {
@@ -1681,30 +1813,18 @@ export default function Home() {
         }
 
         .kairo-chat-icon {
-          width: 34px;
-          height: 34px;
-          border-radius: 11px;
           flex-shrink: 0;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          background: var(--panel-soft);
-          color: var(--muted2);
-        }
-
-        .kairo-chat.active .kairo-chat-icon {
-          color: #a78bfa;
-          background: rgba(139, 92, 246, 0.14);
         }
 
         .kairo-chat-title {
-          min-width: 0;
           flex: 1;
-          font-size: 12px;
-          font-weight: 550;
-          white-space: nowrap;
+          min-width: 0;
+          padding-right: 2px;
           overflow: hidden;
           text-overflow: ellipsis;
+          white-space: nowrap;
+          font-size: 11px;
+          font-weight: 550;
         }
 
         .kairo-chat-more {
@@ -1717,44 +1837,34 @@ export default function Home() {
           border-radius: 9px;
           color: var(--muted2);
           background: transparent;
-          opacity: 0;
           display: flex;
           align-items: center;
           justify-content: center;
-          transition: 0.18s ease;
-        }
-
-        .kairo-chat:hover .kairo-chat-more,
-        .kairo-chat-more:focus {
-          opacity: 1;
         }
 
         .kairo-chat-more:hover {
           color: var(--text);
-          background: var(--panel-soft);
+          background: var(--panel-hover);
         }
 
         .kairo-menu {
-          position: absolute;
-          right: 6px;
-          top: 47px;
-          z-index: 99999;
-          width: 170px;
+          position: fixed;
+          z-index: 999999;
+          width: 178px;
           padding: 5px;
           border: 1px solid var(--line);
           border-radius: 14px;
           background: var(--panel-solid);
           box-shadow:
-            0 25px 70px var(--shadow);
+            0 25px 70px
+              var(--shadow);
           backdrop-filter: blur(25px);
           pointer-events: auto;
         }
 
         .kairo-menu button {
-          position: relative;
-          z-index: 100000;
           width: 100%;
-          height: 36px;
+          min-height: 36px;
           padding: 0 10px;
           border: 0;
           border-radius: 9px;
@@ -1762,11 +1872,9 @@ export default function Home() {
           background: transparent;
           display: flex;
           align-items: center;
-          gap: 8px;
+          gap: 9px;
           text-align: left;
           font-size: 10px;
-          cursor: pointer;
-          pointer-events: auto;
         }
 
         .kairo-menu button:hover {
@@ -1774,32 +1882,26 @@ export default function Home() {
           background: var(--panel-hover);
         }
 
-        .kairo-menu .danger-item {
+        .kairo-menu button.danger-item {
           color: var(--danger);
         }
 
-        .kairo-menu .danger-item:hover {
-          color: #fff;
-          background: rgba(251, 113, 133, 0.12);
-        }
-
-        .kairo-empty-history {
-          margin: 7px 3px;
-          padding: 22px 14px;
-          border: 1px dashed var(--line);
-          border-radius: 16px;
-          text-align: center;
-          color: var(--muted2);
-          font-size: 11px;
-          line-height: 1.6;
+        .kairo-menu button.danger-item:hover {
+          background:
+            rgba(
+              251,
+              113,
+              133,
+              0.08
+            );
         }
 
         .kairo-archive-toggle {
           width: 100%;
-          margin-top: 12px;
-          padding: 8px;
+          margin-top: 8px;
+          padding: 11px 9px;
           border: 0;
-          border-radius: 13px;
+          border-top: 1px solid var(--line-soft);
           color: var(--muted);
           background: transparent;
           display: flex;
@@ -1809,106 +1911,103 @@ export default function Home() {
 
         .kairo-archive-toggle:hover {
           color: var(--text);
-          background: var(--panel-soft);
         }
 
         .kairo-archive-item {
-          padding: 11px 10px;
-          border-radius: 12px;
-        }
-
-        .kairo-archive-item:hover {
+          margin: 3px 0;
+          padding: 9px;
+          border-radius: 10px;
           background: var(--panel-soft);
         }
 
         .kairo-archive-name {
-          font-size: 11px;
-          color: var(--muted);
           overflow: hidden;
           text-overflow: ellipsis;
           white-space: nowrap;
+          font-size: 10px;
         }
 
         .kairo-archive-actions {
           display: flex;
-          gap: 13px;
+          gap: 6px;
           margin-top: 7px;
         }
 
         .kairo-archive-actions button {
+          padding: 4px 7px;
           border: 0;
-          padding: 0;
+          border-radius: 6px;
+          font-size: 8px;
           background: transparent;
-          font-size: 10px;
         }
 
-        .restore {
-          color: #60a5fa;
+        .kairo-archive-actions .restore {
+          color: #8b5cf6;
         }
 
-        .delete {
-          color: #fb7185;
+        .kairo-archive-actions .delete {
+          color: var(--danger);
         }
 
         .kairo-side-bottom {
-          padding: 14px;
+          flex-shrink: 0;
+          padding: 11px;
+          border-top: 1px solid var(--line);
         }
 
         .kairo-account-card {
-          padding: 13px;
+          padding: 11px;
           border: 1px solid var(--line);
-          border-radius: 17px;
+          border-radius: 14px;
           background: var(--panel-soft);
         }
 
         .kairo-account-row {
           display: flex;
           align-items: center;
-          gap: 10px;
+          gap: 9px;
         }
 
         .kairo-account-avatar {
-          width: 34px;
-          height: 34px;
-          border-radius: 11px;
+          width: 32px;
+          height: 32px;
+          flex-shrink: 0;
           display: flex;
           align-items: center;
           justify-content: center;
-          background:
-            linear-gradient(
-              135deg,
-              rgba(139, 92, 246, 0.2),
-              rgba(59, 130, 246, 0.12)
-            );
         }
 
         .kairo-account-title {
-          font-size: 11px;
-          font-weight: 700;
+          font-size: 10px;
+          font-weight: 800;
         }
 
         .kairo-account-sub {
-          font-size: 9px;
-          color: var(--muted2);
           margin-top: 2px;
+          color: var(--muted2);
+          font-size: 8px;
         }
 
         .kairo-online {
-          margin-left: auto;
           width: 7px;
           height: 7px;
+          margin-left: auto;
           border-radius: 50%;
-          background: var(--green);
+          background: #34d399;
           box-shadow:
-            0 0 12px rgba(52, 211, 153, 0.7);
+            0 0 10px
+              rgba(
+                52,
+                211,
+                153,
+                0.7
+              );
         }
 
-        /* MAIN */
-
         .kairo-main {
-          min-width: 0;
           flex: 1;
-          height: 100%;
+          min-width: 0;
+          min-height: 0;
           display: flex;
           flex-direction: column;
         }
@@ -1920,19 +2019,31 @@ export default function Home() {
           align-items: center;
           padding: 0 20px;
           border-bottom: 1px solid var(--line);
-          background: rgba(5, 6, 8, 0.4);
+          background:
+            rgba(
+              5,
+              6,
+              8,
+              0.4
+            );
           backdrop-filter: blur(30px);
           z-index: 20;
         }
 
         .light .kairo-topbar {
-          background: rgba(255, 255, 255, 0.65);
+          background:
+            rgba(
+              255,
+              255,
+              255,
+              0.58
+            );
         }
 
         .kairo-topbar-left {
           display: flex;
           align-items: center;
-          gap: 11px;
+          gap: 10px;
           min-width: 0;
         }
 
@@ -1941,65 +2052,246 @@ export default function Home() {
         }
 
         .kairo-topbar-name {
-          font-size: 13px;
-          font-weight: 750;
-          letter-spacing: -0.02em;
+          font-size: 11px;
+          font-weight: 850;
+          letter-spacing: 0.08em;
         }
 
         .kairo-topbar-status {
-          display: flex;
-          align-items: center;
-          gap: 5px;
+          margin-top: 3px;
           color: var(--muted2);
-          font-size: 9px;
-          margin-top: 2px;
+          font-size: 8px;
         }
 
         .status-dot {
+          display: inline-block;
           width: 5px;
           height: 5px;
+          margin-right: 4px;
           border-radius: 50%;
-          background: var(--green);
+          background: #34d399;
           box-shadow:
-            0 0 9px rgba(52, 211, 153, 0.8);
+            0 0 8px
+              rgba(
+                52,
+                211,
+                153,
+                0.65
+              );
         }
 
         .kairo-topbar-actions {
           margin-left: auto;
           display: flex;
+          align-items: center;
           gap: 7px;
         }
 
         .kairo-top-action {
           width: 38px;
           height: 38px;
-          border-radius: 12px;
+          flex-shrink: 0;
           border: 1px solid var(--line);
+          border-radius: 11px;
           color: var(--muted);
           background: var(--panel-soft);
           display: flex;
           align-items: center;
           justify-content: center;
-          transition: 0.2s ease;
         }
 
         .kairo-top-action:hover {
           color: var(--text);
           background: var(--panel-hover);
-          transform: translateY(-1px);
+        }
+
+        /* AGENT SELECTOR */
+
+        .kairo-agent-selector {
+          position: relative;
+          z-index: 100;
+        }
+
+        .kairo-agent-button {
+          min-width: 150px;
+          height: 38px;
+          padding: 0 10px;
+          border: 1px solid var(--line);
+          border-radius: 11px;
+          color: var(--text);
+          background: var(--panel-soft);
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+
+        .kairo-agent-button:hover,
+        .kairo-agent-button.active {
+          border-color:
+            rgba(
+              139,
+              92,
+              246,
+              0.3
+            );
+          background: var(--panel-hover);
+        }
+
+        .kairo-agent-icon {
+          color: #a78bfa;
+          font-size: 14px;
+        }
+
+        .kairo-agent-label {
+          flex: 1;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          text-align: left;
+          font-size: 9px;
+          font-weight: 750;
+        }
+
+        .kairo-agent-chevron {
+          color: var(--muted2);
+          font-size: 12px;
+        }
+
+        .kairo-agent-dropdown {
+          position: absolute;
+          top: calc(100% + 8px);
+          right: 0;
+          width: 245px;
+          padding: 7px;
+          border: 1px solid var(--line);
+          border-radius: 15px;
+          background: var(--panel-solid);
+          box-shadow:
+            0 25px 70px
+              var(--shadow);
+          backdrop-filter: blur(25px);
+          z-index: 99999;
+        }
+
+        .kairo-agent-dropdown-title {
+          padding: 7px 9px 8px;
+          color: var(--muted2);
+          font-size: 7px;
+          font-weight: 850;
+          letter-spacing: 0.16em;
+        }
+
+        .kairo-agent-option {
+          width: 100%;
+          min-height: 48px;
+          padding: 7px 8px;
+          border: 1px solid transparent;
+          border-radius: 10px;
+          color: var(--muted);
+          background: transparent;
+          display: flex;
+          align-items: center;
+          gap: 9px;
+          text-align: left;
+        }
+
+        .kairo-agent-option:hover,
+        .kairo-agent-option.selected {
+          color: var(--text);
+          border-color:
+            rgba(
+              139,
+              92,
+              246,
+              0.16
+            );
+          background:
+            rgba(
+              139,
+              92,
+              246,
+              0.07
+            );
+        }
+
+        .kairo-agent-option-icon {
+          width: 29px;
+          height: 29px;
+          flex-shrink: 0;
+          border-radius: 9px;
+          color: #a78bfa;
+          background:
+            rgba(
+              139,
+              92,
+              246,
+              0.1
+            );
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+
+        .kairo-agent-option > span:nth-child(2) {
+          min-width: 0;
+          flex: 1;
+        }
+
+        .kairo-agent-option strong {
+          display: block;
+          font-size: 9px;
+          font-weight: 750;
+        }
+
+        .kairo-agent-option small {
+          display: block;
+          margin-top: 3px;
+          color: var(--muted2);
+          font-size: 7px;
+        }
+
+        .kairo-agent-check {
+          color: #a78bfa;
+          font-size: 12px;
+          font-weight: 800;
+        }
+
+        .kairo-agent-divider {
+          height: 1px;
+          margin: 5px 2px;
+          background: var(--line-soft);
+        }
+
+        .kairo-agent-coming {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          padding: 9px;
+          color: var(--muted2);
+          font-size: 8px;
         }
 
         .kairo-messages {
           flex: 1;
           min-height: 0;
           overflow-y: auto;
+          overflow-x: hidden;
         }
 
+        .kairo-messages::-webkit-scrollbar {
+          width: 6px;
+        }
+
+        .kairo-messages::-webkit-scrollbar-thumb {
+          background: var(--line);
+          border-radius: 20px;
+        }
+
+        /* WELCOME */
+
         .kairo-welcome {
-          width: min(980px, 100%);
           min-height: 100%;
-          margin: auto;
-          padding: 55px 24px 35px;
+          padding: 55px 20px 35px;
           display: flex;
           flex-direction: column;
           align-items: center;
@@ -2007,45 +2299,51 @@ export default function Home() {
         }
 
         .kairo-welcome-badge {
-          display: inline-flex;
-          align-items: center;
-          gap: 7px;
-          padding: 7px 11px;
-          border-radius: 999px;
+          margin-top: 22px;
+          padding: 6px 10px;
           border: 1px solid var(--line);
+          border-radius: 999px;
+          color: var(--muted2);
           background: var(--panel-soft);
-          color: var(--muted);
-          font-size: 9px;
-          font-weight: 700;
-          letter-spacing: 0.07em;
+          font-size: 8px;
         }
 
         .badge-dot {
-          width: 6px;
-          height: 6px;
+          display: inline-block;
+          width: 5px;
+          height: 5px;
+          margin-right: 6px;
           border-radius: 50%;
-          background: #a78bfa;
-          box-shadow:
-            0 0 12px rgba(167, 139, 250, 0.8);
+          background: #34d399;
         }
 
         .kairo-welcome-orb {
-          width: 108px;
-          height: 108px;
-          margin-bottom: 27px;
-          border-radius: 31px;
+          width: 70px;
+          height: 70px;
+          border-radius: 50%;
+          padding: 4px;
           display: flex;
           align-items: center;
           justify-content: center;
           background:
-            linear-gradient(
-              145deg,
-              rgba(255, 255, 255, 0.08),
-              rgba(255, 255, 255, 0.018)
+            radial-gradient(
+              circle,
+              rgba(
+                139,
+                92,
+                246,
+                0.2
+              ),
+              transparent 65%
             );
-          border: 1px solid var(--line);
           box-shadow:
-            0 30px 90px rgba(0, 0, 0, 0.25);
+            0 25px 75px
+              rgba(
+                0,
+                0,
+                0,
+                0.2
+              );
         }
 
         .light .kairo-welcome-orb {
@@ -2056,7 +2354,13 @@ export default function Home() {
               #f1f3f8
             );
           box-shadow:
-            0 25px 75px rgba(45, 55, 75, 0.1);
+            0 25px 75px
+              rgba(
+                45,
+                55,
+                75,
+                0.1
+              );
         }
 
         .kairo-orb-inner {
@@ -2101,7 +2405,11 @@ export default function Home() {
 
         .kairo-welcome-title {
           margin: 18px 0 0;
-          font-size: clamp(43px, 7vw, 78px);
+          font-size: clamp(
+            43px,
+            7vw,
+            78px
+          );
           line-height: 0.95;
           font-weight: 850;
           letter-spacing: -0.075em;
@@ -2122,7 +2430,7 @@ export default function Home() {
         }
 
         .kairo-welcome-copy {
-          max-width: 590px;
+          max-width: 680px;
           margin: 20px auto 0;
           text-align: center;
           font-size: 14px;
@@ -2177,7 +2485,12 @@ export default function Home() {
         .kairo-prompt:hover {
           transform: translateY(-4px);
           border-color:
-            rgba(139, 92, 246, 0.3);
+            rgba(
+              139,
+              92,
+              246,
+              0.3
+            );
           background: var(--panel-hover);
         }
 
@@ -2190,7 +2503,12 @@ export default function Home() {
           justify-content: center;
           color: #a78bfa;
           background:
-            rgba(139, 92, 246, 0.1);
+            rgba(
+              139,
+              92,
+              246,
+              0.1
+            );
           margin-bottom: 25px;
         }
 
@@ -2239,17 +2557,35 @@ export default function Home() {
         }
 
         .kairo-user-bubble {
-          max-width: min(720px, 85%);
+          max-width: min(
+            720px,
+            85%
+          );
           padding: 14px 17px;
           border-radius:
             20px 20px 6px 20px;
           border: 1px solid
-            rgba(139, 92, 246, 0.22);
+            rgba(
+              139,
+              92,
+              246,
+              0.22
+            );
           background:
             linear-gradient(
               135deg,
-              rgba(139, 92, 246, 0.16),
-              rgba(99, 102, 241, 0.1)
+              rgba(
+                139,
+                92,
+                246,
+                0.16
+              ),
+              rgba(
+                99,
+                102,
+                241,
+                0.1
+              )
             );
           box-shadow:
             0 12px 40px var(--shadow);
@@ -2265,7 +2601,12 @@ export default function Home() {
           border-color: #ded7f5;
           box-shadow:
             0 10px 30px
-              rgba(45, 55, 80, 0.06);
+              rgba(
+                45,
+                55,
+                80,
+                0.06
+              );
         }
 
         .kairo-message-text,
@@ -2299,7 +2640,12 @@ export default function Home() {
             );
           box-shadow:
             0 9px 25px
-              rgba(124, 58, 237, 0.2);
+              rgba(
+                124,
+                58,
+                237,
+                0.2
+              );
         }
 
         .kairo-assistant-mark-inner {
@@ -2334,9 +2680,19 @@ export default function Home() {
           border-radius: 6px;
           color: #a78bfa;
           background:
-            rgba(139, 92, 246, 0.09);
+            rgba(
+              139,
+              92,
+              246,
+              0.09
+            );
           border: 1px solid
-            rgba(139, 92, 246, 0.12);
+            rgba(
+              139,
+              92,
+              246,
+              0.12
+            );
           font-size: 7px;
           font-weight: 800;
           letter-spacing: 0.1em;
@@ -2430,7 +2786,12 @@ export default function Home() {
           justify-content: center;
           color: #a78bfa;
           background:
-            rgba(139, 92, 246, 0.1);
+            rgba(
+              139,
+              92,
+              246,
+              0.1
+            );
         }
 
         .kairo-file-info {
@@ -2477,10 +2838,20 @@ export default function Home() {
           padding: 9px 12px;
           margin-bottom: 7px;
           border: 1px solid
-            rgba(139, 92, 246, 0.2);
+            rgba(
+              139,
+              92,
+              246,
+              0.2
+            );
           border-radius: 13px;
           background:
-            rgba(139, 92, 246, 0.07);
+            rgba(
+              139,
+              92,
+              246,
+              0.07
+            );
           font-size: 10px;
         }
 
@@ -2530,7 +2901,12 @@ export default function Home() {
           border-radius: 8px;
           color: #a78bfa;
           background:
-            rgba(139, 92, 246, 0.1);
+            rgba(
+              139,
+              92,
+              246,
+              0.1
+            );
         }
 
         .kairo-pending-name {
@@ -2561,7 +2937,12 @@ export default function Home() {
         .kairo-remove:hover {
           color: var(--danger);
           background:
-            rgba(251, 113, 133, 0.08);
+            rgba(
+              251,
+              113,
+              133,
+              0.08
+            );
         }
 
         .kairo-composer {
@@ -2580,11 +2961,21 @@ export default function Home() {
 
         .kairo-composer:focus-within {
           border-color:
-            rgba(139, 92, 246, 0.32);
+            rgba(
+              139,
+              92,
+              246,
+              0.32
+            );
           box-shadow:
             0 20px 70px var(--shadow),
             0 0 0 3px
-              rgba(139, 92, 246, 0.055);
+              rgba(
+                139,
+                92,
+                246,
+                0.055
+              );
         }
 
         .kairo-tool {
@@ -2707,7 +3098,12 @@ export default function Home() {
             bottom: 0;
             box-shadow:
               20px 0 60px
-                rgba(0, 0, 0, 0.35);
+                rgba(
+                  0,
+                  0,
+                  0,
+                  0.35
+                );
           }
 
           .kairo-sidebar.closed {
@@ -2716,8 +3112,7 @@ export default function Home() {
           }
 
           .kairo-prompts {
-            grid-template-columns:
-              1fr;
+            grid-template-columns: 1fr;
           }
 
           .kairo-welcome {
@@ -2743,6 +3138,23 @@ export default function Home() {
 
           .kairo-topbar-status {
             display: none;
+          }
+
+          .kairo-agent-button {
+            min-width: 40px;
+            width: 40px;
+            padding: 0;
+            justify-content: center;
+          }
+
+          .kairo-agent-label,
+          .kairo-agent-chevron {
+            display: none;
+          }
+
+          .kairo-agent-dropdown {
+            right: -5px;
+            width: 235px;
           }
 
           .kairo-welcome-title {
@@ -2812,7 +3224,7 @@ export default function Home() {
               className="kairo-new-button"
               disabled={!authReady}
               onClick={() =>
-                createChat()
+                void createChat()
               }
             >
               <Icon size={16}>
@@ -2835,8 +3247,7 @@ export default function Home() {
               </span>
             </div>
 
-            {activeChats.length ===
-              0 && (
+            {activeChats.length === 0 && (
               <div className="kairo-empty-history">
                 <Icon size={20}>
                   <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4Z" />
@@ -2867,7 +3278,7 @@ export default function Home() {
                   <button
                     className="kairo-chat-open"
                     onClick={() =>
-                      openChat(
+                      void openChat(
                         chat.id
                       )
                     }
@@ -2886,18 +3297,12 @@ export default function Home() {
 
                   <button
                     className="kairo-chat-more"
-                    onClick={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-
-                      setMenuOpen(
-                        (current) =>
-                          current ===
-                          chat.id
-                            ? null
-                            : chat.id
-                      );
-                    }}
+                    onClick={(event) =>
+                      openChatMenu(
+                        event,
+                        chat.id
+                      )
+                    }
                     title="Options"
                     aria-label="Conversation options"
                   >
@@ -2922,66 +3327,6 @@ export default function Home() {
                       />
                     </Icon>
                   </button>
-
-                  {menuOpen ===
-                    chat.id && (
-                    <div
-                      className="kairo-menu"
-                      onClick={(event) =>
-                        event.stopPropagation()
-                      }
-                    >
-                      <button
-                        onClick={() =>
-                          renameChat(
-                            chat.id
-                          )
-                        }
-                      >
-                        <Icon size={14}>
-                          <path d="M12 20h9" />
-                          <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z" />
-                        </Icon>
-
-                        Rename
-                      </button>
-
-                      <button
-                        onClick={() =>
-                          archiveChat(
-                            chat.id
-                          )
-                        }
-                      >
-                        <Icon size={14}>
-                          <path d="M4 7h16" />
-                          <path d="M6 7v11a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7" />
-                          <path d="M8 4h8l1 3H7l1-3Z" />
-                        </Icon>
-
-                        Archive
-                      </button>
-
-                      <button
-                        className="danger-item"
-                        onClick={() =>
-                          deleteChat(
-                            chat.id
-                          )
-                        }
-                      >
-                        <Icon size={14}>
-                          <path d="M3 6h18" />
-                          <path d="M8 6V4h8v2" />
-                          <path d="M19 6l-1 14H6L5 6" />
-                          <path d="M10 11v5" />
-                          <path d="M14 11v5" />
-                        </Icon>
-
-                        Delete
-                      </button>
-                    </div>
-                  )}
                 </div>
               )
             )}
@@ -3045,16 +3390,14 @@ export default function Home() {
                         className="kairo-archive-item"
                       >
                         <div className="kairo-archive-name">
-                          {
-                            chat.title
-                          }
+                          {chat.title}
                         </div>
 
                         <div className="kairo-archive-actions">
                           <button
                             className="restore"
                             onClick={() =>
-                              restoreChat(
+                              void restoreChat(
                                 chat.id
                               )
                             }
@@ -3065,7 +3408,7 @@ export default function Home() {
                           <button
                             className="delete"
                             onClick={() =>
-                              deleteChat(
+                              void deleteChat(
                                 chat.id
                               )
                             }
@@ -3175,11 +3518,144 @@ export default function Home() {
               )}
             </button>
 
+            {/* AGENT SELECTOR */}
+
+            <div
+              className="kairo-agent-selector"
+              onClick={(event) =>
+                event.stopPropagation()
+              }
+            >
+              <button
+                type="button"
+                className={`kairo-agent-button ${
+                  agentOpen
+                    ? "active"
+                    : ""
+                }`}
+                onClick={() =>
+                  setAgentOpen(
+                    (previous) =>
+                      !previous
+                  )
+                }
+                aria-expanded={
+                  agentOpen
+                }
+              >
+                <span className="kairo-agent-icon">
+                  ✦
+                </span>
+
+                <span className="kairo-agent-label">
+                  {selectedAgent}
+                </span>
+
+                <span className="kairo-agent-chevron">
+                  {agentOpen
+                    ? "⌃"
+                    : "⌄"}
+                </span>
+              </button>
+
+              {agentOpen && (
+                <div className="kairo-agent-dropdown">
+                  <div className="kairo-agent-dropdown-title">
+                    SELECT AGENT
+                  </div>
+
+                  <button
+                    type="button"
+                    className={`kairo-agent-option ${
+                      selectedAgent ===
+                      "Kairo AI"
+                        ? "selected"
+                        : ""
+                    }`}
+                    onClick={() =>
+                      selectAgent(
+                        "Kairo AI"
+                      )
+                    }
+                  >
+                    <span className="kairo-agent-option-icon">
+                      ✦
+                    </span>
+
+                    <span>
+                      <strong>
+                        Kairo AI
+                      </strong>
+
+                      <small>
+                        General AI assistant
+                      </small>
+                    </span>
+
+                    {selectedAgent ===
+                      "Kairo AI" && (
+                      <span className="kairo-agent-check">
+                        ✓
+                      </span>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    className={`kairo-agent-option ${
+                      selectedAgent ===
+                      "Website Builder"
+                        ? "selected"
+                        : ""
+                    }`}
+                    onClick={() =>
+                      selectAgent(
+                        "Website Builder"
+                      )
+                    }
+                  >
+                    <span className="kairo-agent-option-icon">
+                      ⌘
+                    </span>
+
+                    <span>
+                      <strong>
+                        Website Builder
+                      </strong>
+
+                      <small>
+                        Build websites with Kairo
+                      </small>
+                    </span>
+
+                    {selectedAgent ===
+                      "Website Builder" && (
+                      <span className="kairo-agent-check">
+                        ✓
+                      </span>
+                    )}
+                  </button>
+
+                  <div className="kairo-agent-divider" />
+
+                  <div className="kairo-agent-coming">
+                    <span>
+                      ◈
+                    </span>
+
+                    <span>
+                      More agents coming soon
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+
             <button
               className="kairo-top-action"
               disabled={!authReady}
               onClick={() =>
-                createChat()
+                void createChat()
               }
               title="New conversation"
             >
@@ -3192,8 +3668,7 @@ export default function Home() {
         </header>
 
         <div className="kairo-messages">
-          {messages.length ===
-          0 ? (
+          {messages.length === 0 ? (
             <div className="kairo-welcome">
               <div className="kairo-welcome-orb">
                 <div className="kairo-orb-inner">
@@ -3216,10 +3691,12 @@ export default function Home() {
               </h1>
 
               <p className="kairo-welcome-copy">
-                Think, build, learn and create
-                with an intelligent AI companion
-                designed to turn your ideas into
-                action.
+                Kairo AI is your intelligent
+                AI companion for chatting,
+                learning, brainstorming,
+                writing code, analyzing
+                information, and getting
+                things done.
               </p>
 
               <div className="kairo-pills">
@@ -3425,8 +3902,7 @@ export default function Home() {
                                 "flex",
                               justifyContent:
                                 "flex-end",
-                              marginTop:
-                                6,
+                              marginTop: 6,
                             }}
                           >
                             <button
@@ -3437,9 +3913,7 @@ export default function Home() {
                                 )
                               }
                             >
-                              <Icon
-                                size={12}
-                              >
+                              <Icon size={12}>
                                 <path d="M12 20h9" />
                                 <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z" />
                               </Icon>
@@ -3509,11 +3983,7 @@ export default function Home() {
                                     key={`${file.name}-${index}`}
                                   >
                                     <div className="kairo-file-icon">
-                                      <Icon
-                                        size={
-                                          15
-                                        }
-                                      >
+                                      <Icon size={15}>
                                         <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
                                       </Icon>
                                     </div>
@@ -3552,11 +4022,7 @@ export default function Home() {
                                     )
                                   }
                                 >
-                                  <Icon
-                                    size={
-                                      12
-                                    }
-                                  >
+                                  <Icon size={12}>
                                     <rect
                                       x="9"
                                       y="9"
@@ -3576,16 +4042,12 @@ export default function Home() {
                                     loading
                                   }
                                   onClick={() =>
-                                    regenerate(
+                                    void regenerate(
                                       message
                                     )
                                   }
                                 >
-                                  <Icon
-                                    size={
-                                      12
-                                    }
-                                  >
+                                  <Icon size={12}>
                                     <path d="M20 11a8.1 8.1 0 0 0-15.5-2M4 5v4h4" />
                                     <path d="M4 13a8.1 8.1 0 0 0 15.5 2M20 19v-4h-4" />
                                   </Icon>
@@ -3729,7 +4191,7 @@ export default function Home() {
                 hidden
                 accept="image/*,video/*,.pdf,.txt,.csv,.json,.doc,.docx,.xls,.xlsx,.zip"
                 onChange={(event) =>
-                  uploadFiles(
+                  void uploadFiles(
                     event.target.files
                   )
                 }
@@ -3745,7 +4207,7 @@ export default function Home() {
                   directory: "",
                 } as any)}
                 onChange={(event) =>
-                  uploadFiles(
+                  void uploadFiles(
                     event.target.files
                   )
                 }
@@ -3785,7 +4247,7 @@ export default function Home() {
                       0)
                 }
                 onClick={() =>
-                  sendMessage()
+                  void sendMessage()
                 }
                 title="Send"
               >
@@ -3818,13 +4280,82 @@ export default function Home() {
 
             <div className="kairo-disclaimer">
               <span>✦</span>
-              KAIRO can make mistakes. Check
-              important information.
+
+              KAIRO can make mistakes.
+              Check important
+              information.
+
               <span>✦</span>
             </div>
           </div>
         </div>
       </section>
+
+      {/* CHAT MENU PORTAL-LIKE FIXED MENU */}
+
+      {menuOpen &&
+        menuPosition && (
+          <div
+            className="kairo-menu"
+            style={{
+              top: menuPosition.top,
+              left: menuPosition.left,
+            }}
+            onClick={(event) =>
+              event.stopPropagation()
+            }
+          >
+            <button
+              onClick={() =>
+                void renameChat(
+                  menuOpen
+                )
+              }
+            >
+              <Icon size={14}>
+                <path d="M12 20h9" />
+                <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z" />
+              </Icon>
+
+              Rename
+            </button>
+
+            <button
+              onClick={() =>
+                void archiveChat(
+                  menuOpen
+                )
+              }
+            >
+              <Icon size={14}>
+                <path d="M4 7h16" />
+                <path d="M6 7v11a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7" />
+                <path d="M8 4h8l1 3H7l1-3Z" />
+              </Icon>
+
+              Archive
+            </button>
+
+            <button
+              className="danger-item"
+              onClick={() =>
+                void deleteChat(
+                  menuOpen
+                )
+              }
+            >
+              <Icon size={14}>
+                <path d="M3 6h18" />
+                <path d="M8 6V4h8v2" />
+                <path d="M19 6l-1 14H6L5 6" />
+                <path d="M10 11v5" />
+                <path d="M14 11v5" />
+              </Icon>
+
+              Delete
+            </button>
+          </div>
+        )}
     </div>
   );
 }
