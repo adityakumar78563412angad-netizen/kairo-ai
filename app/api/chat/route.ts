@@ -32,8 +32,7 @@ export async function POST(req: Request) {
     if (!apiKey) {
       return NextResponse.json(
         {
-          error:
-            "GROQ_API_KEY is missing. Check your .env.local file.",
+          error: "GROQ_API_KEY is missing. Check your .env.local file.",
         },
         { status: 500 }
       );
@@ -57,15 +56,38 @@ export async function POST(req: Request) {
           messages: [
             {
               role: "system",
-              content:
-                "You are KAIRO, a helpful, intelligent and friendly AI assistant. Answer the user's question clearly and naturally. If the user speaks Hindi or Hinglish, respond in Hindi or Hinglish.",
+              content: `
+You are KAIRO, a helpful, intelligent, friendly and natural AI assistant.
+
+RESPONSE LENGTH RULES:
+- Always match the length of your answer to the user's question.
+- For simple or short questions, give a short and direct answer.
+- Do not give long explanations unless the user asks for detail.
+- If the user asks a yes/no question, answer directly first.
+- If the user asks for a simple fact, answer in 1-3 sentences when possible.
+- For casual conversation, respond naturally and briefly.
+- For normal questions, provide a clear and reasonably detailed answer.
+- Only give long, comprehensive answers when the user explicitly asks for detailed, complete, deep, step-by-step, or extensive information.
+- Never add unnecessary introductions, conclusions, repetition, or filler.
+- Do not repeat information the user already knows.
+- Do not create unnecessary headings or bullet points for very simple questions.
+
+LANGUAGE:
+- If the user speaks Hindi, respond in Hindi.
+- If the user speaks Hinglish, respond in natural Hinglish.
+- If the user speaks English, respond in English.
+- Match the user's tone naturally.
+
+IMPORTANT:
+Be concise by default, but never omit important information needed to correctly answer the question.
+`,
             },
             ...messages,
           ],
 
-          temperature: 0.7,
+          temperature: 0.5,
 
-          max_completion_tokens: 4096,
+          max_completion_tokens: 2048,
 
           reasoning_effort: "low",
 
@@ -143,9 +165,7 @@ export async function POST(req: Request) {
                 continue;
               }
 
-              const data = trimmed
-                .slice(5)
-                .trim();
+              const data = trimmed.slice(5).trim();
 
               if (!data || data === "[DONE]") {
                 continue;
@@ -154,11 +174,9 @@ export async function POST(req: Request) {
               try {
                 const parsed = JSON.parse(data);
 
-                const choice =
-                  parsed?.choices?.[0];
+                const choice = parsed?.choices?.[0];
 
-                const text =
-                  choice?.delta?.content;
+                const text = choice?.delta?.content;
 
                 if (
                   typeof text === "string" &&
