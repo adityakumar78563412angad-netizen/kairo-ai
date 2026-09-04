@@ -7,6 +7,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
+
 import { createClient } from "@/lib/supabase";
 
 type Attachment = {
@@ -79,10 +80,14 @@ function KairoMark({ small = false }: { small?: boolean }) {
 
 function formatFileSize(size = 0) {
   if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024)
+
+  if (size < 1024 * 1024) {
     return `${(size / 1024).toFixed(1)} KB`;
-  if (size < 1024 * 1024 * 1024)
+  }
+
+  if (size < 1024 * 1024 * 1024) {
     return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+  }
 
   return `${(
     size /
@@ -93,23 +98,34 @@ function formatFileSize(size = 0) {
 function getFileIcon(type: string, name: string) {
   if (type.startsWith("image/")) return "image";
   if (type.startsWith("video/")) return "video";
-  if (type.includes("pdf") || name.endsWith(".pdf"))
+
+  if (
+    type.includes("pdf") ||
+    name.toLowerCase().endsWith(".pdf")
+  ) {
     return "pdf";
+  }
+
   if (
     type.includes("zip") ||
     type.includes("compressed")
-  )
+  ) {
     return "zip";
+  }
+
   if (
     type.includes("spreadsheet") ||
     /\.(xls|xlsx|csv)$/i.test(name)
-  )
+  ) {
     return "sheet";
+  }
+
   if (
     type.includes("word") ||
     /\.(doc|docx)$/i.test(name)
-  )
+  ) {
     return "doc";
+  }
 
   return "file";
 }
@@ -120,6 +136,7 @@ export default function Home() {
 
   const [chats, setChats] = useState<Chat[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
+
   const [activeChat, setActiveChat] =
     useState<string | null>(null);
 
@@ -129,11 +146,13 @@ export default function Home() {
   const [sidebar, setSidebar] = useState(true);
   const [archiveOpen, setArchiveOpen] =
     useState(false);
+
   const [menuOpen, setMenuOpen] =
     useState<string | null>(null);
 
   const [attachments, setAttachments] =
     useState<Attachment[]>([]);
+
   const [uploading, setUploading] =
     useState(false);
 
@@ -300,6 +319,7 @@ export default function Home() {
         "Load chats:",
         error
       );
+
       return;
     }
 
@@ -340,8 +360,7 @@ export default function Home() {
     setChats((previous) => [
       data,
       ...previous.filter(
-        (chat) =>
-          chat.id !== data.id
+        (chat) => chat.id !== data.id
       ),
     ]);
 
@@ -411,6 +430,7 @@ export default function Home() {
     if (!name?.trim()) return;
 
     const cleanName = name.trim();
+
     const now =
       new Date().toISOString();
 
@@ -428,6 +448,7 @@ export default function Home() {
         "Couldn't rename chat:\n\n" +
           error.message
       );
+
       return;
     }
 
@@ -464,6 +485,7 @@ export default function Home() {
         "Couldn't archive chat:\n\n" +
           error.message
       );
+
       return;
     }
 
@@ -505,6 +527,7 @@ export default function Home() {
         "Couldn't restore chat:\n\n" +
           error.message
       );
+
       return;
     }
 
@@ -540,13 +563,13 @@ export default function Home() {
         "Couldn't delete chat:\n\n" +
           error.message
       );
+
       return;
     }
 
     setChats((previous) =>
       previous.filter(
-        (chat) =>
-          chat.id !== id
+        (chat) => chat.id !== id
       )
     );
 
@@ -566,8 +589,9 @@ export default function Home() {
   async function uploadFiles(
     files: FileList | null
   ) {
-    if (!files || files.length === 0)
+    if (!files || files.length === 0) {
       return;
+    }
 
     const currentUser =
       await ensureUser();
@@ -579,9 +603,7 @@ export default function Home() {
     try {
       const uploaded: Attachment[] = [];
 
-      for (const file of Array.from(
-        files
-      )) {
+      for (const file of Array.from(files)) {
         try {
           const formData =
             new FormData();
@@ -598,9 +620,11 @@ export default function Home() {
 
           formData.append(
             "relativePath",
-            (file as File & {
-              webkitRelativePath?: string;
-            }).webkitRelativePath ||
+            (
+              file as File & {
+                webkitRelativePath?: string;
+              }
+            ).webkitRelativePath ||
               file.name
           );
 
@@ -710,14 +734,13 @@ export default function Home() {
               "application/json",
           },
           body: JSON.stringify({
-            messages:
-              history.map(
-                (message) => ({
-                  role: message.role,
-                  content:
-                    message.content,
-                })
-              ),
+            messages: history.map(
+              (message) => ({
+                role: message.role,
+                content:
+                  message.content,
+              })
+            ),
             attachments:
               currentAttachments,
           }),
@@ -868,8 +891,7 @@ export default function Home() {
 
       setMessages((previous) =>
         previous.map((message) =>
-          message.id ===
-          assistantId
+          message.id === assistantId
             ? {
                 ...message,
                 content:
@@ -889,8 +911,9 @@ export default function Home() {
   // ============================================================
 
   async function sendMessage() {
-    if (loading || uploading)
+    if (loading || uploading) {
       return;
+    }
 
     const text =
       input.trim();
@@ -910,7 +933,10 @@ export default function Home() {
     setLoading(true);
 
     try {
+      // ========================================================
       // EDIT MODE
+      // ========================================================
+
       if (editingId) {
         const editedIndex =
           messages.findIndex(
@@ -999,6 +1025,10 @@ export default function Home() {
           return;
         }
       }
+
+      // ========================================================
+      // NORMAL MESSAGE
+      // ========================================================
 
       let chatId =
         activeChat;
@@ -1204,31 +1234,29 @@ export default function Home() {
     setEditingId(message.id);
     setInput(message.content);
 
-    if (
-      message.attachments
-    ) {
+    if (message.attachments) {
       setAttachments(
         message.attachments
       );
     }
 
- setTimeout(() => {
-  const textarea = document.querySelector(
-    ".kairo-textarea"
-  ) as HTMLTextAreaElement | null;
+    setTimeout(() => {
+      const textarea =
+        document.querySelector(
+          ".kairo-textarea"
+        ) as HTMLTextAreaElement | null;
 
-  if (textarea) {
-    textarea.focus();
+      if (textarea) {
+        textarea.focus();
+      }
+    }, 50);
   }
-}, 50);
-}
 
-function cancelEdit() {
-  setEditingId(null);
-  setInput("");
-  setAttachments([]);
-}
-   
+  function cancelEdit() {
+    setEditingId(null);
+    setInput("");
+    setAttachments([]);
+  }
 
   async function regenerate(
     message: Message
@@ -1242,8 +1270,9 @@ function cancelEdit() {
           item.id === message.id
       );
 
-    if (assistantIndex === -1)
+    if (assistantIndex === -1) {
       return;
+    }
 
     const previousMessages =
       messages.slice(
@@ -1270,6 +1299,7 @@ function cancelEdit() {
     }
 
     setLoading(true);
+
     setMessages(
       previousMessages
     );
@@ -3836,10 +3866,8 @@ function cancelEdit() {
                   multiple
                   hidden
                   {...({
-                    webkitdirectory:
-                      "",
-                    directory:
-                      "",
+                    webkitdirectory: "",
+                    directory: "",
                   } as any)}
                   onChange={(event) =>
                     uploadFiles(
