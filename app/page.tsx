@@ -1212,7 +1212,7 @@ export default function Home() {
       );
     }
 
-  setTimeout(() => {
+ setTimeout(() => {
   const textarea = document.querySelector(
     ".kairo-textarea"
   ) as HTMLTextAreaElement | null;
@@ -1221,12 +1221,14 @@ export default function Home() {
     textarea.focus();
   }
 }, 50);
+}
 
-  function cancelEdit() {
-    setEditingId(null);
-    setInput("");
-    setAttachments([]);
-  }
+function cancelEdit() {
+  setEditingId(null);
+  setInput("");
+  setAttachments([]);
+}
+   
 
   async function regenerate(
     message: Message
@@ -3923,4 +3925,4 @@ export default function Home() {
       </main>
     </>
   );
-}}
+}
