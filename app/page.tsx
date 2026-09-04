@@ -1342,17 +1342,14 @@ export default function Home() {
                 🤖
               </div>
 
-              <h1 className="text-4xl md:text-5xl font-bold">
-                Hello, I'm KAIRO.
-              </h1>
+             <h1 className="text-4xl md:text-5xl font-bold">
+  Hello, I'm KAIRO.
+</h1>
 
-              <p className="text-white/50 mt-3 max-w-lg">
-                Ask anything,
-                brainstorm ideas,
-                write code,
-                analyze information,
-                or just chat.
-              </p>
+<p className="text-white/50 mt-3 max-w-lg">
+  Kairo AI is your intelligent AI companion for chatting, learning,
+  brainstorming, writing code, analyzing information, and getting things done.
+</p>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-8 max-w-2xl w-full">
                 {[
