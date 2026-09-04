@@ -1076,11 +1076,9 @@ export default function Home() {
   // --------------------------------------------------
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView(
-      {
-        behavior: "smooth",
-      }
-    );
+    bottomRef.current?.scrollIntoView({
+      behavior: "smooth",
+    });
   }, [messages]);
 
   const activeChats =
@@ -1098,29 +1096,48 @@ export default function Home() {
   // --------------------------------------------------
 
   return (
-    <main className="h-screen bg-[#0b0b0f] text-white flex overflow-hidden">
+    <main className="h-screen bg-[#08090d] text-white flex overflow-hidden">
       {/* SIDEBAR */}
 
       <aside
         className={`${
-          sidebar
-            ? "w-[280px]"
-            : "w-0"
-        } transition-all duration-200 bg-[#111116] border-r border-white/10 overflow-hidden flex flex-col shrink-0`}
+          sidebar ? "w-[285px]" : "w-0"
+        } transition-all duration-300 bg-[#0d0f14] border-r border-white/[0.07] overflow-hidden flex flex-col shrink-0`}
       >
-        <div className="p-4">
+        {/* SIDEBAR HEADER */}
+
+        <div className="p-5">
           <div className="flex items-center justify-between">
-            <div className="font-bold text-xl whitespace-nowrap">
-              🤖 KAIRO
+            <div className="flex items-center gap-3 whitespace-nowrap">
+              <div className="relative w-9 h-9 rounded-xl bg-gradient-to-br from-violet-400 via-fuchsia-500 to-blue-500 flex items-center justify-center shadow-lg shadow-violet-500/10">
+                <div className="absolute inset-[1px] rounded-[10px] bg-[#0d0f14]/30" />
+
+                <div className="relative w-3 h-3 rounded-full bg-white shadow-[0_0_16px_rgba(255,255,255,0.9)]" />
+              </div>
+
+              <span className="text-[19px] font-semibold tracking-[-0.03em]">
+                KAIRO
+              </span>
             </div>
 
             <button
               onClick={() =>
                 setSidebar(false)
               }
-              className="text-white/50 hover:text-white text-xl"
+              className="w-8 h-8 rounded-lg flex items-center justify-center text-white/35 hover:text-white hover:bg-white/[0.06] transition"
+              title="Close sidebar"
             >
-              ×
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+              >
+                <path d="M18 6 6 18" />
+                <path d="m6 6 12 12" />
+              </svg>
             </button>
           </div>
 
@@ -1129,42 +1146,63 @@ export default function Home() {
               createChat()
             }
             disabled={!authReady}
-            className="mt-6 w-full rounded-xl bg-white text-black py-3 font-semibold hover:bg-white/90 disabled:opacity-40"
+            className="mt-7 w-full h-11 rounded-xl bg-white text-black font-medium text-sm hover:bg-white/90 transition disabled:opacity-40 flex items-center justify-center gap-2"
           >
-            ＋ New chat
+            <svg
+              width="17"
+              height="17"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+            >
+              <path d="M12 5v14" />
+              <path d="M5 12h14" />
+            </svg>
+
+            <span>New chat</span>
           </button>
         </div>
 
+        {/* HISTORY */}
+
         <div className="flex-1 overflow-y-auto px-3">
-          <p className="text-xs text-white/40 px-2 mb-2">
-            HISTORY
-          </p>
+          <div className="flex items-center justify-between px-3 mb-2">
+            <p className="text-[10px] font-semibold tracking-[0.18em] text-white/30">
+              RECENT CHATS
+            </p>
+
+            {activeChats.length > 0 && (
+              <span className="text-[10px] text-white/20">
+                {activeChats.length}
+              </span>
+            )}
+          </div>
 
           {activeChats.length ===
             0 && (
-            <p className="text-xs text-white/25 px-3 py-3">
-              No chats yet
-            </p>
+            <div className="mx-2 mt-3 rounded-xl border border-dashed border-white/[0.07] p-4">
+              <p className="text-xs text-white/25 text-center">
+                Your conversations will appear here.
+              </p>
+            </div>
           )}
 
           {activeChats.map(
             (chat) => (
               <div
                 key={chat.id}
-                className={`group relative mb-1 rounded-xl ${
-                  activeChat ===
-                  chat.id
-                    ? "bg-white/10"
-                    : "hover:bg-white/5"
-                }`}
+                className={`group relative mb-1 rounded-xl border ${
+                  activeChat === chat.id
+                    ? "bg-white/[0.065] border-white/[0.08]"
+                    : "border-transparent hover:bg-white/[0.035] hover:border-white/[0.05]"
+                } transition`}
               >
                 <button
                   onClick={() =>
-                    openChat(
-                      chat.id
-                    )
+                    openChat(chat.id)
                   }
-                  className="w-full text-left px-3 py-3 pr-10 truncate"
+                  className="w-full text-left px-3.5 py-3 pr-11 truncate text-[13px] text-white/70 hover:text-white transition"
                 >
                   {chat.title}
                 </button>
@@ -1172,29 +1210,61 @@ export default function Home() {
                 <button
                   onClick={() =>
                     setMenuOpen(
-                      menuOpen ===
-                        chat.id
+                      menuOpen === chat.id
                         ? null
                         : chat.id
                     )
                   }
-                  className="absolute right-2 top-2 text-white/40 hover:text-white px-1"
+                  className="absolute right-2 top-2 w-7 h-7 rounded-lg flex items-center justify-center text-white/25 hover:text-white hover:bg-white/[0.08] transition"
+                  title="Chat options"
                 >
-                  ⋯
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                  >
+                    <circle
+                      cx="5"
+                      cy="12"
+                      r="1.5"
+                    />
+                    <circle
+                      cx="12"
+                      cy="12"
+                      r="1.5"
+                    />
+                    <circle
+                      cx="19"
+                      cy="12"
+                      r="1.5"
+                    />
+                  </svg>
                 </button>
 
                 {menuOpen ===
                   chat.id && (
-                  <div className="absolute z-30 right-2 top-10 w-40 rounded-xl bg-[#202027] border border-white/10 shadow-xl overflow-hidden">
+                  <div className="absolute z-30 right-2 top-11 w-44 rounded-xl bg-[#171a21] border border-white/[0.09] shadow-2xl shadow-black/40 overflow-hidden p-1">
                     <button
                       onClick={() =>
                         renameChat(
                           chat.id
                         )
                       }
-                      className="w-full text-left px-3 py-2 hover:bg-white/10"
+                      className="w-full flex items-center gap-3 text-left px-3 py-2.5 rounded-lg text-sm text-white/65 hover:text-white hover:bg-white/[0.07] transition"
                     >
-                      ✏️ Rename
+                      <svg
+                        width="15"
+                        height="15"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.7"
+                      >
+                        <path d="M12 20h9" />
+                        <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z" />
+                      </svg>
+                      Rename
                     </button>
 
                     <button
@@ -1203,9 +1273,22 @@ export default function Home() {
                           chat.id
                         )
                       }
-                      className="w-full text-left px-3 py-2 hover:bg-white/10"
+                      className="w-full flex items-center gap-3 text-left px-3 py-2.5 rounded-lg text-sm text-white/65 hover:text-white hover:bg-white/[0.07] transition"
                     >
-                      📦 Archive
+                      <svg
+                        width="15"
+                        height="15"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.7"
+                      >
+                        <path d="M4 7h16" />
+                        <path d="M6 7v11a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7" />
+                        <path d="M9 11h6" />
+                        <path d="M8 4h8l1 3H7l1-3Z" />
+                      </svg>
+                      Archive
                     </button>
 
                     <button
@@ -1214,9 +1297,23 @@ export default function Home() {
                           chat.id
                         )
                       }
-                      className="w-full text-left px-3 py-2 text-red-400 hover:bg-white/10"
+                      className="w-full flex items-center gap-3 text-left px-3 py-2.5 rounded-lg text-sm text-red-400 hover:text-red-300 hover:bg-red-500/[0.08] transition"
                     >
-                      🗑 Delete
+                      <svg
+                        width="15"
+                        height="15"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.7"
+                      >
+                        <path d="M3 6h18" />
+                        <path d="M8 6V4h8v2" />
+                        <path d="M19 6l-1 14H6L5 6" />
+                        <path d="M10 11v5" />
+                        <path d="M14 11v5" />
+                      </svg>
+                      Delete
                     </button>
                   </div>
                 )}
@@ -1224,22 +1321,56 @@ export default function Home() {
             )
           )}
 
+          {/* ARCHIVED */}
+
           <button
             onClick={() =>
               setArchiveOpen(
                 !archiveOpen
               )
             }
-            className="w-full text-left px-3 py-3 mt-5 rounded-xl hover:bg-white/5 text-white/70"
+            className="w-full flex items-center justify-between text-left px-3 py-3 mt-5 rounded-xl hover:bg-white/[0.04] text-white/45 hover:text-white/75 transition"
           >
-            📦 Archived chats
+            <span className="flex items-center gap-3 text-[13px]">
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.7"
+              >
+                <path d="M4 7h16" />
+                <path d="M6 7v11a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7" />
+                <path d="M9 11h6" />
+                <path d="M8 4h8l1 3H7l1-3Z" />
+              </svg>
+
+              Archived chats
+            </span>
+
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              className={`transition-transform ${
+                archiveOpen
+                  ? "rotate-180"
+                  : ""
+              }`}
+            >
+              <path d="m6 9 6 6 6-6" />
+            </svg>
           </button>
 
           {archiveOpen && (
             <div className="mt-1">
               {archivedChats.length ===
               0 ? (
-                <p className="text-xs text-white/30 px-3 py-2">
+                <p className="text-xs text-white/25 px-3 py-3">
                   No archived chats
                 </p>
               ) : (
@@ -1247,20 +1378,20 @@ export default function Home() {
                   (chat) => (
                     <div
                       key={chat.id}
-                      className="rounded-xl hover:bg-white/5 px-3 py-3"
+                      className="rounded-xl hover:bg-white/[0.035] px-3 py-3 transition"
                     >
-                      <div className="truncate text-sm">
+                      <div className="truncate text-sm text-white/60">
                         {chat.title}
                       </div>
 
-                      <div className="flex gap-3 mt-2">
+                      <div className="flex gap-4 mt-2.5">
                         <button
                           onClick={() =>
                             restoreChat(
                               chat.id
                             )
                           }
-                          className="text-xs text-blue-400"
+                          className="text-xs text-blue-400 hover:text-blue-300 transition"
                         >
                           Restore
                         </button>
@@ -1271,7 +1402,7 @@ export default function Home() {
                               chat.id
                             )
                           }
-                          className="text-xs text-red-400"
+                          className="text-xs text-red-400 hover:text-red-300 transition"
                         >
                           Delete
                         </button>
@@ -1284,37 +1415,72 @@ export default function Home() {
           )}
         </div>
 
-        <div className="p-4 border-t border-white/10 text-xs text-white/30 whitespace-nowrap">
-          KAIRO AI
-          <br />
-          Your intelligent AI companion
+        {/* SIDEBAR FOOTER */}
+
+        <div className="p-4 border-t border-white/[0.07]">
+          <div className="rounded-xl bg-white/[0.025] border border-white/[0.05] p-3">
+            <div className="flex items-center gap-2.5">
+              <div className="w-7 h-7 rounded-lg bg-white/[0.07] flex items-center justify-center">
+                <div className="w-2 h-2 rounded-full bg-violet-400 shadow-[0_0_10px_rgba(167,139,250,0.8)]" />
+              </div>
+
+              <div>
+                <p className="text-xs font-medium text-white/65">
+                  KAIRO AI
+                </p>
+
+                <p className="text-[10px] text-white/25">
+                  Intelligent AI companion
+                </p>
+              </div>
+            </div>
+          </div>
         </div>
       </aside>
 
       {/* MAIN CHAT */}
 
-      <section className="flex-1 flex flex-col min-w-0">
+      <section className="flex-1 flex flex-col min-w-0 bg-[#08090d]">
         {/* HEADER */}
 
-        <header className="h-16 border-b border-white/10 flex items-center px-4 shrink-0">
+        <header className="h-16 border-b border-white/[0.07] flex items-center px-4 md:px-6 shrink-0 bg-[#08090d]/90 backdrop-blur-xl">
           {!sidebar && (
             <button
               onClick={() =>
                 setSidebar(true)
               }
-              className="mr-3 text-xl"
+              className="mr-3 w-9 h-9 rounded-xl flex items-center justify-center text-white/50 hover:text-white hover:bg-white/[0.06] transition"
+              title="Open sidebar"
             >
-              ☰
+              <svg
+                width="19"
+                height="19"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+              >
+                <path d="M4 6h16" />
+                <path d="M4 12h16" />
+                <path d="M4 18h16" />
+              </svg>
             </button>
           )}
 
-          <div>
-            <div className="font-semibold">
-              KAIRO AI
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-violet-400 via-fuchsia-500 to-blue-500 flex items-center justify-center">
+              <div className="w-2.5 h-2.5 rounded-full bg-white shadow-[0_0_12px_rgba(255,255,255,0.9)]" />
             </div>
 
-            <div className="text-xs text-white/40">
-              Powered by Groq
+            <div>
+              <div className="font-semibold tracking-tight text-sm">
+                KAIRO AI
+              </div>
+
+              <div className="flex items-center gap-1.5 text-[10px] text-white/30">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_7px_rgba(52,211,153,0.7)]" />
+                Powered by Groq
+              </div>
             </div>
           </div>
 
@@ -1324,10 +1490,20 @@ export default function Home() {
                 createChat()
               }
               disabled={!authReady}
-              className="px-3 py-2 rounded-lg hover:bg-white/10 disabled:opacity-40"
+              className="w-9 h-9 rounded-xl border border-white/[0.08] hover:bg-white/[0.06] flex items-center justify-center text-white/55 hover:text-white transition disabled:opacity-40"
               title="New chat"
             >
-              ＋
+              <svg
+                width="17"
+                height="17"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+              >
+                <path d="M12 5v14" />
+                <path d="M5 12h14" />
+              </svg>
             </button>
           </div>
         </header>
@@ -1337,49 +1513,112 @@ export default function Home() {
         <div className="flex-1 overflow-y-auto">
           {messages.length ===
           0 ? (
-            <div className="h-full flex flex-col items-center justify-center px-5 text-center">
-              <div className="text-6xl mb-5">
-                🤖
+            <div className="min-h-full flex flex-col items-center justify-center px-5 text-center pb-8">
+              {/* AI VISUAL */}
+
+              <div className="relative mb-8">
+                <div className="absolute -inset-10 rounded-full bg-violet-500/[0.08] blur-3xl" />
+
+                <div className="absolute -inset-5 rounded-full border border-violet-400/[0.08] animate-pulse" />
+
+                <div className="relative w-28 h-28 rounded-[32px] border border-white/[0.1] bg-gradient-to-br from-white/[0.09] to-white/[0.025] backdrop-blur-xl shadow-2xl flex items-center justify-center overflow-hidden">
+                  <div className="absolute -top-8 -right-8 w-20 h-20 rounded-full bg-blue-500/20 blur-2xl" />
+
+                  <div className="absolute -bottom-8 -left-8 w-20 h-20 rounded-full bg-fuchsia-500/20 blur-2xl" />
+
+                  <div className="relative w-16 h-16 rounded-full bg-gradient-to-br from-violet-400 via-fuchsia-500 to-blue-500 p-[1px] shadow-[0_0_35px_rgba(139,92,246,0.3)]">
+                    <div className="w-full h-full rounded-full bg-[#0b0c11] flex items-center justify-center">
+                      <div className="relative w-7 h-7 rounded-full bg-white">
+                        <div className="absolute inset-0 rounded-full bg-white blur-md opacity-60" />
+
+                        <div className="absolute inset-[5px] rounded-full bg-gradient-to-br from-violet-400 to-blue-500" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
 
-             <h1 className="text-4xl md:text-5xl font-bold">
-  Hello, I'm KAIRO.
-</h1>
+              {/* HERO */}
 
-<p className="text-white/50 mt-3 max-w-lg">
-  Kairo AI is your intelligent AI companion for chatting, learning,
-  brainstorming, writing code, analyzing information, and getting things done.
-</p>
+              <div className="max-w-2xl">
+                <h1 className="text-4xl md:text-6xl font-semibold tracking-[-0.055em] leading-[1.05]">
+                  Hello, I&apos;m{" "}
+                  <span className="bg-gradient-to-r from-white via-white to-white/55 bg-clip-text text-transparent">
+                    KAIRO
+                  </span>
+                  <span className="text-violet-400">
+                    .
+                  </span>
+                </h1>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-8 max-w-2xl w-full">
+                <p className="text-white/40 mt-5 max-w-xl mx-auto text-sm md:text-base leading-7">
+                  Your intelligent AI companion for thinking,
+                  creating, learning, coding, and getting things
+                  done.
+                </p>
+              </div>
+
+              {/* SUGGESTIONS */}
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-10 max-w-3xl w-full">
                 {[
-                  "Explain quantum physics simply",
-                  "Help me build a website",
-                  "Give me a creative idea",
-                ].map(
-                  (text) => (
-                    <button
-                      key={text}
-                      onClick={() =>
-                        setInput(text)
-                      }
-                      className="p-4 rounded-2xl bg-white/5 border border-white/10 hover:bg-white/10 text-sm text-left"
-                    >
-                      {text}
-                    </button>
-                  )
-                )}
+                  {
+                    label: "LEARN",
+                    title:
+                      "Explain quantum physics simply",
+                  },
+                  {
+                    label: "BUILD",
+                    title:
+                      "Help me build a website",
+                  },
+                  {
+                    label: "CREATE",
+                    title:
+                      "Give me a creative idea",
+                  },
+                ].map((item) => (
+                  <button
+                    key={item.title}
+                    onClick={() =>
+                      setInput(item.title)
+                    }
+                    className="group text-left rounded-2xl border border-white/[0.07] bg-white/[0.025] p-4.5 transition-all duration-200 hover:bg-white/[0.055] hover:border-white/[0.14] hover:-translate-y-0.5"
+                  >
+                    <div className="flex items-center justify-between mb-4">
+                      <span className="text-[9px] font-semibold tracking-[0.2em] text-white/25 group-hover:text-violet-300/60 transition">
+                        {item.label}
+                      </span>
+
+                      <span className="w-6 h-6 rounded-full border border-white/[0.07] flex items-center justify-center text-white/20 group-hover:text-white/70 group-hover:border-white/15 transition">
+                        <svg
+                          width="13"
+                          height="13"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                        >
+                          <path d="M5 12h14" />
+                          <path d="m13 6 6 6-6 6" />
+                        </svg>
+                      </span>
+                    </div>
+
+                    <p className="text-sm text-white/60 group-hover:text-white/85 leading-6 transition">
+                      {item.title}
+                    </p>
+                  </button>
+                ))}
               </div>
             </div>
           ) : (
-            <div className="max-w-4xl mx-auto px-4 py-8">
+            <div className="max-w-4xl mx-auto px-4 py-8 md:py-10">
               {messages.map(
                 (message) => (
                   <div
-                    key={
-                      message.id
-                    }
-                    className={`flex mb-7 ${
+                    key={message.id}
+                    className={`flex mb-8 ${
                       message.role ===
                       "user"
                         ? "justify-end"
@@ -1387,124 +1626,225 @@ export default function Home() {
                     }`}
                   >
                     <div
-                      className={`max-w-[85%] ${
+                      className={`${
                         message.role ===
                         "user"
-                          ? "bg-[#25252d] rounded-3xl px-5 py-3"
+                          ? "max-w-[85%] bg-[#1b1e26] border border-white/[0.06] rounded-[22px] px-5 py-3.5"
                           : "w-full"
                       }`}
                     >
-                      <div className="whitespace-pre-wrap leading-7">
-                        {message.content ||
-                          (loading &&
-                          message.role ===
-                            "assistant"
-                            ? "Thinking..."
-                            : "")}
-                      </div>
-
-                      {message.attachments &&
-                        message
-                          .attachments
-                          .length >
-                          0 && (
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            {message.attachments.map(
-                              (
-                                file,
-                                index
-                              ) => (
-                                <div
-                                  key={`${file.name}-${index}`}
-                                  className="text-xs bg-black/30 rounded-lg px-3 py-2"
-                                >
-                                  📎{" "}
-                                  {
-                                    file.name
-                                  }
-                                </div>
-                              )
-                            )}
-                          </div>
-                        )}
-
                       {message.role ===
-                        "assistant" &&
-                        message.content &&
-                        !message.content.startsWith(
-                          "⚠️"
-                        ) && (
-                          <div className="flex gap-3 mt-3">
-                            <button
-                              onClick={() =>
-                                copyMessage(
-                                  message.content
-                                )
-                              }
-                              className="text-xs text-white/40 hover:text-white"
-                            >
-                              📋 Copy
-                            </button>
-
-                            <button
-                              onClick={() =>
-                                regenerate(
-                                  message
-                                )
-                              }
-                              disabled={
-                                loading
-                              }
-                              className="text-xs text-white/40 hover:text-white disabled:opacity-30"
-                            >
-                              🔄 Regenerate
-                            </button>
+                        "assistant" && (
+                        <div className="flex items-start gap-3">
+                          <div className="shrink-0 mt-1 w-7 h-7 rounded-lg bg-gradient-to-br from-violet-400 via-fuchsia-500 to-blue-500 flex items-center justify-center">
+                            <div className="w-2 h-2 rounded-full bg-white" />
                           </div>
-                        )}
+
+                          <div className="min-w-0 flex-1">
+                            <div className="whitespace-pre-wrap leading-7 text-[14px] md:text-[15px] text-white/85">
+                              {message.content ||
+                                (loading
+                                  ? "Thinking..."
+                                  : "")}
+                            </div>
+
+                            {message.attachments &&
+                              message.attachments.length >
+                                0 && (
+                                <div className="mt-3 flex flex-wrap gap-2">
+                                  {message.attachments.map(
+                                    (
+                                      file,
+                                      index
+                                    ) => (
+                                      <div
+                                        key={`${file.name}-${index}`}
+                                        className="text-xs bg-white/[0.05] border border-white/[0.06] rounded-lg px-3 py-2 text-white/50 flex items-center gap-2"
+                                      >
+                                        <svg
+                                          width="13"
+                                          height="13"
+                                          viewBox="0 0 24 24"
+                                          fill="none"
+                                          stroke="currentColor"
+                                          strokeWidth="1.7"
+                                        >
+                                          <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                                        </svg>
+
+                                        {
+                                          file.name
+                                        }
+                                      </div>
+                                    )
+                                  )}
+                                </div>
+                              )}
+
+                            {message.content &&
+                              !message.content.startsWith(
+                                "⚠️"
+                              ) && (
+                                <div className="flex gap-1.5 mt-4">
+                                  <button
+                                    onClick={() =>
+                                      copyMessage(
+                                        message.content
+                                      )
+                                    }
+                                    className="h-8 px-2.5 rounded-lg text-[11px] text-white/30 hover:text-white/75 hover:bg-white/[0.05] transition flex items-center gap-2"
+                                  >
+                                    <svg
+                                      width="14"
+                                      height="14"
+                                      viewBox="0 0 24 24"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      strokeWidth="1.7"
+                                    >
+                                      <rect
+                                        x="9"
+                                        y="9"
+                                        width="11"
+                                        height="11"
+                                        rx="2"
+                                      />
+                                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                                    </svg>
+                                    Copy
+                                  </button>
+
+                                  <button
+                                    onClick={() =>
+                                      regenerate(
+                                        message
+                                      )
+                                    }
+                                    disabled={
+                                      loading
+                                    }
+                                    className="h-8 px-2.5 rounded-lg text-[11px] text-white/30 hover:text-white/75 hover:bg-white/[0.05] transition disabled:opacity-30 flex items-center gap-2"
+                                  >
+                                    <svg
+                                      width="14"
+                                      height="14"
+                                      viewBox="0 0 24 24"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      strokeWidth="1.7"
+                                    >
+                                      <path d="M20 11a8.1 8.1 0 0 0-15.5-2M4 5v4h4" />
+                                      <path d="M4 13a8.1 8.1 0 0 0 15.5 2M20 19v-4h-4" />
+                                    </svg>
+                                    Regenerate
+                                  </button>
+                                </div>
+                              )}
+                          </div>
+                        </div>
+                      )}
 
                       {message.role ===
                         "user" && (
-                        <button
-                          onClick={() =>
-                            editMessage(
-                              message
-                            )
-                          }
-                          className="text-xs text-white/40 hover:text-white mt-2"
-                        >
-                          ✏️ Edit
-                        </button>
+                        <>
+                          <div className="whitespace-pre-wrap leading-7 text-[14px] md:text-[15px] text-white/90">
+                            {message.content}
+                          </div>
+
+                          {message.attachments &&
+                            message.attachments.length >
+                              0 && (
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                {message.attachments.map(
+                                  (
+                                    file,
+                                    index
+                                  ) => (
+                                    <div
+                                      key={`${file.name}-${index}`}
+                                      className="text-xs bg-black/20 border border-white/[0.05] rounded-lg px-3 py-2 text-white/50 flex items-center gap-2"
+                                    >
+                                      <svg
+                                        width="13"
+                                        height="13"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="1.7"
+                                      >
+                                        <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                                      </svg>
+
+                                      {
+                                        file.name
+                                      }
+                                    </div>
+                                  )
+                                )}
+                              </div>
+                            )}
+
+                          <button
+                            onClick={() =>
+                              editMessage(
+                                message
+                              )
+                            }
+                            className="mt-2 h-7 px-2 rounded-lg text-[11px] text-white/25 hover:text-white/65 hover:bg-white/[0.05] transition flex items-center gap-1.5"
+                          >
+                            <svg
+                              width="12"
+                              height="12"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="1.8"
+                            >
+                              <path d="M12 20h9" />
+                              <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z" />
+                            </svg>
+                            Edit
+                          </button>
+                        </>
                       )}
                     </div>
                   </div>
                 )
               )}
 
-              <div
-                ref={bottomRef}
-              />
+              <div ref={bottomRef} />
             </div>
           )}
         </div>
 
         {/* COMPOSER */}
 
-        <div className="p-3 md:p-5 shrink-0">
+        <div className="p-3 md:p-5 shrink-0 bg-gradient-to-t from-[#08090d] via-[#08090d] to-transparent">
           <div className="max-w-4xl mx-auto">
             {/* EDITING BAR */}
 
             {editingId && (
-              <div className="mb-2 flex items-center justify-between rounded-xl bg-white/5 border border-white/10 px-4 py-2">
-                <span className="text-xs text-white/60">
-                  ✏️ Editing
-                  message
+              <div className="mb-2.5 flex items-center justify-between rounded-xl bg-violet-500/[0.07] border border-violet-400/[0.12] px-4 py-2.5">
+                <span className="text-xs text-violet-200/60 flex items-center gap-2">
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                  >
+                    <path d="M12 20h9" />
+                    <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z" />
+                  </svg>
+                  Editing message
                 </span>
 
                 <button
                   onClick={
                     cancelEdit
                   }
-                  className="text-xs text-white/50 hover:text-white"
+                  className="text-xs text-white/35 hover:text-white transition"
                 >
                   Cancel
                 </button>
@@ -1515,7 +1855,7 @@ export default function Home() {
 
             {attachments.length >
               0 && (
-              <div className="flex flex-wrap gap-2 mb-2">
+              <div className="flex flex-wrap gap-2 mb-2.5">
                 {attachments.map(
                   (
                     file,
@@ -1523,12 +1863,22 @@ export default function Home() {
                   ) => (
                     <div
                       key={`${file.name}-${index}`}
-                      className="bg-white/10 rounded-xl px-3 py-2 text-xs flex items-center gap-2"
+                      className="bg-[#151820] border border-white/[0.08] rounded-xl px-3 py-2 text-xs flex items-center gap-2 text-white/55"
                     >
-                      📎{" "}
-                      {
-                        file.name
-                      }
+                      <svg
+                        width="13"
+                        height="13"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.7"
+                      >
+                        <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                      </svg>
+
+                      <span className="max-w-[180px] truncate">
+                        {file.name}
+                      </span>
 
                       <button
                         onClick={() =>
@@ -1536,9 +1886,19 @@ export default function Home() {
                             index
                           )
                         }
-                        className="text-white/50 hover:text-white"
+                        className="w-5 h-5 rounded-md flex items-center justify-center text-white/30 hover:text-white hover:bg-white/[0.07] transition"
                       >
-                        ×
+                        <svg
+                          width="13"
+                          height="13"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                        >
+                          <path d="M18 6 6 18" />
+                          <path d="m6 6 12 12" />
+                        </svg>
                       </button>
                     </div>
                   )
@@ -1546,8 +1906,10 @@ export default function Home() {
               </div>
             )}
 
-            <div className="rounded-3xl border border-white/10 bg-[#15151b] p-2 shadow-2xl">
-              <div className="flex items-end gap-2">
+            {/* COMPOSER BOX */}
+
+            <div className="rounded-[24px] border border-white/[0.09] bg-[#11141a] p-2 shadow-2xl shadow-black/20 focus-within:border-white/[0.15] transition">
+              <div className="flex items-end gap-1.5">
                 {/* FILE */}
 
                 <button
@@ -1558,10 +1920,19 @@ export default function Home() {
                     uploading ||
                     loading
                   }
-                  className="w-11 h-11 shrink-0 rounded-full hover:bg-white/10 text-xl disabled:opacity-30"
+                  className="w-10 h-10 shrink-0 rounded-xl hover:bg-white/[0.06] text-white/35 hover:text-white/80 transition disabled:opacity-30 flex items-center justify-center"
                   title="Attach files"
                 >
-                  ＋
+                  <svg
+                    width="19"
+                    height="19"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.7"
+                  >
+                    <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                  </svg>
                 </button>
 
                 {/* FOLDER */}
@@ -1574,10 +1945,19 @@ export default function Home() {
                     uploading ||
                     loading
                   }
-                  className="w-11 h-11 shrink-0 rounded-full hover:bg-white/10 text-lg disabled:opacity-30"
+                  className="w-10 h-10 shrink-0 rounded-xl hover:bg-white/[0.06] text-white/35 hover:text-white/80 transition disabled:opacity-30 flex items-center justify-center"
                   title="Attach folder"
                 >
-                  📁
+                  <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.7"
+                  >
+                    <path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" />
+                  </svg>
                 </button>
 
                 <input
@@ -1636,7 +2016,7 @@ export default function Home() {
                     uploading
                   }
                   rows={1}
-                  className="flex-1 min-w-0 resize-none bg-transparent outline-none px-2 py-3 max-h-40"
+                  className="flex-1 min-w-0 resize-none bg-transparent outline-none px-2.5 py-2.5 max-h-40 text-sm text-white placeholder:text-white/25 leading-6"
                 />
 
                 {/* SEND */}
@@ -1652,21 +2032,30 @@ export default function Home() {
                       attachments.length ===
                         0)
                   }
-                  className="w-11 h-11 shrink-0 rounded-full bg-white text-black disabled:opacity-30 font-bold hover:bg-white/90"
+                  className="w-10 h-10 shrink-0 rounded-xl bg-white text-black disabled:opacity-20 font-bold hover:bg-white/90 transition flex items-center justify-center"
                   title="Send message"
                 >
-                  {loading
-                    ? "..."
-                    : "➤"}
+                  {loading ? (
+                    <span className="w-4 h-4 rounded-full border-2 border-black/20 border-t-black animate-spin" />
+                  ) : (
+                    <svg
+                      width="17"
+                      height="17"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                    >
+                      <path d="M22 2 11 13" />
+                      <path d="m22 2-7 20-4-9-9-4Z" />
+                    </svg>
+                  )}
                 </button>
               </div>
             </div>
 
-            <p className="text-center text-[11px] text-white/25 mt-2">
-              KAIRO can make
-              mistakes. Check
-              important
-              information.
+            <p className="text-center text-[10px] text-white/20 mt-2.5">
+              KAIRO can make mistakes. Check important information.
             </p>
           </div>
         </div>
