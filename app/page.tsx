@@ -1226,37 +1226,544 @@ export default function Home() {
 
   return (
     <>
-      <style jsx global>{`
-        .kairo-light {
-          filter: invert(1) hue-rotate(180deg);
-        }
+     <style jsx global>{`
+  /* ==================================================
+     KAIRO THEME SYSTEM
+     Dark mode remains unchanged.
+     Light mode gets a proper native light UI.
+     ================================================== */
 
-        .kairo-light input,
-        .kairo-light textarea,
-        .kairo-light button,
-        .kairo-light [role="button"] {
-          filter: invert(1) hue-rotate(180deg);
-        }
+  .kairo-theme-toggle {
+    position: relative;
+    overflow: hidden;
+  }
 
-        .kairo-light input[type="file"] {
-          filter: none;
-        }
+  .kairo-theme-icon {
+    transition:
+      transform 0.35s ease,
+      opacity 0.25s ease;
+  }
 
-        .kairo-theme-toggle {
-          position: relative;
-          overflow: hidden;
-        }
+  .kairo-theme-toggle:hover .kairo-theme-icon {
+    transform: rotate(25deg) scale(1.08);
+  }
 
-        .kairo-theme-icon {
-          transition:
-            transform 0.35s ease,
-            opacity 0.25s ease;
-        }
+  /* ==================================================
+     LIGHT MODE
+     ================================================== */
 
-        .kairo-theme-toggle:hover .kairo-theme-icon {
-          transform: rotate(25deg) scale(1.08);
-        }
-      `}</style>
+  main.kairo-light {
+    background: #f7f8fc !important;
+    color: #111318 !important;
+    filter: none !important;
+  }
+
+  /* ---------- MAIN AREAS ---------- */
+
+  main.kairo-light > aside {
+    background:
+      linear-gradient(
+        180deg,
+        #ffffff 0%,
+        #f8f9fc 100%
+      ) !important;
+
+    border-color: #e7e9ef !important;
+  }
+
+  main.kairo-light > section {
+    background:
+      radial-gradient(
+        circle at 50% -10%,
+        rgba(124, 58, 237, 0.035),
+        transparent 38%
+      ),
+      #f9fafc !important;
+  }
+
+  main.kairo-light section header {
+    background: rgba(255, 255, 255, 0.86) !important;
+    border-color: #e7e9ef !important;
+    backdrop-filter: blur(20px);
+  }
+
+  /* ---------- GENERAL TEXT ---------- */
+
+  main.kairo-light [class*="text-white"] {
+    color: #171923 !important;
+  }
+
+  main.kairo-light [class*="text-white\\/90"] {
+    color: #171923 !important;
+  }
+
+  main.kairo-light [class*="text-white\\/85"] {
+    color: #252936 !important;
+  }
+
+  main.kairo-light [class*="text-white\\/70"] {
+    color: #4b5060 !important;
+  }
+
+  main.kairo-light [class*="text-white\\/65"] {
+    color: #555b6d !important;
+  }
+
+  main.kairo-light [class*="text-white\\/60"] {
+    color: #5f6575 !important;
+  }
+
+  main.kairo-light [class*="text-white\\/55"] {
+    color: #686e7e !important;
+  }
+
+  main.kairo-light [class*="text-white\\/50"] {
+    color: #707687 !important;
+  }
+
+  main.kairo-light [class*="text-white\\/45"] {
+    color: #747a8a !important;
+  }
+
+  main.kairo-light [class*="text-white\\/40"] {
+    color: #7b8190 !important;
+  }
+
+  main.kairo-light [class*="text-white\\/35"] {
+    color: #858b9a !important;
+  }
+
+  main.kairo-light [class*="text-white\\/30"] {
+    color: #8b91a0 !important;
+  }
+
+  main.kairo-light [class*="text-white\\/25"] {
+    color: #969cab !important;
+  }
+
+  main.kairo-light [class*="text-white\\/20"] {
+    color: #a0a6b4 !important;
+  }
+
+  /* ---------- SIDEBAR ---------- */
+
+  main.kairo-light aside .border-white\\/\\[0\\.07\\] {
+    border-color: #e6e8ee !important;
+  }
+
+  main.kairo-light aside button:hover {
+    background: rgba(15, 23, 42, 0.045) !important;
+  }
+
+  main.kairo-light aside
+    .group.relative.mb-1.rounded-xl.border {
+    background: transparent !important;
+  }
+
+  main.kairo-light aside
+    .group.relative.mb-1.rounded-xl.border:hover {
+    background: #f1f3f7 !important;
+    border-color: #e5e7ed !important;
+  }
+
+  main.kairo-light aside
+    .group.relative.mb-1.rounded-xl.border.bg-white\\/\\[0\\.065\\] {
+    background:
+      linear-gradient(
+        135deg,
+        rgba(124, 58, 237, 0.075),
+        rgba(59, 130, 246, 0.045)
+      ) !important;
+
+    border-color: rgba(124, 58, 237, 0.16) !important;
+  }
+
+  /* ---------- SIDEBAR FOOTER ---------- */
+
+  main.kairo-light aside .bg-white\\/\\[0\\.025\\] {
+    background: #f3f4f8 !important;
+  }
+
+  main.kairo-light aside .bg-white\\/\\[0\\.07\\] {
+    background: #e9ebf1 !important;
+  }
+
+  /* ---------- MENUS ---------- */
+
+  main.kairo-light aside .bg-\\[\\#171a21\\] {
+    background: #ffffff !important;
+    border-color: #e3e5eb !important;
+
+    box-shadow:
+      0 18px 45px rgba(15, 23, 42, 0.14) !important;
+  }
+
+  main.kairo-light aside
+    .bg-\\[\\#171a21\\] button:hover {
+    background: #f2f3f7 !important;
+  }
+
+  /* ---------- NEW CHAT BUTTON ---------- */
+
+  main.kairo-light aside button.bg-white {
+    background:
+      linear-gradient(
+        135deg,
+        #181a22,
+        #272a35
+      ) !important;
+
+    color: #ffffff !important;
+
+    box-shadow:
+      0 8px 20px rgba(15, 23, 42, 0.12);
+  }
+
+  main.kairo-light aside button.bg-white:hover {
+    background:
+      linear-gradient(
+        135deg,
+        #252834,
+        #303442
+      ) !important;
+  }
+
+  /* ---------- HEADER BUTTONS ---------- */
+
+  main.kairo-light header button {
+    color: #73798a !important;
+    border-color: #e2e5eb !important;
+  }
+
+  main.kairo-light header button:hover {
+    color: #1b1e27 !important;
+    background: #f0f1f5 !important;
+  }
+
+  /* ---------- KAIRO HEADER STATUS ---------- */
+
+  main.kairo-light header
+    .text-\\[10px\\].text-white\\/30 {
+    color: #858b9a !important;
+  }
+
+  /* ---------- HERO ---------- */
+
+  main.kairo-light h1 {
+    color: #161821 !important;
+  }
+
+  main.kairo-light h1 span.bg-gradient-to-r {
+    background:
+      linear-gradient(
+        90deg,
+        #171923 0%,
+        #3b3f4c 55%,
+        #8a8f9d 100%
+      ) !important;
+
+    background-clip: text !important;
+    -webkit-background-clip: text !important;
+    -webkit-text-fill-color: transparent !important;
+  }
+
+  main.kairo-light h1 .text-violet-400 {
+    color: #7c3aed !important;
+  }
+
+  /* ---------- HERO DESCRIPTION ---------- */
+
+  main.kairo-light
+    .max-w-2xl
+    p {
+    color: #73798a !important;
+  }
+
+  /* ---------- AI VISUAL ---------- */
+
+  main.kairo-light
+    .relative.w-28.h-28 {
+    border-color: #e1e4eb !important;
+    background:
+      linear-gradient(
+        135deg,
+        rgba(255, 255, 255, 0.95),
+        rgba(244, 245, 249, 0.95)
+      ) !important;
+
+    box-shadow:
+      0 20px 50px rgba(15, 23, 42, 0.08) !important;
+  }
+
+  main.kairo-light
+    .relative.w-28.h-28
+    > .absolute.-top-8 {
+    opacity: 0.35;
+  }
+
+  main.kairo-light
+    .relative.w-28.h-28
+    .bg-\\[\\#0b0c11\\] {
+    background: #ffffff !important;
+  }
+
+  /* ---------- SUGGESTION CARDS ---------- */
+
+  main.kairo-light
+    button.group.text-left.rounded-2xl {
+    background:
+      linear-gradient(
+        145deg,
+        rgba(255, 255, 255, 0.98),
+        rgba(248, 249, 252, 0.98)
+      ) !important;
+
+    border-color: #e3e6ed !important;
+
+    box-shadow:
+      0 8px 25px rgba(15, 23, 42, 0.035) !important;
+  }
+
+  main.kairo-light
+    button.group.text-left.rounded-2xl:hover {
+    background: #ffffff !important;
+    border-color: rgba(124, 58, 237, 0.22) !important;
+
+    box-shadow:
+      0 14px 32px rgba(15, 23, 42, 0.075) !important;
+  }
+
+  main.kairo-light
+    button.group.text-left.rounded-2xl
+    .border-white\\/\\[0\\.07\\] {
+    border-color: #e3e5eb !important;
+  }
+
+  main.kairo-light
+    button.group.text-left.rounded-2xl:hover
+    .border-white\\/\\[0\\.15\\] {
+    border-color: rgba(124, 58, 237, 0.25) !important;
+  }
+
+  /* ---------- CHAT USER MESSAGE ---------- */
+
+  main.kairo-light
+    .bg-\\[\\#1b1e26\\] {
+    background:
+      linear-gradient(
+        135deg,
+        #eeeaff,
+        #f1f4ff
+      ) !important;
+
+    border-color: #dedbea !important;
+
+    color: #20222c !important;
+
+    box-shadow:
+      0 6px 18px rgba(15, 23, 42, 0.045);
+  }
+
+  /* ---------- ASSISTANT MESSAGE ---------- */
+
+  main.kairo-light
+    .whitespace-pre-wrap.leading-7 {
+    color: #292d38 !important;
+  }
+
+  /* ---------- MESSAGE ATTACHMENTS ---------- */
+
+  main.kairo-light
+    .bg-white\\/\\[0\\.05\\] {
+    background: #f0f1f5 !important;
+    border-color: #e1e3e9 !important;
+  }
+
+  main.kairo-light
+    .bg-black\\/20 {
+    background: rgba(15, 23, 42, 0.045) !important;
+    border-color: #dfe2e8 !important;
+  }
+
+  /* ---------- MESSAGE ACTIONS ---------- */
+
+  main.kairo-light
+    .h-8.px-2\\.5.rounded-lg {
+    color: #8a90a0 !important;
+  }
+
+  main.kairo-light
+    .h-8.px-2\\.5.rounded-lg:hover {
+    color: #292d38 !important;
+    background: #eef0f4 !important;
+  }
+
+  /* ---------- EDIT BAR ---------- */
+
+  main.kairo-light
+    .bg-violet-500\\/\\[0\\.07\\] {
+    background:
+      rgba(124, 58, 237, 0.055) !important;
+
+    border-color:
+      rgba(124, 58, 237, 0.14) !important;
+  }
+
+  main.kairo-light
+    .text-violet-200\\/60 {
+    color: #7252ad !important;
+  }
+
+  /* ---------- COMPOSER AREA ---------- */
+
+  main.kairo-light
+    .bg-gradient-to-t {
+    background:
+      linear-gradient(
+        to top,
+        #f9fafc 65%,
+        rgba(249, 250, 252, 0)
+      ) !important;
+  }
+
+  main.kairo-light
+    .rounded-\\[24px\\].bg-\\[\\#11141a\\] {
+    background:
+      rgba(255, 255, 255, 0.96) !important;
+
+    border-color: #dfe2e8 !important;
+
+    box-shadow:
+      0 12px 35px rgba(15, 23, 42, 0.075) !important;
+  }
+
+  main.kairo-light
+    .rounded-\\[24px\\].bg-\\[\\#11141a\\]:focus-within {
+    border-color:
+      rgba(124, 58, 237, 0.32) !important;
+
+    box-shadow:
+      0 12px 35px rgba(15, 23, 42, 0.075),
+      0 0 0 3px rgba(124, 58, 237, 0.055) !important;
+  }
+
+  /* ---------- TEXTAREA ---------- */
+
+  main.kairo-light textarea {
+    color: #1b1e27 !important;
+    caret-color: #7c3aed !important;
+  }
+
+  main.kairo-light textarea::placeholder {
+    color: #a1a6b3 !important;
+  }
+
+  /* ---------- COMPOSER ICON BUTTONS ---------- */
+
+  main.kairo-light
+    .rounded-\\[24px\\]
+    button {
+    color: #858b99 !important;
+  }
+
+  main.kairo-light
+    .rounded-\\[24px\\]
+    button:hover {
+    color: #303440 !important;
+    background: #f0f1f5 !important;
+  }
+
+  /* ---------- SEND BUTTON ---------- */
+
+  main.kairo-light
+    .rounded-\\[24px\\]
+    button.bg-white {
+    background:
+      linear-gradient(
+        135deg,
+        #181a22,
+        #343743
+      ) !important;
+
+    color: #ffffff !important;
+
+    box-shadow:
+      0 6px 16px rgba(15, 23, 42, 0.15);
+  }
+
+  main.kairo-light
+    .rounded-\\[24px\\]
+    button.bg-white:hover {
+    background:
+      linear-gradient(
+        135deg,
+        #282b35,
+        #414450
+      ) !important;
+  }
+
+  /* ---------- ATTACHMENT PREVIEW ---------- */
+
+  main.kairo-light
+    .bg-\\[\\#151820\\] {
+    background: #ffffff !important;
+    border-color: #dfe2e8 !important;
+    color: #626878 !important;
+
+    box-shadow:
+      0 4px 14px rgba(15, 23, 42, 0.045);
+  }
+
+  /* ---------- FOOTER WARNING ---------- */
+
+  main.kairo-light
+    .text-center.text-\\[10px\\] {
+    color: #a0a5b2 !important;
+  }
+
+  /* ---------- ARCHIVED ---------- */
+
+  main.kairo-light
+    .border-dashed {
+    border-color: #e1e4ea !important;
+  }
+
+  /* ---------- SCROLLBAR ---------- */
+
+  main.kairo-light ::-webkit-scrollbar {
+    width: 7px;
+    height: 7px;
+  }
+
+  main.kairo-light ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  main.kairo-light ::-webkit-scrollbar-thumb {
+    background: #d5d8df;
+    border-radius: 999px;
+  }
+
+  main.kairo-light
+    ::-webkit-scrollbar-thumb:hover {
+    background: #bfc3cd;
+  }
+
+  /* ---------- SMOOTH THEME TRANSITION ---------- */
+
+  main.kairo-light,
+  main.kairo-light aside,
+  main.kairo-light section,
+  main.kairo-light header,
+  main.kairo-light button,
+  main.kairo-light textarea {
+    transition:
+      background-color 0.25s ease,
+      border-color 0.25s ease,
+      color 0.25s ease,
+      box-shadow 0.25s ease;
+  }
+`}</style>
 
       <main
         className={`h-screen ${
