@@ -14,7 +14,10 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   applicationName: "Kairo AI",
-
+icons: {
+  icon: "/icon.png",
+  apple: "/icon.png",
+},
   title: {
     default: "Kairo AI — Your Intelligent AI Companion",
     template: "%s | Kairo AI",
