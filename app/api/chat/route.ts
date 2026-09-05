@@ -2,27 +2,57 @@ import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
+type Attachment = {
+  name?: string;
+  type?: string;
+  size?: number;
+  url?: string;
+  key?: string;
+  relativePath?: string;
+};
+
+type InputMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
+
 export async function POST(req: Request) {
   try {
     const body = await req.json();
 
-    const messages = Array.isArray(body?.messages)
+    const rawMessages = Array.isArray(body?.messages)
       ? body.messages
-          .filter(
-            (m: any) =>
-              (m?.role === "user" || m?.role === "assistant") &&
-              typeof m?.content === "string" &&
-              m.content.trim().length > 0
-          )
-          .map((m: any) => ({
-            role: m.role,
-            content: m.content.trim(),
-          }))
       : [];
 
-    if (messages.length === 0) {
+    const messages: InputMessage[] = rawMessages
+      .filter(
+        (m: any) =>
+          (m?.role === "user" || m?.role === "assistant") &&
+          typeof m?.content === "string" &&
+          m.content.trim().length > 0
+      )
+      .map((m: any) => ({
+        role: m.role,
+        content: m.content.trim(),
+      }));
+
+    const attachments: Attachment[] = Array.isArray(
+      body?.attachments
+    )
+      ? body.attachments.filter(
+          (attachment: any) =>
+            attachment &&
+            typeof attachment === "object" &&
+            typeof attachment.url === "string" &&
+            attachment.url.trim().length > 0
+        )
+      : [];
+
+    if (messages.length === 0 && attachments.length === 0) {
       return NextResponse.json(
-        { error: "No messages provided." },
+        {
+          error: "No messages or attachments provided.",
+        },
         { status: 400 }
       );
     }
@@ -32,31 +62,43 @@ export async function POST(req: Request) {
     if (!apiKey) {
       return NextResponse.json(
         {
-          error: "GROQ_API_KEY is missing. Check your .env.local file.",
+          error:
+            "GROQ_API_KEY is missing. Check your environment variables.",
         },
         { status: 500 }
       );
     }
 
-    const model = "openai/gpt-oss-120b";
+    /*
+     * ---------------------------------------------------------
+     * MODEL SELECTION
+     * ---------------------------------------------------------
+     *
+     * Normal chat:
+     *   openai/gpt-oss-120b
+     *
+     * Image chat:
+     *   meta-llama/llama-4-scout-17b-16e-instruct
+     *
+     * The vision model is selected automatically whenever
+     * an image attachment is present.
+     */
 
-    const groqResponse = await fetch(
-      "https://api.groq.com/openai/v1/chat/completions",
-      {
-        method: "POST",
+    const imageAttachments = attachments.filter(
+      (attachment) =>
+        typeof attachment.type === "string" &&
+        attachment.type.startsWith("image/") &&
+        typeof attachment.url === "string" &&
+        attachment.url.trim().length > 0
+    );
 
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
+    const hasImages = imageAttachments.length > 0;
 
-        body: JSON.stringify({
-          model,
+    const model = hasImages
+      ? "meta-llama/llama-4-scout-17b-16e-instruct"
+      : "openai/gpt-oss-120b";
 
-          messages: [
-            {
-              role: "system",
-              content: `
+    const systemPrompt = `
 You are KAIRO, a helpful, intelligent, friendly and natural AI assistant.
 
 RESPONSE LENGTH RULES:
@@ -78,25 +120,140 @@ LANGUAGE:
 - If the user speaks English, respond in English.
 - Match the user's tone naturally.
 
+IMAGE UNDERSTANDING:
+- When an image is attached, actually analyze the image and answer based on what you can see.
+- Never claim that you cannot see an attached image if a valid image has been provided to you.
+- If the user asks how an image looks, describe the visible subject, composition, lighting, colors, quality, mood and other relevant visual details.
+- Do not invent details that are not visible.
+- If something in the image is unclear, honestly say that it is unclear.
+- When the user asks for an opinion about an image, give a natural and useful opinion.
+- Treat the attached image as part of the user's question.
+
 IMPORTANT:
 Be concise by default, but never omit important information needed to correctly answer the question.
-`,
-            },
-            ...messages,
-          ],
+`;
 
-          temperature: 0.5,
+    /*
+     * ---------------------------------------------------------
+     * BUILD GROQ MESSAGES
+     * ---------------------------------------------------------
+     */
+
+    let groqMessages: any[];
+
+    if (hasImages) {
+      /*
+       * Vision request.
+       *
+       * We keep the conversation history, but the latest user
+       * message becomes a multimodal message containing:
+       *
+       *   1. text
+       *   2. image_url
+       */
+
+      const previousMessages = messages.slice(0, -1);
+
+      const lastUserMessage =
+        messages.length > 0
+          ? messages[messages.length - 1]
+          : null;
+
+      const latestText =
+        lastUserMessage?.role === "user"
+          ? lastUserMessage.content
+          : "Please analyze the attached image.";
+
+      groqMessages = [
+        {
+          role: "system",
+          content: systemPrompt,
+        },
+
+        ...previousMessages.map((message) => ({
+          role: message.role,
+          content: message.content,
+        })),
+
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text:
+                latestText ||
+                "Please analyze the attached image.",
+            },
+
+            ...imageAttachments.map((attachment) => ({
+              type: "image_url",
+              image_url: {
+                url: attachment.url,
+              },
+            })),
+          ],
+        },
+      ];
+    } else {
+      /*
+       * Normal text-only request.
+       */
+
+      groqMessages = [
+        {
+          role: "system",
+          content: systemPrompt,
+        },
+
+        ...messages.map((message) => ({
+          role: message.role,
+          content: message.content,
+        })),
+      ];
+    }
+
+    /*
+     * ---------------------------------------------------------
+     * GROQ REQUEST
+     * ---------------------------------------------------------
+     */
+
+    const groqResponse = await fetch(
+      "https://api.groq.com/openai/v1/chat/completions",
+      {
+        method: "POST",
+
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+
+        body: JSON.stringify({
+          model,
+
+          messages: groqMessages,
+
+          temperature: hasImages ? 0.4 : 0.5,
 
           max_completion_tokens: 2048,
 
-          reasoning_effort: "low",
-
-          reasoning_format: "hidden",
+          ...(model === "openai/gpt-oss-120b"
+            ? {
+                reasoning_effort: "low",
+                reasoning_format: "hidden",
+              }
+            : {}),
 
           stream: true,
         }),
       }
     );
+
+    /*
+     * ---------------------------------------------------------
+     * GROQ ERROR
+     * ---------------------------------------------------------
+     */
 
     if (!groqResponse.ok) {
       const errorText = await groqResponse.text();
@@ -124,6 +281,12 @@ Be concise by default, but never omit important information needed to correctly 
       );
     }
 
+    /*
+     * ---------------------------------------------------------
+     * STREAM RESPONSE
+     * ---------------------------------------------------------
+     */
+
     if (!groqResponse.body) {
       return NextResponse.json(
         {
@@ -138,13 +301,15 @@ Be concise by default, but never omit important information needed to correctly 
 
     const stream = new ReadableStream({
       async start(controller) {
-        const reader = groqResponse.body!.getReader();
+        const reader =
+          groqResponse.body!.getReader();
 
         let buffer = "";
 
         try {
           while (true) {
-            const { value, done } = await reader.read();
+            const { value, done } =
+              await reader.read();
 
             if (done) {
               break;
@@ -154,29 +319,41 @@ Be concise by default, but never omit important information needed to correctly 
               stream: true,
             });
 
-            const lines = buffer.split("\n");
+            const lines =
+              buffer.split("\n");
 
-            buffer = lines.pop() || "";
+            buffer =
+              lines.pop() || "";
 
             for (const line of lines) {
-              const trimmed = line.trim();
+              const trimmed =
+                line.trim();
 
-              if (!trimmed.startsWith("data:")) {
+              if (
+                !trimmed.startsWith("data:")
+              ) {
                 continue;
               }
 
-              const data = trimmed.slice(5).trim();
+              const data =
+                trimmed.slice(5).trim();
 
-              if (!data || data === "[DONE]") {
+              if (
+                !data ||
+                data === "[DONE]"
+              ) {
                 continue;
               }
 
               try {
-                const parsed = JSON.parse(data);
+                const parsed =
+                  JSON.parse(data);
 
-                const choice = parsed?.choices?.[0];
+                const choice =
+                  parsed?.choices?.[0];
 
-                const text = choice?.delta?.content;
+                const text =
+                  choice?.delta?.content;
 
                 if (
                   typeof text === "string" &&
@@ -200,7 +377,9 @@ Be concise by default, but never omit important information needed to correctly 
           }
 
           controller.enqueue(
-            encoder.encode("data: [DONE]\n\n")
+            encoder.encode(
+              "data: [DONE]\n\n"
+            )
           );
 
           controller.close();
