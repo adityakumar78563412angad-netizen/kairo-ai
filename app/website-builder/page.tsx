@@ -1,125 +1,32 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-
-type Device = "desktop" | "tablet" | "mobile";
-type Tab = "preview" | "code";
-
-type Project = {
-  id: string;
-  name: string;
-  prompt: string;
-  html: string;
-  createdAt: string;
-};
-
-const STORAGE_KEY = "kairo-website-builder-projects";
-
-const templates = [
-  {
-    id: "portfolio",
-    name: "Portfolio",
-    icon: "✦",
-    description: "Personal portfolio website",
-    prompt:
-      "Create a modern premium personal portfolio website for a creative developer. Include a hero section, about section, skills, projects, experience, contact section, smooth animations, responsive design and a dark futuristic visual style.",
-  },
-  {
-    id: "startup",
-    name: "Startup",
-    icon: "🚀",
-    description: "SaaS startup landing page",
-    prompt:
-      "Create a premium SaaS startup landing page. Include navbar, hero section with CTA buttons, trusted companies, features, product showcase, pricing cards, testimonials, FAQ, final CTA and footer. Make it modern, responsive and conversion focused.",
-  },
-  {
-    id: "agency",
-    name: "Agency",
-    icon: "◈",
-    description: "Creative digital agency",
-    prompt:
-      "Create a high-end creative digital agency website. Include a bold hero, services, selected work/projects, statistics, team, testimonials, process section, contact CTA and footer. Use premium typography, smooth animations and responsive layouts.",
-  },
-  {
-    id: "restaurant",
-    name: "Restaurant",
-    icon: "🍽",
-    description: "Restaurant website",
-    prompt:
-      "Create a beautiful premium restaurant website. Include hero, navigation, menu categories, popular dishes, about the restaurant, gallery, customer reviews, opening hours, reservation CTA, location and footer. Make it elegant and fully responsive.",
-  },
-];
+import { FormEvent, useState } from "react";
+import { useRouter } from "next/navigation";
 
 export default function WebsiteBuilderPage() {
+  const router = useRouter();
+
   const [prompt, setPrompt] = useState("");
-  const [projectName, setProjectName] = useState("My Website");
-
-  const [html, setHtml] = useState("");
-  const [previousHtml, setPreviousHtml] = useState("");
-  const [nextHtml, setNextHtml] = useState("");
-
-  const [activeTab, setActiveTab] = useState<Tab>("preview");
-  const [device, setDevice] = useState<Device>("desktop");
-
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const [savedProjects, setSavedProjects] = useState<Project[]>([]);
-  const [showProjects, setShowProjects] = useState(false);
+  async function generateWebsite(event?: FormEvent) {
+    event?.preventDefault();
 
-  const [copied, setCopied] = useState(false);
-  const [fullscreen, setFullscreen] = useState(false);
-
-  const [history, setHistory] = useState<string[]>([]);
-  const [historyIndex, setHistoryIndex] = useState(-1);
-
-  const currentTemplate = useMemo(() => {
-    return templates.find((template) => prompt === template.prompt);
-  }, [prompt]);
-
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-
-      if (saved) {
-        setSavedProjects(JSON.parse(saved));
-      }
-    } catch {
-      console.error("Failed to load saved projects");
-    }
-  }, []);
-
-  function updateHistory(newHtml: string) {
-    if (!newHtml) return;
-
-    setHistory((current) => {
-      const trimmed = current.slice(0, historyIndex + 1);
-
-      const updated = [...trimmed, newHtml];
-
-      return updated.slice(-20);
-    });
-
-    setHistoryIndex((current) => {
-      if (current < 0) return 0;
-      return Math.min(current + 1, 19);
-    });
-  }
-
-  async function generateWebsite(
-    customPrompt?: string,
-    templateName?: string
-  ) {
-    const finalPrompt = (customPrompt ?? prompt).trim();
+    const finalPrompt = prompt.trim();
 
     if (!finalPrompt) {
-      setError("Pehle batao ki website kaisi chahiye.");
+      setError("Pehle batao ki tum kis type ki website banana chahte ho.");
+      return;
+    }
+
+    if (finalPrompt.length > 10000) {
+      setError("Prompt 10,000 characters se chhota rakho.");
       return;
     }
 
     setError("");
     setLoading(true);
-    setCopied(false);
 
     try {
       const response = await fetch("/api/website-builder", {
@@ -128,6 +35,7 @@ export default function WebsiteBuilderPage() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
+          action: "generate",
           prompt: finalPrompt,
         }),
       });
@@ -141,192 +49,83 @@ export default function WebsiteBuilderPage() {
       }
 
       if (!data.html || typeof data.html !== "string") {
-        throw new Error("AI ne valid website code return nahi kiya.");
-      }
-
-      setPreviousHtml(html);
-      setNextHtml("");
-      setHtml(data.html);
-
-      setHistory((current) => {
-        const updated = [...current.slice(0, historyIndex + 1), data.html];
-        return updated.slice(-20);
-      });
-
-      setHistoryIndex((current) => {
-        if (current < 0) return 0;
-        return Math.min(current + 1, 19);
-      });
-
-      if (templateName) {
-        setProjectName(
-          `${templateName.charAt(0).toUpperCase()}${templateName.slice(1)} Website`
+        throw new Error(
+          "AI ne valid website code return nahi kiya."
         );
       }
+
+      const websiteName =
+        createWebsiteName(finalPrompt);
+
+      sessionStorage.setItem(
+        "kairo-website-builder-project",
+        JSON.stringify({
+          prompt: finalPrompt,
+          html: data.html,
+          name: websiteName,
+          createdAt: new Date().toISOString(),
+        })
+      );
+
+      router.push("/website-builder/editor");
     } catch (err) {
-      console.error(err);
+      console.error(
+        "Website Builder generation error:",
+        err
+      );
 
       setError(
         err instanceof Error
           ? err.message
-          : "Something went wrong while generating the website."
+          : "Website generate karte waqt kuch galat ho gaya."
       );
-    } finally {
+
       setLoading(false);
     }
   }
 
-  function selectTemplate(template: (typeof templates)[number]) {
-    setPrompt(template.prompt);
-    setProjectName(
-      `${template.name} Website`
-    );
-    setError("");
-  }
+  function createWebsiteName(text: string) {
+    const cleaned = text
+      .replace(
+        /create|make|build|design|a|an|the|website|site/gi,
+        " "
+      )
+      .replace(/\s+/g, " ")
+      .trim();
 
-  function undo() {
-    if (historyIndex <= 0) return;
-
-    const newIndex = historyIndex - 1;
-
-    setNextHtml(history[historyIndex]);
-    setHtml(history[newIndex]);
-    setHistoryIndex(newIndex);
-  }
-
-  function redo() {
-    if (historyIndex >= history.length - 1) return;
-
-    const newIndex = historyIndex + 1;
-
-    setPreviousHtml(history[historyIndex]);
-    setHtml(history[newIndex]);
-    setHistoryIndex(newIndex);
-  }
-
-  function refreshPreview() {
-    if (!html) return;
-
-    setHtml((current) => {
-      const refreshed = current;
-
-      setTimeout(() => {
-        setHtml(refreshed);
-      }, 0);
-
-      return refreshed;
-    });
-  }
-
-  async function copyCode() {
-    if (!html) return;
-
-    try {
-      await navigator.clipboard.writeText(html);
-
-      setCopied(true);
-
-      setTimeout(() => {
-        setCopied(false);
-      }, 2000);
-    } catch {
-      setError("Code copy nahi ho paya.");
-    }
-  }
-
-  function saveProject() {
-    if (!html) {
-      setError("Save karne ke liye pehle website generate karo.");
-      return;
+    if (!cleaned) {
+      return "My Website";
     }
 
-    const newProject: Project = {
-      id: crypto.randomUUID(),
-      name: projectName.trim() || "My Website",
-      prompt,
-      html,
-      createdAt: new Date().toISOString(),
-    };
+    const words = cleaned
+      .split(" ")
+      .filter(Boolean)
+      .slice(0, 4);
 
-    const updatedProjects = [newProject, ...savedProjects].slice(0, 20);
+    const name = words
+      .map(
+        (word) =>
+          word.charAt(0).toUpperCase() +
+          word.slice(1)
+      )
+      .join(" ");
 
-    setSavedProjects(updatedProjects);
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify(updatedProjects)
-    );
+    return `${name} Website`;
+  }
 
+  function useExample(text: string) {
+    setPrompt(text);
     setError("");
+
+    setTimeout(() => {
+      document
+        .getElementById("website-prompt")
+        ?.focus();
+    }, 50);
   }
-
-  function loadProject(project: Project) {
-    setProjectName(project.name);
-    setPrompt(project.prompt);
-    setHtml(project.html);
-
-    setHistory([project.html]);
-    setHistoryIndex(0);
-
-    setShowProjects(false);
-    setActiveTab("preview");
-    setError("");
-  }
-
-  function deleteProject(id: string) {
-    const updated = savedProjects.filter(
-      (project) => project.id !== id
-    );
-
-    setSavedProjects(updated);
-
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify(updated)
-    );
-  }
-
-  function exportHtml() {
-    if (!html) {
-      setError("Export karne ke liye pehle website generate karo.");
-      return;
-    }
-
-    const blob = new Blob([html], {
-      type: "text/html;charset=utf-8",
-    });
-
-    const url = URL.createObjectURL(blob);
-
-    const anchor = document.createElement("a");
-
-    anchor.href = url;
-    anchor.download =
-      `${projectName.trim().replace(/\s+/g, "-").toLowerCase() || "kairo-website"}.html`;
-
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-
-    URL.revokeObjectURL(url);
-  }
-
-  function openFullscreen() {
-    setFullscreen(true);
-  }
-
-  function closeFullscreen() {
-    setFullscreen(false);
-  }
-
-  const previewWidth =
-    device === "desktop"
-      ? "100%"
-      : device === "tablet"
-        ? "768px"
-        : "390px";
 
   return (
-    <main className="builder-page">
+    <main className="kairo-builder-home">
       <style jsx global>{`
         * {
           box-sizing: border-box;
@@ -337,7 +136,9 @@ export default function WebsiteBuilderPage() {
           margin: 0;
           padding: 0;
           background: #050505;
-          color: #fff;
+        }
+
+        body {
           font-family:
             Inter,
             ui-sans-serif,
@@ -349,8 +150,7 @@ export default function WebsiteBuilderPage() {
         }
 
         button,
-        textarea,
-        input {
+        textarea {
           font: inherit;
         }
 
@@ -358,191 +158,305 @@ export default function WebsiteBuilderPage() {
           cursor: pointer;
         }
 
-        .builder-page {
+        .kairo-builder-home {
           min-height: 100vh;
+          color: #fff;
           background:
             radial-gradient(
-              circle at 15% 0%,
-              rgba(110, 75, 255, 0.13),
-              transparent 28%
+              circle at 50% -15%,
+              rgba(124, 92, 255, 0.18),
+              transparent 35%
             ),
             radial-gradient(
-              circle at 90% 10%,
-              rgba(0, 200, 255, 0.08),
+              circle at 10% 45%,
+              rgba(59, 130, 246, 0.07),
+              transparent 25%
+            ),
+            radial-gradient(
+              circle at 90% 55%,
+              rgba(168, 85, 247, 0.06),
               transparent 25%
             ),
             #050505;
-          color: #fff;
+          overflow-x: hidden;
         }
 
-        .builder-shell {
-          width: 100%;
+        .builder-container {
           min-height: 100vh;
+          width: min(1180px, 100%);
+          margin: 0 auto;
+          padding: 0 28px;
           display: flex;
           flex-direction: column;
         }
 
-        .builder-header {
-          height: 70px;
-          padding: 0 24px;
+        .builder-navbar {
+          height: 76px;
           display: flex;
           align-items: center;
           justify-content: space-between;
-          border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-          background: rgba(5, 5, 5, 0.82);
-          backdrop-filter: blur(18px);
-          position: sticky;
-          top: 0;
-          z-index: 50;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.06);
         }
 
-        .brand-area {
+        .builder-brand {
           display: flex;
           align-items: center;
-          gap: 12px;
+          gap: 11px;
         }
 
-        .brand-icon {
-          width: 36px;
-          height: 36px;
-          border-radius: 11px;
+        .builder-logo {
+          width: 38px;
+          height: 38px;
+          border-radius: 12px;
           display: flex;
           align-items: center;
           justify-content: center;
-          background: linear-gradient(135deg, #7c5cff, #3b82f6);
+          font-size: 17px;
           font-weight: 900;
-          box-shadow: 0 0 30px rgba(124, 92, 255, 0.35);
+          background:
+            linear-gradient(
+              135deg,
+              #8b6cff,
+              #4f46e5
+            );
+          box-shadow:
+            0 0 35px rgba(124, 92, 255, 0.3),
+            inset 0 1px rgba(255, 255, 255, 0.25);
         }
 
-        .brand-title {
+        .builder-brand-name {
+          font-size: 15px;
           font-weight: 800;
-          font-size: 16px;
           letter-spacing: -0.3px;
         }
 
-        .brand-subtitle {
-          color: #777;
-          font-size: 11px;
+        .builder-brand-subtitle {
+          color: #666;
+          font-size: 10px;
           margin-top: 2px;
         }
 
-        .header-actions {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-        }
-
-        .icon-button,
-        .secondary-button {
-          border: 1px solid rgba(255, 255, 255, 0.1);
-          background: rgba(255, 255, 255, 0.045);
-          color: #ddd;
-          border-radius: 10px;
+        .back-button {
           height: 38px;
-          padding: 0 13px;
+          padding: 0 14px;
+          display: inline-flex;
+          align-items: center;
+          gap: 7px;
+          border: 1px solid rgba(255, 255, 255, 0.09);
+          border-radius: 10px;
+          background: rgba(255, 255, 255, 0.035);
+          color: #aaa;
+          font-size: 12px;
           transition: 0.2s ease;
         }
 
-        .icon-button {
-          width: 38px;
-          padding: 0;
+        .back-button:hover {
+          color: #fff;
+          background: rgba(255, 255, 255, 0.07);
+          border-color: rgba(255, 255, 255, 0.15);
+          transform: translateX(-1px);
+        }
+
+        .builder-main {
+          flex: 1;
           display: flex;
           align-items: center;
           justify-content: center;
+          padding: 70px 0 90px;
         }
 
-        .icon-button:hover,
-        .secondary-button:hover {
-          background: rgba(255, 255, 255, 0.09);
-          border-color: rgba(255, 255, 255, 0.17);
-          color: white;
+        .builder-content {
+          width: min(900px, 100%);
+          text-align: center;
+          margin-top: -20px;
         }
 
-        .builder-layout {
-          flex: 1;
-          display: grid;
-          grid-template-columns: 380px minmax(0, 1fr);
-          min-height: calc(100vh - 70px);
-        }
-
-        .control-panel {
-          border-right: 1px solid rgba(255, 255, 255, 0.08);
-          background: rgba(8, 8, 8, 0.75);
-          padding: 20px;
-          overflow-y: auto;
-        }
-
-        .panel-section {
-          margin-bottom: 22px;
-        }
-
-        .section-label {
+        .ai-badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          padding: 7px 12px;
+          border-radius: 999px;
+          border: 1px solid rgba(124, 92, 255, 0.2);
+          background: rgba(124, 92, 255, 0.07);
+          color: #b9adff;
           font-size: 11px;
-          text-transform: uppercase;
-          letter-spacing: 1.2px;
-          color: #777;
           font-weight: 700;
-          margin-bottom: 9px;
+          margin-bottom: 25px;
+          box-shadow: 0 0 30px rgba(124, 92, 255, 0.08);
         }
 
-        .project-input {
+        .ai-dot {
+          width: 6px;
+          height: 6px;
+          border-radius: 50%;
+          background: #8b7cff;
+          box-shadow: 0 0 12px #8b7cff;
+        }
+
+        .builder-heading {
+          margin: 0;
+          font-size: clamp(42px, 7vw, 76px);
+          line-height: 0.98;
+          letter-spacing: -4px;
+          font-weight: 900;
+        }
+
+        .builder-heading-gradient {
+          display: block;
+          background:
+            linear-gradient(
+              110deg,
+              #ffffff 5%,
+              #c7bcff 45%,
+              #8b7cff 75%,
+              #6d5cff 100%
+            );
+          -webkit-background-clip: text;
+          background-clip: text;
+          color: transparent;
+        }
+
+        .builder-description {
+          width: min(680px, 100%);
+          margin: 25px auto 0;
+          color: #888;
+          font-size: 15px;
+          line-height: 1.7;
+        }
+
+        .prompt-wrapper {
+          width: min(820px, 100%);
+          margin: 42px auto 0;
+        }
+
+        .prompt-card {
+          position: relative;
+          padding: 1px;
+          border-radius: 20px;
+          background:
+            linear-gradient(
+              135deg,
+              rgba(124, 92, 255, 0.45),
+              rgba(255, 255, 255, 0.08),
+              rgba(59, 130, 246, 0.2)
+            );
+          box-shadow:
+            0 35px 90px rgba(0, 0, 0, 0.45),
+            0 0 80px rgba(124, 92, 255, 0.07);
+        }
+
+        .prompt-card-inner {
+          border-radius: 19px;
+          background:
+            radial-gradient(
+              circle at 50% 0%,
+              rgba(124, 92, 255, 0.06),
+              transparent 45%
+            ),
+            #0b0b0d;
+          padding: 20px;
+        }
+
+        .prompt-top {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 0 4px 12px;
+        }
+
+        .prompt-label {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          color: #aaa;
+          font-size: 11px;
+          font-weight: 700;
+        }
+
+        .prompt-spark {
+          color: #9a8cff;
+          font-size: 15px;
+        }
+
+        .prompt-status {
+          color: #555;
+          font-size: 10px;
+        }
+
+        .prompt-input {
           width: 100%;
-          height: 43px;
-          border-radius: 11px;
-          border: 1px solid rgba(255, 255, 255, 0.1);
+          min-height: 145px;
+          resize: none;
+          border: 0;
+          outline: 0;
+          border-radius: 13px;
+          padding: 15px;
+          color: #f4f4f5;
+          background: rgba(255, 255, 255, 0.035);
+          font-size: 14px;
+          line-height: 1.7;
+        }
+
+        .prompt-input::placeholder {
+          color: #555;
+        }
+
+        .prompt-input:focus {
           background: rgba(255, 255, 255, 0.045);
-          color: white;
-          padding: 0 13px;
-          outline: none;
         }
 
-        .project-input:focus {
-          border-color: rgba(124, 92, 255, 0.7);
-          box-shadow: 0 0 0 3px rgba(124, 92, 255, 0.1);
+        .prompt-bottom {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          margin-top: 12px;
+          padding: 0 2px;
         }
 
-        .prompt-box {
-          width: 100%;
-          min-height: 155px;
-          resize: vertical;
-          border-radius: 14px;
-          border: 1px solid rgba(255, 255, 255, 0.1);
-          background: rgba(255, 255, 255, 0.04);
-          color: white;
-          padding: 13px;
-          outline: none;
-          line-height: 1.55;
-          font-size: 13px;
-        }
-
-        .prompt-box::placeholder {
-          color: #666;
-        }
-
-        .prompt-box:focus {
-          border-color: rgba(124, 92, 255, 0.7);
-          box-shadow: 0 0 0 3px rgba(124, 92, 255, 0.1);
+        .prompt-hint {
+          color: #555;
+          font-size: 10px;
+          text-align: left;
         }
 
         .generate-button {
-          width: 100%;
-          height: 47px;
+          min-width: 175px;
+          height: 46px;
           border: 0;
-          border-radius: 12px;
+          border-radius: 11px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
           color: white;
+          font-size: 12px;
           font-weight: 800;
-          background: linear-gradient(135deg, #7657ff, #4f46e5);
+          background:
+            linear-gradient(
+              135deg,
+              #8066ff,
+              #5b4be7
+            );
           box-shadow:
-            0 12px 30px rgba(79, 70, 229, 0.25),
+            0 12px 28px rgba(91, 75, 231, 0.3),
             inset 0 1px rgba(255, 255, 255, 0.2);
-          transition: 0.2s ease;
+          transition:
+            transform 0.2s ease,
+            box-shadow 0.2s ease,
+            opacity 0.2s ease;
         }
 
         .generate-button:hover:not(:disabled) {
-          transform: translateY(-1px);
+          transform: translateY(-2px);
           box-shadow:
-            0 15px 35px rgba(79, 70, 229, 0.35),
-            inset 0 1px rgba(255, 255, 255, 0.2);
+            0 17px 35px rgba(91, 75, 231, 0.4),
+            inset 0 1px rgba(255, 255, 255, 0.25);
+        }
+
+        .generate-button:active:not(:disabled) {
+          transform: translateY(0);
         }
 
         .generate-button:disabled {
@@ -550,863 +464,408 @@ export default function WebsiteBuilderPage() {
           cursor: wait;
         }
 
-        .templates-grid {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 8px;
+        .examples {
+          margin-top: 27px;
         }
 
-        .template-card {
-          text-align: left;
-          border: 1px solid rgba(255, 255, 255, 0.08);
-          background: rgba(255, 255, 255, 0.035);
-          color: white;
-          border-radius: 12px;
-          padding: 12px;
-          min-height: 92px;
-          transition: 0.2s ease;
-        }
-
-        .template-card:hover {
-          transform: translateY(-1px);
-          background: rgba(255, 255, 255, 0.07);
-          border-color: rgba(124, 92, 255, 0.35);
-        }
-
-        .template-icon {
-          font-size: 20px;
-          margin-bottom: 8px;
-        }
-
-        .template-name {
-          font-size: 12px;
-          font-weight: 800;
-        }
-
-        .template-description {
-          margin-top: 4px;
+        .examples-label {
+          color: #555;
           font-size: 10px;
-          color: #777;
-          line-height: 1.4;
-        }
-
-        .error-box {
-          border: 1px solid rgba(255, 70, 70, 0.3);
-          background: rgba(255, 50, 50, 0.07);
-          color: #ff9d9d;
-          border-radius: 11px;
-          padding: 11px;
-          font-size: 12px;
-          line-height: 1.5;
-          margin-bottom: 14px;
-        }
-
-        .saved-projects {
-          display: flex;
-          flex-direction: column;
-          gap: 8px;
-        }
-
-        .saved-project {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 10px;
-          border: 1px solid rgba(255, 255, 255, 0.08);
-          background: rgba(255, 255, 255, 0.035);
-          border-radius: 11px;
-          padding: 10px;
-        }
-
-        .saved-project-info {
-          min-width: 0;
-          flex: 1;
-          cursor: pointer;
-        }
-
-        .saved-project-name {
-          font-size: 12px;
-          font-weight: 700;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-        }
-
-        .saved-project-date {
-          color: #666;
-          font-size: 10px;
-          margin-top: 3px;
-        }
-
-        .delete-project {
-          border: 0;
-          background: transparent;
-          color: #777;
-          padding: 6px;
-        }
-
-        .delete-project:hover {
-          color: #ff7373;
-        }
-
-        .workspace {
-          min-width: 0;
-          display: flex;
-          flex-direction: column;
-          background: #0a0a0a;
-        }
-
-        .workspace-toolbar {
-          height: 58px;
-          padding: 0 15px;
-          border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 10px;
-          background: rgba(10, 10, 10, 0.8);
-        }
-
-        .toolbar-left,
-        .toolbar-right {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-        }
-
-        .tab-button {
-          height: 34px;
-          padding: 0 12px;
-          border-radius: 8px;
-          border: 1px solid transparent;
-          background: transparent;
-          color: #777;
-          font-size: 12px;
-          font-weight: 700;
-        }
-
-        .tab-button.active {
-          color: white;
-          background: rgba(255, 255, 255, 0.08);
-          border-color: rgba(255, 255, 255, 0.08);
-        }
-
-        .device-button {
-          width: 34px;
-          height: 34px;
-          border: 1px solid transparent;
-          background: transparent;
-          color: #666;
-          border-radius: 8px;
-        }
-
-        .device-button:hover,
-        .device-button.active {
-          color: white;
-          background: rgba(255, 255, 255, 0.08);
-          border-color: rgba(255, 255, 255, 0.08);
-        }
-
-        .divider {
-          width: 1px;
-          height: 22px;
-          background: rgba(255, 255, 255, 0.08);
-          margin: 0 4px;
-        }
-
-        .preview-area {
-          flex: 1;
-          min-height: 0;
-          overflow: auto;
-          display: flex;
-          justify-content: center;
-          align-items: flex-start;
-          padding: 25px;
-          background:
-            radial-gradient(
-              circle at center,
-              rgba(255, 255, 255, 0.025),
-              transparent 50%
-            ),
-            #101010;
-        }
-
-        .preview-frame {
-          width: var(--preview-width);
-          max-width: 100%;
-          height: calc(100vh - 180px);
-          min-height: 500px;
-          border: 1px solid rgba(255, 255, 255, 0.12);
-          border-radius: 13px;
-          overflow: hidden;
-          background: white;
-          box-shadow: 0 25px 70px rgba(0, 0, 0, 0.45);
-          transition: width 0.25s ease;
-        }
-
-        .preview-frame iframe {
-          width: 100%;
-          height: 100%;
-          border: 0;
-          display: block;
-          background: white;
-        }
-
-        .empty-preview {
-          width: 100%;
-          height: 100%;
-          min-height: 500px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          text-align: center;
-          color: #666;
-        }
-
-        .empty-preview-inner {
-          max-width: 450px;
-        }
-
-        .empty-icon {
-          width: 62px;
-          height: 62px;
-          border-radius: 18px;
-          margin: 0 auto 18px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          background: rgba(124, 92, 255, 0.1);
-          border: 1px solid rgba(124, 92, 255, 0.2);
-          font-size: 28px;
-        }
-
-        .empty-title {
-          color: #ddd;
-          font-size: 20px;
-          font-weight: 800;
-          margin-bottom: 8px;
-        }
-
-        .empty-description {
-          color: #666;
-          font-size: 13px;
-          line-height: 1.6;
-        }
-
-        .code-container {
-          flex: 1;
-          min-height: 0;
-          overflow: auto;
-          padding: 20px;
-          background: #080808;
-        }
-
-        .code-header {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
           margin-bottom: 10px;
         }
 
-        .code-title {
-          color: #999;
-          font-size: 12px;
-          font-weight: 700;
-        }
-
-        .code-area {
-          margin: 0;
-          min-height: calc(100vh - 170px);
-          border: 1px solid rgba(255, 255, 255, 0.08);
-          border-radius: 12px;
-          background: #050505;
-          color: #d7d7d7;
-          padding: 18px;
-          overflow: auto;
-          font-family:
-            "SFMono-Regular",
-            Consolas,
-            "Liberation Mono",
-            monospace;
-          font-size: 12px;
-          line-height: 1.6;
-          white-space: pre;
-        }
-
-        .fullscreen-overlay {
-          position: fixed;
-          inset: 0;
-          z-index: 999;
-          background: #080808;
+        .example-list {
           display: flex;
-          flex-direction: column;
-        }
-
-        .fullscreen-toolbar {
-          height: 55px;
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          padding: 0 14px;
-          border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-        }
-
-        .fullscreen-title {
-          font-size: 13px;
-          font-weight: 800;
-        }
-
-        .fullscreen-preview {
-          flex: 1;
-          background: white;
-        }
-
-        .fullscreen-preview iframe {
-          width: 100%;
-          height: 100%;
-          border: 0;
-        }
-
-        .loading-overlay {
-          position: fixed;
-          inset: 0;
-          z-index: 900;
-          background: rgba(0, 0, 0, 0.55);
-          backdrop-filter: blur(5px);
-          display: flex;
-          align-items: center;
           justify-content: center;
+          flex-wrap: wrap;
+          gap: 7px;
         }
 
-        .loading-card {
-          width: min(390px, calc(100vw - 30px));
-          border: 1px solid rgba(255, 255, 255, 0.1);
-          background: #101010;
-          border-radius: 18px;
-          padding: 26px;
-          text-align: center;
-          box-shadow: 0 25px 80px rgba(0, 0, 0, 0.5);
-        }
-
-        .spinner {
-          width: 38px;
-          height: 38px;
-          border-radius: 50%;
-          border: 3px solid rgba(255, 255, 255, 0.12);
-          border-top-color: #7c5cff;
-          margin: 0 auto 17px;
-          animation: spin 0.8s linear infinite;
-        }
-
-        .loading-title {
-          font-weight: 800;
-          margin-bottom: 5px;
-        }
-
-        .loading-text {
+        .example-button {
+          border: 1px solid rgba(255, 255, 255, 0.07);
+          background: rgba(255, 255, 255, 0.025);
           color: #777;
-          font-size: 12px;
-          line-height: 1.5;
+          border-radius: 999px;
+          padding: 8px 11px;
+          font-size: 10px;
+          transition: 0.2s ease;
         }
 
-        @keyframes spin {
+        .example-button:hover {
+          color: #bbb;
+          background: rgba(255, 255, 255, 0.055);
+          border-color: rgba(124, 92, 255, 0.25);
+        }
+
+        .error-message {
+          width: min(820px, 100%);
+          margin: 12px auto 0;
+          padding: 10px 13px;
+          border: 1px solid rgba(255, 75, 75, 0.2);
+          border-radius: 10px;
+          background: rgba(255, 55, 55, 0.06);
+          color: #ff9b9b;
+          text-align: left;
+          font-size: 11px;
+        }
+
+        .builder-features {
+          margin-top: 55px;
+          display: grid;
+          grid-template-columns:
+            repeat(3, 1fr);
+          gap: 10px;
+        }
+
+        .feature {
+          padding: 15px;
+          border: 1px solid rgba(255, 255, 255, 0.055);
+          border-radius: 12px;
+          background: rgba(255, 255, 255, 0.018);
+          text-align: left;
+        }
+
+        .feature-icon {
+          font-size: 15px;
+          margin-bottom: 8px;
+        }
+
+        .feature-title {
+          color: #bbb;
+          font-size: 11px;
+          font-weight: 800;
+        }
+
+        .feature-text {
+          color: #555;
+          font-size: 10px;
+          line-height: 1.5;
+          margin-top: 4px;
+        }
+
+        .builder-footer {
+          padding: 22px 0;
+          text-align: center;
+          color: #444;
+          font-size: 10px;
+        }
+
+        .loading-spinner {
+          width: 15px;
+          height: 15px;
+          border: 2px solid rgba(255, 255, 255, 0.25);
+          border-top-color: white;
+          border-radius: 50%;
+          animation: kairo-spin 0.7s linear infinite;
+        }
+
+        @keyframes kairo-spin {
           to {
             transform: rotate(360deg);
           }
         }
 
-        @media (max-width: 900px) {
-          .builder-layout {
-            grid-template-columns: 320px minmax(0, 1fr);
+        @media (max-width: 700px) {
+          .builder-container {
+            padding: 0 15px;
           }
 
-          .control-panel {
-            padding: 15px;
+          .builder-navbar {
+            height: 66px;
           }
 
-          .preview-area {
-            padding: 15px;
-          }
-        }
-
-        @media (max-width: 720px) {
-          .builder-header {
-            padding: 0 12px;
-          }
-
-          .brand-subtitle {
+          .builder-brand-subtitle {
             display: none;
           }
 
-          .builder-layout {
+          .builder-main {
+            padding: 55px 0 60px;
+          }
+
+          .builder-content {
+            margin-top: 0;
+          }
+
+          .builder-heading {
+            font-size: clamp(38px, 13vw, 58px);
+            letter-spacing: -2.5px;
+          }
+
+          .builder-description {
+            font-size: 13px;
+            margin-top: 19px;
+          }
+
+          .prompt-wrapper {
+            margin-top: 30px;
+          }
+
+          .prompt-card-inner {
+            padding: 13px;
+          }
+
+          .prompt-input {
+            min-height: 170px;
+            font-size: 13px;
+          }
+
+          .prompt-bottom {
+            align-items: stretch;
+            flex-direction: column;
+          }
+
+          .prompt-hint {
+            text-align: center;
+          }
+
+          .generate-button {
+            width: 100%;
+          }
+
+          .builder-features {
             grid-template-columns: 1fr;
+            margin-top: 35px;
           }
 
-          .control-panel {
-            border-right: 0;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-            max-height: none;
+          .feature {
+            text-align: center;
           }
 
-          .workspace {
-            min-height: 650px;
-          }
-
-          .preview-frame {
-            height: 600px;
-          }
-
-          .header-actions .secondary-button {
-            display: none;
-          }
-
-          .workspace-toolbar {
-            overflow-x: auto;
-          }
-
-          .toolbar-right {
-            flex-shrink: 0;
+          .back-button {
+            padding: 0 10px;
           }
         }
       `}</style>
 
-      <div className="builder-shell">
-        <header className="builder-header">
-          <div className="brand-area">
-            <div className="brand-icon">K</div>
+      <div className="builder-container">
+        <nav className="builder-navbar">
+          <div className="builder-brand">
+            <div className="builder-logo">K</div>
 
             <div>
-              <div className="brand-title">Kairo Website Builder</div>
-              <div className="brand-subtitle">
-                Build websites with Kairo AI
+              <div className="builder-brand-name">
+                Kairo AI
+              </div>
+
+              <div className="builder-brand-subtitle">
+                Website Builder
               </div>
             </div>
           </div>
 
-          <div className="header-actions">
-            <button
-              className="secondary-button"
-              onClick={() => setShowProjects((value) => !value)}
-            >
-              📁 Projects
-            </button>
+          <button
+            type="button"
+            className="back-button"
+            onClick={() => router.back()}
+          >
+            ← Back
+          </button>
+        </nav>
 
-            <button
-              className="secondary-button"
-              onClick={saveProject}
-              disabled={!html}
-            >
-              💾 Save
-            </button>
-
-            <button
-              className="secondary-button"
-              onClick={exportHtml}
-              disabled={!html}
-            >
-              ↓ Export
-            </button>
-          </div>
-        </header>
-
-        <div className="builder-layout">
-          <aside className="control-panel">
-            {showProjects && (
-              <section className="panel-section">
-                <div className="section-label">
-                  Saved Projects
-                </div>
-
-                {savedProjects.length === 0 ? (
-                  <div
-                    style={{
-                      color: "#666",
-                      fontSize: 12,
-                      padding: "10px 0",
-                    }}
-                  >
-                    Abhi koi saved project nahi hai.
-                  </div>
-                ) : (
-                  <div className="saved-projects">
-                    {savedProjects.map((project) => (
-                      <div
-                        className="saved-project"
-                        key={project.id}
-                      >
-                        <div
-                          className="saved-project-info"
-                          onClick={() => loadProject(project)}
-                        >
-                          <div className="saved-project-name">
-                            {project.name}
-                          </div>
-
-                          <div className="saved-project-date">
-                            {new Date(
-                              project.createdAt
-                            ).toLocaleDateString()}
-                          </div>
-                        </div>
-
-                        <button
-                          className="delete-project"
-                          onClick={() =>
-                            deleteProject(project.id)
-                          }
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </section>
-            )}
-
-            <section className="panel-section">
-              <div className="section-label">
-                Project Name
-              </div>
-
-              <input
-                className="project-input"
-                value={projectName}
-                onChange={(event) =>
-                  setProjectName(event.target.value)
-                }
-                placeholder="My Website"
-              />
-            </section>
-
-            <section className="panel-section">
-              <div className="section-label">
-                Describe your website
-              </div>
-
-              <textarea
-                className="prompt-box"
-                value={prompt}
-                onChange={(event) =>
-                  setPrompt(event.target.value)
-                }
-                placeholder="Example: Create a modern dark portfolio website for a developer with hero, projects, skills, testimonials and contact section..."
-              />
-
-              <div style={{ height: 10 }} />
-
-              {error && (
-                <div className="error-box">
-                  {error}
-                </div>
-              )}
-
-              <button
-                className="generate-button"
-                onClick={() => generateWebsite()}
-                disabled={loading}
-              >
-                {loading
-                  ? "✨ Kairo is building..."
-                  : "✨ Generate Website"}
-              </button>
-            </section>
-
-            <section className="panel-section">
-              <div className="section-label">
-                Start with a template
-              </div>
-
-              <div className="templates-grid">
-                {templates.map((template) => (
-                  <button
-                    key={template.id}
-                    className="template-card"
-                    onClick={() => {
-                      selectTemplate(template);
-                    }}
-                  >
-                    <div className="template-icon">
-                      {template.icon}
-                    </div>
-
-                    <div className="template-name">
-                      {template.name}
-                    </div>
-
-                    <div className="template-description">
-                      {template.description}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </section>
-
-            <section
-              className="panel-section"
-              style={{
-                borderTop:
-                  "1px solid rgba(255,255,255,0.07)",
-                paddingTop: 18,
-              }}
-            >
-              <div className="section-label">
-                AI Builder
-              </div>
-
-              <div
-                style={{
-                  color: "#777",
-                  fontSize: 11,
-                  lineHeight: 1.6,
-                }}
-              >
-                Gemini AI tumhare prompt ko complete
-                responsive HTML, CSS aur JavaScript website
-                mein convert karega.
-              </div>
-            </section>
-          </aside>
-
-          <section className="workspace">
-            <div className="workspace-toolbar">
-              <div className="toolbar-left">
-                <button
-                  className={`tab-button ${
-                    activeTab === "preview" ? "active" : ""
-                  }`}
-                  onClick={() => setActiveTab("preview")}
-                >
-                  ◉ Preview
-                </button>
-
-                <button
-                  className={`tab-button ${
-                    activeTab === "code" ? "active" : ""
-                  }`}
-                  onClick={() => setActiveTab("code")}
-                >
-                  {"</>"} Code
-                </button>
-              </div>
-
-              <div className="toolbar-right">
-                {activeTab === "preview" && (
-                  <>
-                    <button
-                      className={`device-button ${
-                        device === "desktop"
-                          ? "active"
-                          : ""
-                      }`}
-                      onClick={() =>
-                        setDevice("desktop")
-                      }
-                      title="Desktop"
-                    >
-                      🖥
-                    </button>
-
-                    <button
-                      className={`device-button ${
-                        device === "tablet"
-                          ? "active"
-                          : ""
-                      }`}
-                      onClick={() =>
-                        setDevice("tablet")
-                      }
-                      title="Tablet"
-                    >
-                      ▣
-                    </button>
-
-                    <button
-                      className={`device-button ${
-                        device === "mobile"
-                          ? "active"
-                          : ""
-                      }`}
-                      onClick={() =>
-                        setDevice("mobile")
-                      }
-                      title="Mobile"
-                    >
-                      📱
-                    </button>
-
-                    <div className="divider" />
-                  </>
-                )}
-
-                <button
-                  className="icon-button"
-                  onClick={undo}
-                  disabled={
-                    historyIndex <= 0
-                  }
-                  title="Undo"
-                >
-                  ↶
-                </button>
-
-                <button
-                  className="icon-button"
-                  onClick={redo}
-                  disabled={
-                    historyIndex < 0 ||
-                    historyIndex >=
-                      history.length - 1
-                  }
-                  title="Redo"
-                >
-                  ↷
-                </button>
-
-                <button
-                  className="icon-button"
-                  onClick={refreshPreview}
-                  disabled={!html}
-                  title="Refresh"
-                >
-                  ↻
-                </button>
-
-                <div className="divider" />
-
-                <button
-                  className="icon-button"
-                  onClick={copyCode}
-                  disabled={!html}
-                  title="Copy code"
-                >
-                  {copied ? "✓" : "⧉"}
-                </button>
-
-                <button
-                  className="icon-button"
-                  onClick={openFullscreen}
-                  disabled={!html}
-                  title="Fullscreen"
-                >
-                  ⛶
-                </button>
-              </div>
+        <section className="builder-main">
+          <div className="builder-content">
+            <div className="ai-badge">
+              <span className="ai-dot" />
+              Powered by Kairo AI
             </div>
 
-            {activeTab === "preview" ? (
-              <div className="preview-area">
-                {html ? (
-                  <div
-                    className="preview-frame"
-                    style={
-                      {
-                        "--preview-width":
-                          previewWidth,
-                      } as React.CSSProperties
+            <h1 className="builder-heading">
+              Build your website
+              <span className="builder-heading-gradient">
+                with AI.
+              </span>
+            </h1>
+
+            <p className="builder-description">
+              Describe the website you have in mind.
+              Kairo AI will turn your idea into a
+              complete, responsive and professional
+              website.
+            </p>
+
+            <form
+              className="prompt-wrapper"
+              onSubmit={generateWebsite}
+            >
+              <div className="prompt-card">
+                <div className="prompt-card-inner">
+                  <div className="prompt-top">
+                    <div className="prompt-label">
+                      <span className="prompt-spark">
+                        ✦
+                      </span>
+                      Describe your website
+                    </div>
+
+                    <div className="prompt-status">
+                      AI Website Generation
+                    </div>
+                  </div>
+
+                  <textarea
+                    id="website-prompt"
+                    className="prompt-input"
+                    value={prompt}
+                    onChange={(event) =>
+                      setPrompt(event.target.value)
                     }
-                  >
-                    <iframe
-                      title="Kairo Website Preview"
-                      srcDoc={html}
-                      sandbox="allow-scripts allow-forms allow-modals allow-popups allow-same-origin"
-                    />
-                  </div>
-                ) : (
-                  <div className="empty-preview">
-                    <div className="empty-preview-inner">
-                      <div className="empty-icon">
-                        ✨
-                      </div>
+                    disabled={loading}
+                    placeholder={`Example: Create a premium dark portfolio website for a full-stack developer. Include a hero section, projects, skills, experience, testimonials and a contact form with smooth animations...`}
+                    maxLength={10000}
+                  />
 
-                      <div className="empty-title">
-                        Your website starts here
-                      </div>
-
-                      <div className="empty-description">
-                        Left side mein apna idea likho aur
-                        <br />
-                        <strong>
-                          Generate Website
-                        </strong>{" "}
-                        par click karo.
-                        <br />
-                        Kairo AI tumhare liye complete
-                        website generate karega.
-                      </div>
+                  <div className="prompt-bottom">
+                    <div className="prompt-hint">
+                      Describe design, sections,
+                      features and style
                     </div>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="code-container">
-                <div className="code-header">
-                  <div className="code-title">
-                    Generated HTML
-                  </div>
 
-                  <button
-                    className="secondary-button"
-                    onClick={copyCode}
-                    disabled={!html}
-                  >
-                    {copied
-                      ? "✓ Copied"
-                      : "Copy Code"}
-                  </button>
+                    <button
+                      type="submit"
+                      className="generate-button"
+                      disabled={loading}
+                    >
+                      {loading ? (
+                        <>
+                          <span className="loading-spinner" />
+                          Building...
+                        </>
+                      ) : (
+                        <>
+                          ✦ Generate Website
+                        </>
+                      )}
+                    </button>
+                  </div>
                 </div>
+              </div>
+            </form>
 
-                <pre className="code-area">
-                  {html ||
-                    "Generate a website to see the source code here..."}
-                </pre>
+            {error && (
+              <div className="error-message">
+                {error}
               </div>
             )}
-          </section>
-        </div>
+
+            <div className="examples">
+              <div className="examples-label">
+                Or start with an idea
+              </div>
+
+              <div className="example-list">
+                <button
+                  type="button"
+                  className="example-button"
+                  onClick={() =>
+                    useExample(
+                      "Create a premium dark portfolio website for a software developer with hero, about, skills, projects, experience, testimonials and contact section."
+                    )
+                  }
+                >
+                  Developer Portfolio
+                </button>
+
+                <button
+                  type="button"
+                  className="example-button"
+                  onClick={() =>
+                    useExample(
+                      "Create a modern SaaS startup landing page with a hero section, features, pricing, testimonials, FAQ, CTA and footer."
+                    )
+                  }
+                >
+                  SaaS Startup
+                </button>
+
+                <button
+                  type="button"
+                  className="example-button"
+                  onClick={() =>
+                    useExample(
+                      "Create an elegant premium restaurant website with menu, popular dishes, gallery, reviews, opening hours, reservation section and location."
+                    )
+                  }
+                >
+                  Restaurant
+                </button>
+
+                <button
+                  type="button"
+                  className="example-button"
+                  onClick={() =>
+                    useExample(
+                      "Create a high-end creative agency website with bold hero, services, portfolio, team, statistics, testimonials, process and contact section."
+                    )
+                  }
+                >
+                  Creative Agency
+                </button>
+              </div>
+            </div>
+
+            <div className="builder-features">
+              <div className="feature">
+                <div className="feature-icon">
+                  ✦
+                </div>
+
+                <div className="feature-title">
+                  AI Generated
+                </div>
+
+                <div className="feature-text">
+                  Turn a simple description into a
+                  complete website.
+                </div>
+              </div>
+
+              <div className="feature">
+                <div className="feature-icon">
+                  ◈
+                </div>
+
+                <div className="feature-title">
+                  Fully Responsive
+                </div>
+
+                <div className="feature-text">
+                  Websites are designed for desktop,
+                  tablet and mobile.
+                </div>
+              </div>
+
+              <div className="feature">
+                <div className="feature-icon">
+                  ⚡
+                </div>
+
+                <div className="feature-title">
+                  Edit with AI
+                </div>
+
+                <div className="feature-text">
+                  Continue editing your website using
+                  natural language.
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <footer className="builder-footer">
+          Kairo AI Website Builder
+        </footer>
       </div>
 
-      {fullscreen && html && (
-        <div className="fullscreen-overlay">
-          <div className="fullscreen-toolbar">
-            <div className="fullscreen-title">
-              {projectName}
-            </div>
-
-            <button
-              className="secondary-button"
-              onClick={closeFullscreen}
-            >
-              ✕ Close
-            </button>
-          </div>
-
-          <div className="fullscreen-preview">
-            <iframe
-              title="Fullscreen Website Preview"
-              srcDoc={html}
-              sandbox="allow-scripts allow-forms allow-modals allow-popups allow-same-origin"
-            />
-          </div>
-        </div>
-      )}
-
       {loading && (
-        <div className="loading-overlay">
-          <div className="loading-card">
-            <div className="spinner" />
-
-            <div className="loading-title">
-              Kairo AI is building your website
-            </div>
-
-            <div className="loading-text">
-              Kairo Ai, HTML, CSS aur JavaScript
-              generate kar raha hai. Thoda time lag sakta
-              hai...
-            </div>
-          </div>
-        </div>
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 100,
+            pointerEvents: "none",
+          }}
+        />
       )}
     </main>
   );
