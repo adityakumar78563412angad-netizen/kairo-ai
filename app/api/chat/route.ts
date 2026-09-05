@@ -1,3 +1,8 @@
+import {
+  GetObjectCommand,
+  S3Client,
+} from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -35,59 +40,157 @@ function isImageAttachment(
   );
 }
 
-async function imageUrlToDataUrl(
-  url: string,
-  fallbackType?: string
+async function getB2SignedUrl(
+  key: string
 ) {
-  const response = await fetch(url, {
-    method: "GET",
-    redirect: "follow",
-    cache: "no-store",
+  const applicationKeyId =
+    process.env.B2_APPLICATION_KEY_ID?.trim();
+
+  const applicationKey =
+    process.env.B2_APPLICATION_KEY?.trim();
+
+  const bucketName =
+    process.env.B2_BUCKET_NAME?.trim();
+
+  const endpoint =
+    process.env.B2_S3_ENDPOINT?.trim();
+
+  if (
+    !applicationKeyId ||
+    !applicationKey ||
+    !bucketName ||
+    !endpoint
+  ) {
+    throw new Error(
+      "Backblaze B2 environment variables are missing."
+    );
+  }
+
+  const regionMatch =
+    endpoint.match(
+      /s3\.([a-z0-9-]+)\.backblazeb2\.com/i
+    );
+
+  const region =
+    regionMatch?.[1] || "us-east-005";
+
+  const s3 = new S3Client({
+    region,
+    endpoint,
+    credentials: {
+      accessKeyId: applicationKeyId,
+      secretAccessKey: applicationKey,
+    },
   });
+
+  const command =
+    new GetObjectCommand({
+      Bucket: bucketName,
+      Key: key,
+    });
+
+  /*
+   * The URL is temporary.
+   * 10 minutes is enough for Kairo to read
+   * the image while keeping the object private.
+   */
+  return await getSignedUrl(
+    s3,
+    command,
+    {
+      expiresIn: 600,
+    }
+  );
+}
+
+async function imageToDataUrl(
+  attachment: Attachment
+) {
+  if (!attachment.key) {
+    throw new Error(
+      `No storage key was found for "${attachment.name || "image"}".`
+    );
+  }
+
+  console.log(
+    "KAIRO B2 KEY:",
+    attachment.key
+  );
+
+  const signedUrl =
+    await getB2SignedUrl(
+      attachment.key
+    );
+
+  console.log(
+    "KAIRO B2 SIGNED URL CREATED"
+  );
+
+  const response = await fetch(
+    signedUrl,
+    {
+      method: "GET",
+      cache: "no-store",
+    }
+  );
 
   if (!response.ok) {
     throw new Error(
-      `Kairo could not download the uploaded image from storage. HTTP ${response.status}.`
+      `Kairo could not download the image from Backblaze B2. HTTP ${response.status}.`
     );
   }
 
   const contentType =
-    response.headers.get("content-type") ||
-    fallbackType ||
+    response.headers.get(
+      "content-type"
+    ) ||
+    attachment.type ||
     "image/jpeg";
 
-  if (!contentType.startsWith("image/")) {
+  if (
+    !contentType
+      .toLowerCase()
+      .startsWith("image/")
+  ) {
     throw new Error(
-      `The uploaded file is not being returned as an image. Storage returned: ${contentType}`
+      `Backblaze returned "${contentType}" instead of an image.`
     );
   }
 
   const arrayBuffer =
     await response.arrayBuffer();
 
-  const maxSize = 20 * 1024 * 1024;
+  const maxSize =
+    20 * 1024 * 1024;
 
-  if (arrayBuffer.byteLength > maxSize) {
+  if (
+    arrayBuffer.byteLength >
+    maxSize
+  ) {
     throw new Error(
-      "The image is larger than Groq's 20 MB image limit."
+      "The image is larger than 20 MB."
     );
   }
 
   const base64 =
-    Buffer.from(arrayBuffer).toString("base64");
+    Buffer.from(
+      arrayBuffer
+    ).toString("base64");
 
   return `data:${contentType};base64,${base64}`;
 }
 
-export async function POST(req: Request) {
+export async function POST(
+  req: Request
+) {
   try {
-    const body = await req.json();
+    const body =
+      await req.json();
 
-    const rawMessages = Array.isArray(
-      body?.messages
-    )
-      ? body.messages
-      : [];
+    const rawMessages =
+      Array.isArray(body?.messages)
+        ? body.messages
+        : [];
 
     const messages: InputMessage[] =
       rawMessages
@@ -106,9 +209,9 @@ export async function POST(req: Request) {
     const attachments: Attachment[] =
       Array.isArray(body?.attachments)
         ? body.attachments.filter(
-            (attachment: any) =>
-              attachment &&
-              typeof attachment === "object"
+            (a: any) =>
+              a &&
+              typeof a === "object"
           )
         : [];
 
@@ -132,17 +235,11 @@ export async function POST(req: Request) {
       return NextResponse.json(
         {
           error:
-            "GROQ_API_KEY is missing. Check your environment variables.",
+            "GROQ_API_KEY is missing.",
         },
         { status: 500 }
       );
     }
-
-    /*
-     * -------------------------------------------------------
-     * DETECT IMAGES
-     * -------------------------------------------------------
-     */
 
     const imageAttachments =
       attachments.filter(
@@ -152,20 +249,9 @@ export async function POST(req: Request) {
     const hasImages =
       imageAttachments.length > 0;
 
-    /*
-     * Groq currently supports multimodal vision
-     * models such as Qwen 3.6 27B.
-     */
-
     const model = hasImages
       ? "qwen/qwen3.6-27b"
       : "openai/gpt-oss-120b";
-
-    /*
-     * -------------------------------------------------------
-     * SYSTEM PROMPT
-     * -------------------------------------------------------
-     */
 
     const systemPrompt = `
 You are KAIRO, a helpful, intelligent, friendly and natural AI assistant.
@@ -188,57 +274,29 @@ LANGUAGE:
 - Match the user's tone naturally.
 
 IMAGE UNDERSTANDING:
-- You can analyze images that are attached to the conversation.
-- When an image is attached, use the actual visual information from the image.
-- Never say that you cannot see the image when an image was successfully provided.
-- If the user asks "ye picture kaisi hai", give a natural opinion based on the visible image.
-- You may discuss subject, composition, lighting, colors, background, quality, mood and other visible details.
+- When an image is attached, analyze the actual visual content of the image.
+- Do not say that you cannot see the image when a valid image has been provided.
+- If the user asks how a picture looks, give a natural opinion based on what is actually visible.
+- You can discuss composition, lighting, colors, subject, background, quality and mood.
 - Never invent details that are not visible.
-- If a specific detail is unclear, say that it is unclear.
-- If the user asks about text visible in an image, read and explain it when possible.
+- If something is unclear, say that it is unclear.
+- If the user asks about text in an image, read it when possible.
 
 IMPORTANT:
 Be concise by default, but never omit important information needed to correctly answer the question.
 `;
 
-    /*
-     * -------------------------------------------------------
-     * PREPARE GROQ MESSAGES
-     * -------------------------------------------------------
-     */
-
     let groqMessages: any[];
 
     if (hasImages) {
-      /*
-       * Download every image from B2/storage and convert
-       * it into a base64 data URL.
-       *
-       * This means Groq receives the actual image bytes
-       * instead of depending on Groq being able to access
-       * the B2 URL itself.
-       */
-
       const imageParts = [];
 
-      for (const attachment of imageAttachments) {
-        if (!attachment.url) {
-          continue;
-        }
-
-        console.log(
-          "KAIRO VISION IMAGE:",
-          {
-            name: attachment.name,
-            type: attachment.type,
-            url: attachment.url,
-          }
-        );
-
+      for (
+        const attachment of imageAttachments
+      ) {
         const dataUrl =
-          await imageUrlToDataUrl(
-            attachment.url,
-            attachment.type
+          await imageToDataUrl(
+            attachment
           );
 
         imageParts.push({
@@ -249,22 +307,14 @@ Be concise by default, but never omit important information needed to correctly 
         });
       }
 
-      if (imageParts.length === 0) {
-        return NextResponse.json(
-          {
-            error:
-              "Kairo received an image attachment, but could not prepare it for vision analysis.",
-          },
-          { status: 400 }
-        );
-      }
-
       const previousMessages =
         messages.slice(0, -1);
 
       const lastMessage =
         messages.length > 0
-          ? messages[messages.length - 1]
+          ? messages[
+              messages.length - 1
+            ]
           : null;
 
       const userText =
@@ -300,10 +350,6 @@ Be concise by default, but never omit important information needed to correctly 
         },
       ];
     } else {
-      /*
-       * Normal text-only Kairo.
-       */
-
       groqMessages = [
         {
           role: "system",
@@ -318,12 +364,6 @@ Be concise by default, but never omit important information needed to correctly 
         ),
       ];
     }
-
-    /*
-     * -------------------------------------------------------
-     * GROQ REQUEST
-     * -------------------------------------------------------
-     */
 
     console.log(
       "KAIRO MODEL:",
@@ -340,40 +380,38 @@ Be concise by default, but never omit important information needed to correctly 
       imageAttachments.length
     );
 
-    const groqResponse = await fetch(
-      "https://api.groq.com/openai/v1/chat/completions",
-      {
-        method: "POST",
+    const groqResponse =
+      await fetch(
+        "https://api.groq.com/openai/v1/chat/completions",
+        {
+          method: "POST",
 
-        headers: {
-          "Content-Type":
-            "application/json",
+          headers: {
+            "Content-Type":
+              "application/json",
 
-          Authorization:
-            `Bearer ${apiKey}`,
-        },
+            Authorization:
+              `Bearer ${apiKey}`,
+          },
 
-        body: JSON.stringify({
-          model,
+          body: JSON.stringify({
+            model,
 
-          messages: groqMessages,
+            messages:
+              groqMessages,
 
-          temperature: hasImages
-            ? 0.4
-            : 0.5,
+            temperature:
+              hasImages
+                ? 0.4
+                : 0.5,
 
-          max_completion_tokens: 2048,
+            max_completion_tokens:
+              2048,
 
-          stream: true,
-        }),
-      }
-    );
-
-    /*
-     * -------------------------------------------------------
-     * GROQ ERROR
-     * -------------------------------------------------------
-     */
+            stream: true,
+          }),
+        }
+      );
 
     if (!groqResponse.ok) {
       const errorText =
@@ -384,11 +422,14 @@ Be concise by default, but never omit important information needed to correctly 
         errorText
       );
 
-      let message = errorText;
+      let message =
+        errorText;
 
       try {
         const parsed =
-          JSON.parse(errorText);
+          JSON.parse(
+            errorText
+          );
 
         message =
           parsed?.error?.message ||
@@ -418,12 +459,6 @@ Be concise by default, but never omit important information needed to correctly 
       );
     }
 
-    /*
-     * -------------------------------------------------------
-     * STREAM RESPONSE
-     * -------------------------------------------------------
-     */
-
     const encoder =
       new TextEncoder();
 
@@ -432,7 +467,9 @@ Be concise by default, but never omit important information needed to correctly 
 
     const stream =
       new ReadableStream({
-        async start(controller) {
+        async start(
+          controller
+        ) {
           const reader =
             groqResponse.body!.getReader();
 
@@ -443,7 +480,8 @@ Be concise by default, but never omit important information needed to correctly 
               const {
                 value,
                 done,
-              } = await reader.read();
+              } =
+                await reader.read();
 
               if (done) {
                 break;
@@ -463,7 +501,9 @@ Be concise by default, but never omit important information needed to correctly 
               buffer =
                 lines.pop() || "";
 
-              for (const line of lines) {
+              for (
+                const line of lines
+              ) {
                 const trimmed =
                   line.trim();
 
@@ -491,11 +531,10 @@ Be concise by default, but never omit important information needed to correctly 
                   const parsed =
                     JSON.parse(data);
 
-                  const choice =
-                    parsed?.choices?.[0];
-
                   const text =
-                    choice?.delta
+                    parsed
+                      ?.choices?.[0]
+                      ?.delta
                       ?.content;
 
                   if (
@@ -513,7 +552,9 @@ Be concise by default, but never omit important information needed to correctly 
                       )
                     );
                   }
-                } catch (error) {
+                } catch (
+                  error
+                ) {
                   console.error(
                     "STREAM PARSE ERROR:",
                     error
@@ -529,35 +570,46 @@ Be concise by default, but never omit important information needed to correctly 
             );
 
             controller.close();
-          } catch (error) {
+          } catch (
+            error
+          ) {
             console.error(
               "STREAM ERROR:",
               error
             );
 
-            controller.error(error);
+            controller.error(
+              error
+            );
           } finally {
             reader.releaseLock();
           }
         },
       });
 
-    return new Response(stream, {
-      status: 200,
+    return new Response(
+      stream,
+      {
+        status: 200,
 
-      headers: {
-        "Content-Type":
-          "text/event-stream; charset=utf-8",
+        headers: {
+          "Content-Type":
+            "text/event-stream; charset=utf-8",
 
-        "Cache-Control":
-          "no-cache, no-transform",
+          "Cache-Control":
+            "no-cache, no-transform",
 
-        Connection: "keep-alive",
+          Connection:
+            "keep-alive",
 
-        "X-Accel-Buffering": "no",
-      },
-    });
-  } catch (error) {
+          "X-Accel-Buffering":
+            "no",
+        },
+      }
+    );
+  } catch (
+    error
+  ) {
     console.error(
       "KAIRO ROUTE ERROR:",
       error
