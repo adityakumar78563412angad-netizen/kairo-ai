@@ -58,7 +58,7 @@ export default function WebsiteBuilderPage() {
         createWebsiteName(finalPrompt);
 
       sessionStorage.setItem(
-        "kairo-website-builder-project",
+        "ZUQEN-website-builder-project",
         JSON.stringify({
           prompt: finalPrompt,
           html: data.html,
@@ -125,7 +125,7 @@ export default function WebsiteBuilderPage() {
   }
 
   return (
-    <main className="kairo-builder-home">
+    <main className="ZUQEN-builder-home">
       <style jsx global>{`
         * {
           box-sizing: border-box;
@@ -158,7 +158,7 @@ export default function WebsiteBuilderPage() {
           cursor: pointer;
         }
 
-        .kairo-builder-home {
+        .ZUQEN-builder-home {
           min-height: 100vh;
           color: #fff;
           background:
@@ -556,10 +556,10 @@ export default function WebsiteBuilderPage() {
           border: 2px solid rgba(255, 255, 255, 0.25);
           border-top-color: white;
           border-radius: 50%;
-          animation: kairo-spin 0.7s linear infinite;
+          animation: ZUQEN-spin 0.7s linear infinite;
         }
 
-        @keyframes kairo-spin {
+        @keyframes ZUQEN-spin {
           to {
             transform: rotate(360deg);
           }
@@ -644,7 +644,7 @@ export default function WebsiteBuilderPage() {
 
             <div>
               <div className="builder-brand-name">
-                Kairo AI
+                ZUQEN AI
               </div>
 
               <div className="builder-brand-subtitle">
@@ -666,7 +666,7 @@ export default function WebsiteBuilderPage() {
           <div className="builder-content">
             <div className="ai-badge">
               <span className="ai-dot" />
-              Powered by Kairo AI
+              Powered by ZUQEN AI
             </div>
 
             <h1 className="builder-heading">
@@ -678,7 +678,7 @@ export default function WebsiteBuilderPage() {
 
             <p className="builder-description">
               Describe the website you have in mind.
-              Kairo AI will turn your idea into a
+              ZUQEN AI will turn your idea into a
               complete, responsive and professional
               website.
             </p>
@@ -853,7 +853,7 @@ export default function WebsiteBuilderPage() {
         </section>
 
         <footer className="builder-footer">
-          Kairo AI Website Builder
+          ZUQEN AI Website Builder
         </footer>
       </div>
 

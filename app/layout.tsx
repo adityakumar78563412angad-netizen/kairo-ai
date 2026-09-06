@@ -13,28 +13,28 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  applicationName: "Kairo AI",
+  applicationName: "ZUQEN AI",
 icons: {
   icon: "/icon.png",
   apple: "/icon.png",
 },
   title: {
-    default: "Kairo AI — Your Intelligent AI Companion",
-    template: "%s | Kairo AI",
+    default: "ZUQEN AI — Your Intelligent AI Companion",
+    template: "%s | ZUQEN AI",
   },
 
   description:
-    "Kairo AI is your intelligent AI companion for chatting, creating, learning, brainstorming, writing code, analyzing information, and getting things done.",
+    "ZUQEN AI is your intelligent AI companion for chatting, creating, learning, brainstorming, writing code, analyzing information, and getting things done.",
 
   keywords: [
-    "Kairo AI",
-    "Kairo AI chatbot",
-    "Kairo AI assistant",
+    "ZUQEN AI",
+    "ZUQEN AI chatbot",
+    "ZUQEN AI assistant",
     "AI assistant",
     "AI chatbot",
   ],
 
-  metadataBase: new URL("https://kairo-ai-alpha.vercel.app"),
+  metadataBase: new URL("https://ZUQEN-ai-alpha.vercel.app"),
 
   alternates: {
     canonical: "/",
@@ -45,19 +45,19 @@ icons: {
   },
 
   openGraph: {
-    title: "Kairo AI — Your Intelligent AI Companion",
+    title: "ZUQEN AI — Your Intelligent AI Companion",
     description:
-      "Chat, create, learn, brainstorm, write code, and get things done with Kairo AI.",
-    url: "https://kairo-ai-alpha.vercel.app/",
-    siteName: "Kairo AI",
+      "Chat, create, learn, brainstorm, write code, and get things done with ZUQEN AI.",
+    url: "https://ZUQEN-ai-alpha.vercel.app/",
+    siteName: "ZUQEN AI",
     type: "website",
   },
 
   twitter: {
     card: "summary",
-    title: "Kairo AI — Your Intelligent AI Companion",
+    title: "ZUQEN AI — Your Intelligent AI Companion",
     description:
-      "Chat, create, learn, brainstorm, write code, and get things done with Kairo AI.",
+      "Chat, create, learn, brainstorm, write code, and get things done with ZUQEN AI.",
   },
 
   robots: {
@@ -76,18 +76,18 @@ export default function RootLayout({
     "@graph": [
       {
         "@type": "WebSite",
-        "@id": "https://kairo-ai-alpha.vercel.app/#website",
-        name: "Kairo AI",
-        alternateName: "Kairo AI",
-        url: "https://kairo-ai-alpha.vercel.app/",
+        "@id": "https://ZUQEN-ai-alpha.vercel.app/#website",
+        name: "ZUQEN AI",
+        alternateName: "ZUQEN AI",
+        url: "https://ZUQEN-ai-alpha.vercel.app/",
       },
       {
         "@type": "WebApplication",
-        "@id": "https://kairo-ai-alpha.vercel.app/#app",
-        name: "Kairo AI",
+        "@id": "https://ZUQEN-ai-alpha.vercel.app/#app",
+        name: "ZUQEN AI",
         description:
-          "Kairo AI is your intelligent AI companion for chatting, creating, learning, brainstorming, writing code, analyzing information, and getting things done.",
-        url: "https://kairo-ai-alpha.vercel.app/",
+          "ZUQEN AI is your intelligent AI companion for chatting, creating, learning, brainstorming, writing code, analyzing information, and getting things done.",
+        url: "https://ZUQEN-ai-alpha.vercel.app/",
         applicationCategory: "BusinessApplication",
         operatingSystem: "Web",
       },

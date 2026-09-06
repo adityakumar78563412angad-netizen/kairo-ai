@@ -18,10 +18,10 @@ type WebsiteProject = {
 };
 
 const PROJECT_KEY =
-  "kairo-website-builder-project";
+  "ZUQEN-website-builder-project";
 
 const DRIVE_PROJECTS_KEY =
-  "kairo-website-builder-drive-projects";
+  "ZUQEN-website-builder-drive-projects";
 
 export default function WebsiteEditorPage() {
   const router = useRouter();
@@ -194,7 +194,7 @@ export default function WebsiteEditorPage() {
 
     if (!instruction) {
       setError(
-        "Kairo ko batao ki website mein kya change karna hai."
+        "ZUQEN ko batao ki website mein kya change karna hai."
       );
       return;
     }
@@ -392,7 +392,7 @@ export default function WebsiteEditorPage() {
         .trim()
         .replace(/\s+/g, "-")
         .toLowerCase() ||
-        "kairo-website"}.html`;
+        "ZUQEN-website"}.html`;
 
     document.body.appendChild(
       anchor
@@ -480,11 +480,11 @@ export default function WebsiteEditorPage() {
     }
   }
 
-  function saveToKairoAI() {
+  function saveToZUQENAI() {
     setShowSaveMenu(false);
 
     setSavedMessage(
-      "Save to Kairo AI — Coming soon"
+      "Save to ZUQEN AI — Coming soon"
     );
 
     window.setTimeout(() => {
@@ -1815,7 +1815,7 @@ export default function WebsiteEditorPage() {
 
               <div className="brand-info">
                 <div className="brand-name">
-                  Kairo AI
+                  ZUQEN AI
                 </div>
 
                 <div className="brand-label">
@@ -1891,7 +1891,7 @@ export default function WebsiteEditorPage() {
                     type="button"
                     className="save-option"
                     onClick={
-                      saveToKairoAI
+                      saveToZUQENAI
                     }
                   >
                     <div className="save-option-icon">
@@ -1900,12 +1900,12 @@ export default function WebsiteEditorPage() {
 
                     <div>
                       <div className="save-option-title">
-                        Save to Kairo AI
+                        Save to ZUQEN AI
                       </div>
 
                       <div className="save-option-text">
                         Keep it inside your
-                        Kairo workspace.
+                        ZUQEN workspace.
                       </div>
                     </div>
                   </button>
@@ -2090,7 +2090,7 @@ export default function WebsiteEditorPage() {
                       key={
                         previewKey
                       }
-                      title="Kairo AI Website Preview"
+                      title="ZUQEN AI Website Preview"
                       srcDoc={html}
                       sandbox="allow-scripts allow-forms allow-modals allow-popups"
                     />
@@ -2189,7 +2189,7 @@ export default function WebsiteEditorPage() {
 
                 <div>
                   <div className="ai-title">
-                    Kairo AI
+                    ZUQEN AI
                   </div>
 
                   <div className="ai-status">
@@ -2207,7 +2207,7 @@ export default function WebsiteEditorPage() {
                 </div>
 
                 <div className="ai-welcome-text">
-                  Tell Kairo naturally what
+                  Tell ZUQEN naturally what
                   you want to add, remove or
                   redesign. I'll update the
                   website while keeping the
@@ -2315,7 +2315,7 @@ export default function WebsiteEditorPage() {
                       }
                     }
                   }}
-                  placeholder="Ask Kairo to change something..."
+                  placeholder="Ask ZUQEN to change something..."
                   disabled={loading}
                 />
 
@@ -2336,7 +2336,7 @@ export default function WebsiteEditorPage() {
                       !aiInstruction.trim() ||
                       !html
                     }
-                    title="Send to Kairo AI"
+                    title="Send to ZUQEN AI"
                   >
                     {loading ? (
                       <span className="ai-spinner" />
@@ -2399,7 +2399,7 @@ export default function WebsiteEditorPage() {
             <div className="loading-spinner" />
 
             <div className="loading-title">
-              Kairo is editing your
+              ZUQEN is editing your
               website
             </div>
 

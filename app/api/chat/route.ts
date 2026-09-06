@@ -91,7 +91,7 @@ async function getB2SignedUrl(
 
   /*
    * The URL is temporary.
-   * 10 minutes is enough for Kairo to read
+   * 10 minutes is enough for ZUQEN to read
    * the image while keeping the object private.
    */
   return await getSignedUrl(
@@ -113,7 +113,7 @@ async function imageToDataUrl(
   }
 
   console.log(
-    "KAIRO B2 KEY:",
+    "ZUQEN B2 KEY:",
     attachment.key
   );
 
@@ -123,7 +123,7 @@ async function imageToDataUrl(
     );
 
   console.log(
-    "KAIRO B2 SIGNED URL CREATED"
+    "ZUQEN B2 SIGNED URL CREATED"
   );
 
   const response = await fetch(
@@ -136,7 +136,7 @@ async function imageToDataUrl(
 
   if (!response.ok) {
     throw new Error(
-      `Kairo could not download the image from Backblaze B2. HTTP ${response.status}.`
+      `ZUQEN could not download the image from Backblaze B2. HTTP ${response.status}.`
     );
   }
 
@@ -254,7 +254,7 @@ export async function POST(
       : "openai/gpt-oss-120b";
 
     const systemPrompt = `
-You are KAIRO, a helpful, intelligent, friendly and natural AI assistant.
+You are ZUQEN, a helpful, intelligent, friendly and natural AI assistant.
 
 RESPONSE LENGTH RULES:
 - Always match the length of your answer to the user's question.
@@ -366,17 +366,17 @@ Be concise by default, but never omit important information needed to correctly 
     }
 
     console.log(
-      "KAIRO MODEL:",
+      "ZUQEN MODEL:",
       model
     );
 
     console.log(
-      "KAIRO HAS IMAGES:",
+      "ZUQEN HAS IMAGES:",
       hasImages
     );
 
     console.log(
-      "KAIRO IMAGE COUNT:",
+      "ZUQEN IMAGE COUNT:",
       imageAttachments.length
     );
 
@@ -611,7 +611,7 @@ Be concise by default, but never omit important information needed to correctly 
     error
   ) {
     console.error(
-      "KAIRO ROUTE ERROR:",
+      "ZUQEN ROUTE ERROR:",
       error
     );
 
@@ -620,7 +620,7 @@ Be concise by default, but never omit important information needed to correctly 
         error:
           error instanceof Error
             ? error.message
-            : "KAIRO request failed.",
+            : "ZUQEN request failed.",
       },
       { status: 500 }
     );

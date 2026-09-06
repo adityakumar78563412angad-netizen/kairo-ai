@@ -64,10 +64,10 @@ function Icon({
   );
 }
 
-function KairoMark({ small = false }: { small?: boolean }) {
+function ZUQENMark({ small = false }: { small?: boolean }) {
   return (
-    <div className={`kairo-mark ${small ? "small" : ""}`}>
-      <div className="kairo-mark-inner" />
+    <div className={`ZUQEN-mark ${small ? "small" : ""}`}>
+      <div className="ZUQEN-mark-inner" />
     </div>
   );
 }
@@ -162,7 +162,7 @@ export default function Home() {
     useState(false);
 
   const [selectedAgent, setSelectedAgent] =
-    useState("Kairo AI");
+    useState("ZUQEN AI");
 
   const fileInput =
     useRef<HTMLInputElement>(null);
@@ -176,7 +176,7 @@ export default function Home() {
   useEffect(() => {
     const savedTheme =
       window.localStorage.getItem(
-        "kairo-theme"
+        "ZUQEN-theme"
       );
 
     if (savedTheme === "light") {
@@ -189,7 +189,7 @@ export default function Home() {
       const next = !previous;
 
       window.localStorage.setItem(
-        "kairo-theme",
+        "ZUQEN-theme",
         next ? "light" : "dark"
       );
 
@@ -279,7 +279,7 @@ export default function Home() {
       data,
       error,
     } = await supabase
-      .from("kairo_chats")
+      .from("ZUQEN_chats")
       .select("*")
       .eq("user_id", userId)
       .order("updated_at", {
@@ -309,7 +309,7 @@ export default function Home() {
         data,
         error,
       } = await supabase
-        .from("kairo_chats")
+        .from("ZUQEN_chats")
         .insert({
           user_id: currentUser.id,
           title: "New conversation",
@@ -359,7 +359,7 @@ export default function Home() {
         data,
         error,
       } = await supabase
-        .from("kairo_messages")
+        .from("ZUQEN_messages")
         .select("*")
         .eq("chat_id", id)
         .order("created_at", {
@@ -413,7 +413,7 @@ export default function Home() {
     const {
       error,
     } = await supabase
-      .from("kairo_chats")
+      .from("ZUQEN_chats")
       .update({
         title,
         updated_at:
@@ -448,7 +448,7 @@ export default function Home() {
     const {
       error,
     } = await supabase
-      .from("kairo_chats")
+      .from("ZUQEN_chats")
       .update({
         archived: true,
         updated_at:
@@ -488,7 +488,7 @@ export default function Home() {
     const {
       error,
     } = await supabase
-      .from("kairo_chats")
+      .from("ZUQEN_chats")
       .update({
         archived: false,
         updated_at:
@@ -531,7 +531,7 @@ export default function Home() {
     const {
       error,
     } = await supabase
-      .from("kairo_chats")
+      .from("ZUQEN_chats")
       .delete()
       .eq("id", id);
 
@@ -846,7 +846,7 @@ export default function Home() {
 
         throw new Error(
           text ||
-            "Kairo AI request failed."
+            "ZUQEN AI request failed."
         );
       }
 
@@ -979,7 +979,7 @@ export default function Home() {
       }
 
       await supabase
-        .from("kairo_messages")
+        .from("ZUQEN_messages")
         .insert({
           id: assistantId,
           chat_id: chatId,
@@ -996,7 +996,7 @@ export default function Home() {
       const message =
         error instanceof Error
           ? error.message
-          : "Kairo AI request failed.";
+          : "ZUQEN AI request failed.";
 
       const errorText =
         `⚠️ ${message}`;
@@ -1016,7 +1016,7 @@ export default function Home() {
       );
 
       await supabase
-        .from("kairo_messages")
+        .from("ZUQEN_messages")
         .insert({
           id: assistantId,
           chat_id: chatId,
@@ -1053,7 +1053,7 @@ export default function Home() {
     const {
       error,
     } = await supabase
-      .from("kairo_chats")
+      .from("ZUQEN_chats")
       .update({
         title,
         updated_at:
@@ -1088,7 +1088,7 @@ export default function Home() {
       new Date().toISOString();
 
     await supabase
-      .from("kairo_chats")
+      .from("ZUQEN_chats")
       .update({
         updated_at: now,
       })
@@ -1158,7 +1158,7 @@ export default function Home() {
         const {
           error,
         } = await supabase
-          .from("kairo_messages")
+          .from("ZUQEN_messages")
           .update({
             content: text,
           })
@@ -1211,7 +1211,7 @@ export default function Home() {
       const {
         error,
       } = await supabase
-        .from("kairo_messages")
+        .from("ZUQEN_messages")
         .insert({
           id: userMessage.id,
           chat_id: chatId,
@@ -1287,7 +1287,7 @@ export default function Home() {
     requestAnimationFrame(() => {
       const textarea =
         document.querySelector(
-          ".kairo-textarea"
+          ".ZUQEN-textarea"
         ) as HTMLTextAreaElement | null;
 
       textarea?.focus();
@@ -1339,7 +1339,7 @@ export default function Home() {
     }
 
     await supabase
-      .from("kairo_messages")
+      .from("ZUQEN_messages")
       .delete()
       .eq("id", message.id);
 
@@ -1395,7 +1395,7 @@ export default function Home() {
 
   return (
     <div
-      className={`kairo-app ${
+      className={`ZUQEN-app ${
         lightMode ? "light" : ""
       }`}
       onClick={() => {
@@ -1444,7 +1444,7 @@ export default function Home() {
           cursor: pointer;
         }
 
-        .kairo-app {
+        .ZUQEN-app {
           --bg: #050608;
           --bg2: #090b10;
           --panel: rgba(12, 14, 20, 0.82);
@@ -1517,7 +1517,7 @@ export default function Home() {
             var(--bg);
         }
 
-        .kairo-app.light {
+        .ZUQEN-app.light {
           --bg: #f5f7fb;
           --bg2: #eef1f7;
           --panel: rgba(
@@ -1552,7 +1552,7 @@ export default function Home() {
           );
         }
 
-        .kairo-mark {
+        .ZUQEN-mark {
           width: 39px;
           height: 39px;
           flex-shrink: 0;
@@ -1579,13 +1579,13 @@ export default function Home() {
               );
         }
 
-        .kairo-mark.small {
+        .ZUQEN-mark.small {
           width: 31px;
           height: 31px;
           border-radius: 10px;
         }
 
-        .kairo-mark-inner {
+        .ZUQEN-mark-inner {
           width: 100%;
           height: 100%;
           border-radius: inherit;
@@ -1595,11 +1595,11 @@ export default function Home() {
           justify-content: center;
         }
 
-        .light .kairo-mark-inner {
+        .light .ZUQEN-mark-inner {
           background: white;
         }
 
-        .kairo-mark-inner::after {
+        .ZUQEN-mark-inner::after {
           content: "";
           width: 9px;
           height: 9px;
@@ -1609,7 +1609,7 @@ export default function Home() {
             0 0 14px white;
         }
 
-        .kairo-sidebar {
+        .ZUQEN-sidebar {
           position: relative;
           width: 300px;
           height: 100%;
@@ -1624,24 +1624,24 @@ export default function Home() {
           z-index: 40;
         }
 
-        .kairo-sidebar.closed {
+        .ZUQEN-sidebar.closed {
           width: 0;
           border-right: 0;
         }
 
-        .kairo-sidebar-inner {
+        .ZUQEN-sidebar-inner {
           width: 300px;
           height: 100%;
           display: flex;
           flex-direction: column;
         }
 
-        .kairo-side-top {
+        .ZUQEN-side-top {
           padding: 18px 14px 12px;
           flex-shrink: 0;
         }
 
-        .kairo-brand-row {
+        .ZUQEN-brand-row {
           display: flex;
           align-items: center;
           justify-content: space-between;
@@ -1649,26 +1649,26 @@ export default function Home() {
           margin-bottom: 16px;
         }
 
-        .kairo-brand {
+        .ZUQEN-brand {
           display: flex;
           align-items: center;
           gap: 10px;
         }
 
-        .kairo-brand-name {
+        .ZUQEN-brand-name {
           font-size: 13px;
           font-weight: 850;
           letter-spacing: 0.12em;
         }
 
-        .kairo-brand-sub {
+        .ZUQEN-brand-sub {
           margin-top: 2px;
           color: var(--muted2);
           font-size: 8px;
           letter-spacing: 0.08em;
         }
 
-        .kairo-icon-button {
+        .ZUQEN-icon-button {
           width: 34px;
           height: 34px;
           border: 1px solid var(--line);
@@ -1680,12 +1680,12 @@ export default function Home() {
           justify-content: center;
         }
 
-        .kairo-icon-button:hover {
+        .ZUQEN-icon-button:hover {
           color: var(--text);
           background: var(--panel-hover);
         }
 
-        .kairo-new-button {
+        .ZUQEN-new-button {
           width: 100%;
           min-height: 43px;
           border: 1px solid
@@ -1729,16 +1729,16 @@ export default function Home() {
               );
         }
 
-        .kairo-new-button:hover:not(:disabled) {
+        .ZUQEN-new-button:hover:not(:disabled) {
           transform: translateY(-1px);
         }
 
-        .kairo-new-button:disabled {
+        .ZUQEN-new-button:disabled {
           opacity: 0.35;
           cursor: not-allowed;
         }
 
-        .kairo-history {
+        .ZUQEN-history {
           flex: 1;
           min-height: 0;
           overflow-y: auto;
@@ -1746,16 +1746,16 @@ export default function Home() {
           padding: 6px 11px 16px;
         }
 
-        .kairo-history::-webkit-scrollbar {
+        .ZUQEN-history::-webkit-scrollbar {
           width: 5px;
         }
 
-        .kairo-history::-webkit-scrollbar-thumb {
+        .ZUQEN-history::-webkit-scrollbar-thumb {
           background: var(--line);
           border-radius: 20px;
         }
 
-        .kairo-section-label {
+        .ZUQEN-section-label {
           display: flex;
           align-items: center;
           justify-content: space-between;
@@ -1767,7 +1767,7 @@ export default function Home() {
           text-transform: uppercase;
         }
 
-        .kairo-empty-history {
+        .ZUQEN-empty-history {
           padding: 35px 15px;
           text-align: center;
           color: var(--muted2);
@@ -1775,7 +1775,7 @@ export default function Home() {
           line-height: 1.7;
         }
 
-        .kairo-chat {
+        .ZUQEN-chat {
           position: relative;
           width: 100%;
           min-height: 52px;
@@ -1792,18 +1792,18 @@ export default function Home() {
           transition: 0.18s ease;
         }
 
-        .kairo-chat:hover {
+        .ZUQEN-chat:hover {
           color: var(--text);
           background: var(--panel-soft);
         }
 
-        .kairo-chat.active {
+        .ZUQEN-chat.active {
           color: var(--text);
           border-color: var(--line);
           background: var(--panel-soft);
         }
 
-        .kairo-chat-open {
+        .ZUQEN-chat-open {
           position: absolute;
           inset: 0;
           width: 100%;
@@ -1812,18 +1812,18 @@ export default function Home() {
           z-index: 1;
         }
 
-        .kairo-chat-icon,
-        .kairo-chat-title {
+        .ZUQEN-chat-icon,
+        .ZUQEN-chat-title {
           position: relative;
           z-index: 2;
           pointer-events: none;
         }
 
-        .kairo-chat-icon {
+        .ZUQEN-chat-icon {
           flex-shrink: 0;
         }
 
-        .kairo-chat-title {
+        .ZUQEN-chat-title {
           flex: 1;
           min-width: 0;
           padding-right: 2px;
@@ -1834,7 +1834,7 @@ export default function Home() {
           font-weight: 550;
         }
 
-        .kairo-chat-more {
+        .ZUQEN-chat-more {
           position: relative;
           z-index: 20;
           width: 30px;
@@ -1849,12 +1849,12 @@ export default function Home() {
           justify-content: center;
         }
 
-        .kairo-chat-more:hover {
+        .ZUQEN-chat-more:hover {
           color: var(--text);
           background: var(--panel-hover);
         }
 
-        .kairo-menu {
+        .ZUQEN-menu {
           position: fixed;
           z-index: 999999;
           width: 178px;
@@ -1869,7 +1869,7 @@ export default function Home() {
           pointer-events: auto;
         }
 
-        .kairo-menu button {
+        .ZUQEN-menu button {
           width: 100%;
           min-height: 36px;
           padding: 0 10px;
@@ -1884,16 +1884,16 @@ export default function Home() {
           font-size: 10px;
         }
 
-        .kairo-menu button:hover {
+        .ZUQEN-menu button:hover {
           color: var(--text);
           background: var(--panel-hover);
         }
 
-        .kairo-menu button.danger-item {
+        .ZUQEN-menu button.danger-item {
           color: var(--danger);
         }
 
-        .kairo-menu button.danger-item:hover {
+        .ZUQEN-menu button.danger-item:hover {
           background:
             rgba(
               251,
@@ -1903,7 +1903,7 @@ export default function Home() {
             );
         }
 
-        .kairo-archive-toggle {
+        .ZUQEN-archive-toggle {
           width: 100%;
           margin-top: 8px;
           padding: 11px 9px;
@@ -1916,31 +1916,31 @@ export default function Home() {
           justify-content: space-between;
         }
 
-        .kairo-archive-toggle:hover {
+        .ZUQEN-archive-toggle:hover {
           color: var(--text);
         }
 
-        .kairo-archive-item {
+        .ZUQEN-archive-item {
           margin: 3px 0;
           padding: 9px;
           border-radius: 10px;
           background: var(--panel-soft);
         }
 
-        .kairo-archive-name {
+        .ZUQEN-archive-name {
           overflow: hidden;
           text-overflow: ellipsis;
           white-space: nowrap;
           font-size: 10px;
         }
 
-        .kairo-archive-actions {
+        .ZUQEN-archive-actions {
           display: flex;
           gap: 6px;
           margin-top: 7px;
         }
 
-        .kairo-archive-actions button {
+        .ZUQEN-archive-actions button {
           padding: 4px 7px;
           border: 0;
           border-radius: 6px;
@@ -1948,34 +1948,34 @@ export default function Home() {
           background: transparent;
         }
 
-        .kairo-archive-actions .restore {
+        .ZUQEN-archive-actions .restore {
           color: #8b5cf6;
         }
 
-        .kairo-archive-actions .delete {
+        .ZUQEN-archive-actions .delete {
           color: var(--danger);
         }
 
-        .kairo-side-bottom {
+        .ZUQEN-side-bottom {
           flex-shrink: 0;
           padding: 11px;
           border-top: 1px solid var(--line);
         }
 
-        .kairo-account-card {
+        .ZUQEN-account-card {
           padding: 11px;
           border: 1px solid var(--line);
           border-radius: 14px;
           background: var(--panel-soft);
         }
 
-        .kairo-account-row {
+        .ZUQEN-account-row {
           display: flex;
           align-items: center;
           gap: 9px;
         }
 
-        .kairo-account-avatar {
+        .ZUQEN-account-avatar {
           width: 32px;
           height: 32px;
           flex-shrink: 0;
@@ -1984,18 +1984,18 @@ export default function Home() {
           justify-content: center;
         }
 
-        .kairo-account-title {
+        .ZUQEN-account-title {
           font-size: 10px;
           font-weight: 800;
         }
 
-        .kairo-account-sub {
+        .ZUQEN-account-sub {
           margin-top: 2px;
           color: var(--muted2);
           font-size: 8px;
         }
 
-        .kairo-online {
+        .ZUQEN-online {
           width: 7px;
           height: 7px;
           margin-left: auto;
@@ -2011,7 +2011,7 @@ export default function Home() {
               );
         }
 
-        .kairo-main {
+        .ZUQEN-main {
           flex: 1;
           min-width: 0;
           min-height: 0;
@@ -2019,7 +2019,7 @@ export default function Home() {
           flex-direction: column;
         }
 
-        .kairo-topbar {
+        .ZUQEN-topbar {
           height: 72px;
           flex-shrink: 0;
           display: flex;
@@ -2037,7 +2037,7 @@ export default function Home() {
           z-index: 20;
         }
 
-        .light .kairo-topbar {
+        .light .ZUQEN-topbar {
           background:
             rgba(
               255,
@@ -2047,24 +2047,24 @@ export default function Home() {
             );
         }
 
-        .kairo-topbar-left {
+        .ZUQEN-topbar-left {
           display: flex;
           align-items: center;
           gap: 10px;
           min-width: 0;
         }
 
-        .kairo-topbar-info {
+        .ZUQEN-topbar-info {
           min-width: 0;
         }
 
-        .kairo-topbar-name {
+        .ZUQEN-topbar-name {
           font-size: 11px;
           font-weight: 850;
           letter-spacing: 0.08em;
         }
 
-        .kairo-topbar-status {
+        .ZUQEN-topbar-status {
           margin-top: 3px;
           color: var(--muted2);
           font-size: 8px;
@@ -2087,14 +2087,14 @@ export default function Home() {
               );
         }
 
-        .kairo-topbar-actions {
+        .ZUQEN-topbar-actions {
           margin-left: auto;
           display: flex;
           align-items: center;
           gap: 7px;
         }
 
-        .kairo-top-action {
+        .ZUQEN-top-action {
           width: 38px;
           height: 38px;
           flex-shrink: 0;
@@ -2107,19 +2107,19 @@ export default function Home() {
           justify-content: center;
         }
 
-        .kairo-top-action:hover {
+        .ZUQEN-top-action:hover {
           color: var(--text);
           background: var(--panel-hover);
         }
 
         /* AGENT SELECTOR */
 
-        .kairo-agent-selector {
+        .ZUQEN-agent-selector {
           position: relative;
           z-index: 100;
         }
 
-        .kairo-agent-button {
+        .ZUQEN-agent-button {
           min-width: 150px;
           height: 38px;
           padding: 0 10px;
@@ -2132,8 +2132,8 @@ export default function Home() {
           gap: 8px;
         }
 
-        .kairo-agent-button:hover,
-        .kairo-agent-button.active {
+        .ZUQEN-agent-button:hover,
+        .ZUQEN-agent-button.active {
           border-color:
             rgba(
               139,
@@ -2144,12 +2144,12 @@ export default function Home() {
           background: var(--panel-hover);
         }
 
-        .kairo-agent-icon {
+        .ZUQEN-agent-icon {
           color: #a78bfa;
           font-size: 14px;
         }
 
-        .kairo-agent-label {
+        .ZUQEN-agent-label {
           flex: 1;
           overflow: hidden;
           text-overflow: ellipsis;
@@ -2159,12 +2159,12 @@ export default function Home() {
           font-weight: 750;
         }
 
-        .kairo-agent-chevron {
+        .ZUQEN-agent-chevron {
           color: var(--muted2);
           font-size: 12px;
         }
 
-        .kairo-agent-dropdown {
+        .ZUQEN-agent-dropdown {
           position: absolute;
           top: calc(100% + 8px);
           right: 0;
@@ -2180,7 +2180,7 @@ export default function Home() {
           z-index: 99999;
         }
 
-        .kairo-agent-dropdown-title {
+        .ZUQEN-agent-dropdown-title {
           padding: 7px 9px 8px;
           color: var(--muted2);
           font-size: 7px;
@@ -2188,7 +2188,7 @@ export default function Home() {
           letter-spacing: 0.16em;
         }
 
-        .kairo-agent-option {
+        .ZUQEN-agent-option {
           width: 100%;
           min-height: 48px;
           padding: 7px 8px;
@@ -2202,8 +2202,8 @@ export default function Home() {
           text-align: left;
         }
 
-        .kairo-agent-option:hover,
-        .kairo-agent-option.selected {
+        .ZUQEN-agent-option:hover,
+        .ZUQEN-agent-option.selected {
           color: var(--text);
           border-color:
             rgba(
@@ -2221,7 +2221,7 @@ export default function Home() {
             );
         }
 
-        .kairo-agent-option-icon {
+        .ZUQEN-agent-option-icon {
           width: 29px;
           height: 29px;
           flex-shrink: 0;
@@ -2239,37 +2239,37 @@ export default function Home() {
           justify-content: center;
         }
 
-        .kairo-agent-option > span:nth-child(2) {
+        .ZUQEN-agent-option > span:nth-child(2) {
           min-width: 0;
           flex: 1;
         }
 
-        .kairo-agent-option strong {
+        .ZUQEN-agent-option strong {
           display: block;
           font-size: 9px;
           font-weight: 750;
         }
 
-        .kairo-agent-option small {
+        .ZUQEN-agent-option small {
           display: block;
           margin-top: 3px;
           color: var(--muted2);
           font-size: 7px;
         }
 
-        .kairo-agent-check {
+        .ZUQEN-agent-check {
           color: #a78bfa;
           font-size: 12px;
           font-weight: 800;
         }
 
-        .kairo-agent-divider {
+        .ZUQEN-agent-divider {
           height: 1px;
           margin: 5px 2px;
           background: var(--line-soft);
         }
 
-        .kairo-agent-coming {
+        .ZUQEN-agent-coming {
           display: flex;
           align-items: center;
           gap: 8px;
@@ -2278,25 +2278,25 @@ export default function Home() {
           font-size: 8px;
         }
 
-        .kairo-messages {
+        .ZUQEN-messages {
           flex: 1;
           min-height: 0;
           overflow-y: auto;
           overflow-x: hidden;
         }
 
-        .kairo-messages::-webkit-scrollbar {
+        .ZUQEN-messages::-webkit-scrollbar {
           width: 6px;
         }
 
-        .kairo-messages::-webkit-scrollbar-thumb {
+        .ZUQEN-messages::-webkit-scrollbar-thumb {
           background: var(--line);
           border-radius: 20px;
         }
 
         /* WELCOME */
 
-        .kairo-welcome {
+        .ZUQEN-welcome {
           min-height: 100%;
           padding: 55px 20px 35px;
           display: flex;
@@ -2305,7 +2305,7 @@ export default function Home() {
           justify-content: center;
         }
 
-        .kairo-welcome-badge {
+        .ZUQEN-welcome-badge {
           margin-top: 22px;
           padding: 6px 10px;
           border: 1px solid var(--line);
@@ -2324,7 +2324,7 @@ export default function Home() {
           background: #34d399;
         }
 
-        .kairo-welcome-orb {
+        .ZUQEN-welcome-orb {
           width: 70px;
           height: 70px;
           border-radius: 50%;
@@ -2353,7 +2353,7 @@ export default function Home() {
               );
         }
 
-        .light .kairo-welcome-orb {
+        .light .ZUQEN-welcome-orb {
           background:
             linear-gradient(
               145deg,
@@ -2370,7 +2370,7 @@ export default function Home() {
               );
         }
 
-        .kairo-orb-inner {
+        .ZUQEN-orb-inner {
           width: 62px;
           height: 62px;
           border-radius: 50%;
@@ -2384,10 +2384,10 @@ export default function Home() {
               #8b5cf6
             );
           animation:
-            kairo-spin 8s linear infinite;
+            ZUQEN-spin 8s linear infinite;
         }
 
-        .kairo-orb-center {
+        .ZUQEN-orb-center {
           width: 100%;
           height: 100%;
           border-radius: 50%;
@@ -2397,11 +2397,11 @@ export default function Home() {
           justify-content: center;
         }
 
-        .light .kairo-orb-center {
+        .light .ZUQEN-orb-center {
           background: white;
         }
 
-        .kairo-orb-core {
+        .ZUQEN-orb-core {
           width: 20px;
           height: 20px;
           border-radius: 50%;
@@ -2410,7 +2410,7 @@ export default function Home() {
             0 0 25px white;
         }
 
-        .kairo-welcome-title {
+        .ZUQEN-welcome-title {
           margin: 18px 0 0;
           font-size: clamp(
             43px,
@@ -2423,7 +2423,7 @@ export default function Home() {
           text-align: center;
         }
 
-        .kairo-gradient {
+        .ZUQEN-gradient {
           background:
             linear-gradient(
               100deg,
@@ -2436,7 +2436,7 @@ export default function Home() {
           color: transparent;
         }
 
-        .kairo-welcome-copy {
+        .ZUQEN-welcome-copy {
           max-width: 680px;
           margin: 20px auto 0;
           text-align: center;
@@ -2445,7 +2445,7 @@ export default function Home() {
           color: var(--muted);
         }
 
-        .kairo-pills {
+        .ZUQEN-pills {
           display: flex;
           flex-wrap: wrap;
           justify-content: center;
@@ -2453,7 +2453,7 @@ export default function Home() {
           margin-top: 19px;
         }
 
-        .kairo-pill {
+        .ZUQEN-pill {
           padding: 6px 10px;
           border: 1px solid var(--line);
           border-radius: 999px;
@@ -2462,7 +2462,7 @@ export default function Home() {
           font-size: 9px;
         }
 
-        .kairo-prompts {
+        .ZUQEN-prompts {
           width: 100%;
           max-width: 900px;
           display: grid;
@@ -2472,7 +2472,7 @@ export default function Home() {
           margin-top: 42px;
         }
 
-        .kairo-prompt {
+        .ZUQEN-prompt {
           min-height: 145px;
           padding: 18px;
           text-align: left;
@@ -2489,7 +2489,7 @@ export default function Home() {
             background 0.2s ease;
         }
 
-        .kairo-prompt:hover {
+        .ZUQEN-prompt:hover {
           transform: translateY(-4px);
           border-color:
             rgba(
@@ -2501,7 +2501,7 @@ export default function Home() {
           background: var(--panel-hover);
         }
 
-        .kairo-prompt-icon {
+        .ZUQEN-prompt-icon {
           width: 35px;
           height: 35px;
           border-radius: 11px;
@@ -2519,26 +2519,26 @@ export default function Home() {
           margin-bottom: 25px;
         }
 
-        .kairo-prompt-label {
+        .ZUQEN-prompt-label {
           font-size: 8px;
           font-weight: 800;
           color: #a78bfa;
           letter-spacing: 0.18em;
         }
 
-        .kairo-prompt-title {
+        .ZUQEN-prompt-title {
           margin-top: 7px;
           font-size: 12px;
           line-height: 1.55;
           font-weight: 650;
         }
 
-        .kairo-prompt-arrow {
+        .ZUQEN-prompt-arrow {
           float: right;
           color: var(--muted2);
         }
 
-        .kairo-welcome-footer {
+        .ZUQEN-welcome-footer {
           margin-top: 28px;
           color: var(--muted2);
           font-size: 9px;
@@ -2546,24 +2546,24 @@ export default function Home() {
 
         /* MESSAGES */
 
-        .kairo-message-list {
+        .ZUQEN-message-list {
           width: min(900px, 100%);
           margin: auto;
           padding: 34px 22px 50px;
         }
 
-        .kairo-message {
+        .ZUQEN-message {
           display: flex;
           margin-bottom: 30px;
           animation:
-            kairo-message-in 0.22s ease;
+            ZUQEN-message-in 0.22s ease;
         }
 
-        .kairo-message.user {
+        .ZUQEN-message.user {
           justify-content: flex-end;
         }
 
-        .kairo-user-bubble {
+        .ZUQEN-user-bubble {
           max-width: min(
             720px,
             85%
@@ -2598,7 +2598,7 @@ export default function Home() {
             0 12px 40px var(--shadow);
         }
 
-        .light .kairo-user-bubble {
+        .light .ZUQEN-user-bubble {
           background:
             linear-gradient(
               135deg,
@@ -2616,21 +2616,21 @@ export default function Home() {
               );
         }
 
-        .kairo-message-text,
-        .kairo-assistant-text {
+        .ZUQEN-message-text,
+        .ZUQEN-assistant-text {
           white-space: pre-wrap;
           word-break: break-word;
           font-size: 14px;
           line-height: 1.8;
         }
 
-        .kairo-assistant-message {
+        .ZUQEN-assistant-message {
           display: flex;
           gap: 13px;
           width: 100%;
         }
 
-        .kairo-assistant-mark {
+        .ZUQEN-assistant-mark {
           width: 36px;
           height: 36px;
           flex-shrink: 0;
@@ -2655,7 +2655,7 @@ export default function Home() {
               );
         }
 
-        .kairo-assistant-mark-inner {
+        .ZUQEN-assistant-mark-inner {
           width: 9px;
           height: 9px;
           border-radius: 50%;
@@ -2664,25 +2664,25 @@ export default function Home() {
             0 0 13px white;
         }
 
-        .kairo-assistant-content {
+        .ZUQEN-assistant-content {
           min-width: 0;
           flex: 1;
           padding-top: 1px;
         }
 
-        .kairo-assistant-header {
+        .ZUQEN-assistant-header {
           display: flex;
           align-items: center;
           gap: 7px;
           margin-bottom: 7px;
         }
 
-        .kairo-assistant-name {
+        .ZUQEN-assistant-name {
           font-size: 11px;
           font-weight: 800;
         }
 
-        .kairo-ai-badge {
+        .ZUQEN-ai-badge {
           padding: 3px 6px;
           border-radius: 6px;
           color: #a78bfa;
@@ -2705,18 +2705,18 @@ export default function Home() {
           letter-spacing: 0.1em;
         }
 
-        .kairo-assistant-text {
+        .ZUQEN-assistant-text {
           color: var(--text);
         }
 
-        .kairo-thinking {
+        .ZUQEN-thinking {
           display: inline-flex;
           align-items: center;
           gap: 5px;
           color: var(--muted2);
         }
 
-        .kairo-thinking span {
+        .ZUQEN-thinking span {
           width: 5px;
           height: 5px;
           border-radius: 50%;
@@ -2726,21 +2726,21 @@ export default function Home() {
               ease-in-out;
         }
 
-        .kairo-thinking span:nth-child(2) {
+        .ZUQEN-thinking span:nth-child(2) {
           animation-delay: 0.12s;
         }
 
-        .kairo-thinking span:nth-child(3) {
+        .ZUQEN-thinking span:nth-child(3) {
           animation-delay: 0.24s;
         }
 
-        .kairo-actions {
+        .ZUQEN-actions {
           display: flex;
           gap: 3px;
           margin-top: 12px;
         }
 
-        .kairo-message-action {
+        .ZUQEN-message-action {
           height: 30px;
           padding: 0 8px;
           border: 0;
@@ -2753,25 +2753,25 @@ export default function Home() {
           gap: 5px;
         }
 
-        .kairo-message-action:hover {
+        .ZUQEN-message-action:hover {
           color: var(--text);
           background: var(--panel-soft);
         }
 
-        .kairo-message-action:disabled {
+        .ZUQEN-message-action:disabled {
           opacity: 0.3;
         }
 
         /* FILES */
 
-        .kairo-files {
+        .ZUQEN-files {
           display: flex;
           flex-wrap: wrap;
           gap: 7px;
           margin-top: 11px;
         }
 
-        .kairo-file-card {
+        .ZUQEN-file-card {
           min-width: 175px;
           max-width: 255px;
           display: flex;
@@ -2783,7 +2783,7 @@ export default function Home() {
           background: var(--panel-soft);
         }
 
-        .kairo-file-icon {
+        .ZUQEN-file-icon {
           width: 31px;
           height: 31px;
           flex-shrink: 0;
@@ -2801,11 +2801,11 @@ export default function Home() {
             );
         }
 
-        .kairo-file-info {
+        .ZUQEN-file-info {
           min-width: 0;
         }
 
-        .kairo-file-name {
+        .ZUQEN-file-name {
           font-size: 10px;
           font-weight: 650;
           white-space: nowrap;
@@ -2813,7 +2813,7 @@ export default function Home() {
           text-overflow: ellipsis;
         }
 
-        .kairo-file-size {
+        .ZUQEN-file-size {
           margin-top: 2px;
           color: var(--muted2);
           font-size: 8px;
@@ -2821,7 +2821,7 @@ export default function Home() {
 
         /* COMPOSER */
 
-        .kairo-composer-area {
+        .ZUQEN-composer-area {
           flex-shrink: 0;
           padding:
             10px 20px 18px;
@@ -2833,12 +2833,12 @@ export default function Home() {
             );
         }
 
-        .kairo-composer-width {
+        .ZUQEN-composer-width {
           width: min(900px, 100%);
           margin: auto;
         }
 
-        .kairo-edit-bar {
+        .ZUQEN-edit-bar {
           display: flex;
           align-items: center;
           justify-content: space-between;
@@ -2862,32 +2862,32 @@ export default function Home() {
           font-size: 10px;
         }
 
-        .kairo-edit-label {
+        .ZUQEN-edit-label {
           display: flex;
           align-items: center;
           gap: 6px;
           color: #a78bfa;
         }
 
-        .kairo-cancel {
+        .ZUQEN-cancel {
           border: 0;
           color: var(--muted);
           background: transparent;
           font-size: 9px;
         }
 
-        .kairo-cancel:hover {
+        .ZUQEN-cancel:hover {
           color: var(--text);
         }
 
-        .kairo-pending-files {
+        .ZUQEN-pending-files {
           display: flex;
           gap: 7px;
           flex-wrap: wrap;
           margin-bottom: 8px;
         }
 
-        .kairo-pending {
+        .ZUQEN-pending {
           max-width: 245px;
           display: flex;
           align-items: center;
@@ -2898,7 +2898,7 @@ export default function Home() {
           background: var(--panel);
         }
 
-        .kairo-pending-icon {
+        .ZUQEN-pending-icon {
           width: 27px;
           height: 27px;
           flex-shrink: 0;
@@ -2916,7 +2916,7 @@ export default function Home() {
             );
         }
 
-        .kairo-pending-name {
+        .ZUQEN-pending-name {
           max-width: 150px;
           overflow: hidden;
           text-overflow: ellipsis;
@@ -2924,12 +2924,12 @@ export default function Home() {
           font-size: 9px;
         }
 
-        .kairo-pending-size {
+        .ZUQEN-pending-size {
           color: var(--muted2);
           font-size: 8px;
         }
 
-        .kairo-remove {
+        .ZUQEN-remove {
           width: 23px;
           height: 23px;
           border: 0;
@@ -2941,7 +2941,7 @@ export default function Home() {
           background: transparent;
         }
 
-        .kairo-remove:hover {
+        .ZUQEN-remove:hover {
           color: var(--danger);
           background:
             rgba(
@@ -2952,7 +2952,7 @@ export default function Home() {
             );
         }
 
-        .kairo-composer {
+        .ZUQEN-composer {
           min-height: 58px;
           display: flex;
           align-items: flex-end;
@@ -2966,7 +2966,7 @@ export default function Home() {
           backdrop-filter: blur(30px);
         }
 
-        .kairo-composer:focus-within {
+        .ZUQEN-composer:focus-within {
           border-color:
             rgba(
               139,
@@ -2985,7 +2985,7 @@ export default function Home() {
               );
         }
 
-        .kairo-tool {
+        .ZUQEN-tool {
           width: 40px;
           height: 40px;
           flex-shrink: 0;
@@ -2998,17 +2998,17 @@ export default function Home() {
           justify-content: center;
         }
 
-        .kairo-tool:hover {
+        .ZUQEN-tool:hover {
           color: var(--text);
           background: var(--panel-hover);
         }
 
-        .kairo-tool:disabled {
+        .ZUQEN-tool:disabled {
           opacity: 0.3;
           cursor: not-allowed;
         }
 
-        .kairo-textarea {
+        .ZUQEN-textarea {
           flex: 1;
           min-width: 0;
           min-height: 40px;
@@ -3023,11 +3023,11 @@ export default function Home() {
           line-height: 20px;
         }
 
-        .kairo-textarea::placeholder {
+        .ZUQEN-textarea::placeholder {
           color: var(--muted2);
         }
 
-        .kairo-send {
+        .ZUQEN-send {
           width: 40px;
           height: 40px;
           flex-shrink: 0;
@@ -3045,17 +3045,17 @@ export default function Home() {
             );
         }
 
-        .kairo-send:hover:not(:disabled) {
+        .ZUQEN-send:hover:not(:disabled) {
           transform: translateY(-1px);
         }
 
-        .kairo-send:disabled {
+        .ZUQEN-send:disabled {
           opacity: 0.22;
           box-shadow: none;
           cursor: not-allowed;
         }
 
-        .kairo-disclaimer {
+        .ZUQEN-disclaimer {
           display: flex;
           align-items: center;
           justify-content: center;
@@ -3065,13 +3065,13 @@ export default function Home() {
           font-size: 8px;
         }
 
-        @keyframes kairo-spin {
+        @keyframes ZUQEN-spin {
           to {
             transform: rotate(360deg);
           }
         }
 
-        @keyframes kairo-message-in {
+        @keyframes ZUQEN-message-in {
           from {
             opacity: 0;
             transform: translateY(5px);
@@ -3098,7 +3098,7 @@ export default function Home() {
         }
 
         @media (max-width: 900px) {
-          .kairo-sidebar {
+          .ZUQEN-sidebar {
             position: fixed;
             left: 0;
             top: 0;
@@ -3113,74 +3113,74 @@ export default function Home() {
                 );
           }
 
-          .kairo-sidebar.closed {
+          .ZUQEN-sidebar.closed {
             transform: translateX(-100%);
             width: 300px;
           }
 
-          .kairo-prompts {
+          .ZUQEN-prompts {
             grid-template-columns: 1fr;
           }
 
-          .kairo-welcome {
+          .ZUQEN-welcome {
             padding:
               35px 18px 25px;
           }
 
-          .kairo-composer-area {
+          .ZUQEN-composer-area {
             padding:
               8px 10px 12px;
           }
 
-          .kairo-message-list {
+          .ZUQEN-message-list {
             padding:
               25px 14px 35px;
           }
         }
 
         @media (max-width: 600px) {
-          .kairo-topbar {
+          .ZUQEN-topbar {
             padding: 0 12px;
           }
 
-          .kairo-topbar-status {
+          .ZUQEN-topbar-status {
             display: none;
           }
 
-          .kairo-agent-button {
+          .ZUQEN-agent-button {
             min-width: 40px;
             width: 40px;
             padding: 0;
             justify-content: center;
           }
 
-          .kairo-agent-label,
-          .kairo-agent-chevron {
+          .ZUQEN-agent-label,
+          .ZUQEN-agent-chevron {
             display: none;
           }
 
-          .kairo-agent-dropdown {
+          .ZUQEN-agent-dropdown {
             right: -5px;
             width: 235px;
           }
 
-          .kairo-welcome-title {
+          .ZUQEN-welcome-title {
             font-size: 48px;
           }
 
-          .kairo-welcome-copy {
+          .ZUQEN-welcome-copy {
             font-size: 12px;
           }
 
-          .kairo-tool {
+          .ZUQEN-tool {
             width: 34px;
           }
 
-          .kairo-send {
+          .ZUQEN-send {
             width: 38px;
           }
 
-          .kairo-user-bubble {
+          .ZUQEN-user-bubble {
             max-width: 92%;
           }
         }
@@ -3189,32 +3189,32 @@ export default function Home() {
       {/* SIDEBAR */}
 
       <aside
-        className={`kairo-sidebar ${
+        className={`ZUQEN-sidebar ${
           sidebar ? "" : "closed"
         }`}
         onClick={(event) =>
           event.stopPropagation()
         }
       >
-        <div className="kairo-sidebar-inner">
-          <div className="kairo-side-top">
-            <div className="kairo-brand-row">
-              <div className="kairo-brand">
-                <KairoMark />
+        <div className="ZUQEN-sidebar-inner">
+          <div className="ZUQEN-side-top">
+            <div className="ZUQEN-brand-row">
+              <div className="ZUQEN-brand">
+                <ZUQENMark />
 
                 <div>
-                  <div className="kairo-brand-name">
-                    KAIRO
+                  <div className="ZUQEN-brand-name">
+                    ZUQEN
                   </div>
 
-                  <div className="kairo-brand-sub">
+                  <div className="ZUQEN-brand-sub">
                     AI workspace
                   </div>
                 </div>
               </div>
 
               <button
-                className="kairo-icon-button"
+                className="ZUQEN-icon-button"
                 onClick={() =>
                   setSidebar(false)
                 }
@@ -3228,7 +3228,7 @@ export default function Home() {
             </div>
 
             <button
-              className="kairo-new-button"
+              className="ZUQEN-new-button"
               disabled={!authReady}
               onClick={() =>
                 void createChat()
@@ -3243,8 +3243,8 @@ export default function Home() {
             </button>
           </div>
 
-          <div className="kairo-history">
-            <div className="kairo-section-label">
+          <div className="ZUQEN-history">
+            <div className="ZUQEN-section-label">
               <span>
                 Conversations
               </span>
@@ -3255,7 +3255,7 @@ export default function Home() {
             </div>
 
             {activeChats.length === 0 && (
-              <div className="kairo-empty-history">
+              <div className="ZUQEN-empty-history">
                 <Icon size={20}>
                   <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4Z" />
                 </Icon>
@@ -3275,7 +3275,7 @@ export default function Home() {
               (chat) => (
                 <div
                   key={chat.id}
-                  className={`kairo-chat ${
+                  className={`ZUQEN-chat ${
                     activeChat ===
                     chat.id
                       ? "active"
@@ -3283,7 +3283,7 @@ export default function Home() {
                   }`}
                 >
                   <button
-                    className="kairo-chat-open"
+                    className="ZUQEN-chat-open"
                     onClick={() =>
                       void openChat(
                         chat.id
@@ -3292,18 +3292,18 @@ export default function Home() {
                     aria-label={`Open ${chat.title}`}
                   />
 
-                  <div className="kairo-chat-icon">
+                  <div className="ZUQEN-chat-icon">
                     <Icon size={15}>
                       <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4Z" />
                     </Icon>
                   </div>
 
-                  <div className="kairo-chat-title">
+                  <div className="ZUQEN-chat-title">
                     {chat.title}
                   </div>
 
                   <button
-                    className="kairo-chat-more"
+                    className="ZUQEN-chat-more"
                     onClick={(event) =>
                       openChatMenu(
                         event,
@@ -3339,7 +3339,7 @@ export default function Home() {
             )}
 
             <button
-              className="kairo-archive-toggle"
+              className="ZUQEN-archive-toggle"
               onClick={() =>
                 setArchiveOpen(
                   !archiveOpen
@@ -3394,13 +3394,13 @@ export default function Home() {
                     (chat) => (
                       <div
                         key={chat.id}
-                        className="kairo-archive-item"
+                        className="ZUQEN-archive-item"
                       >
-                        <div className="kairo-archive-name">
+                        <div className="ZUQEN-archive-name">
                           {chat.title}
                         </div>
 
-                        <div className="kairo-archive-actions">
+                        <div className="ZUQEN-archive-actions">
                           <button
                             className="restore"
                             onClick={() =>
@@ -3431,24 +3431,24 @@ export default function Home() {
             )}
           </div>
 
-          <div className="kairo-side-bottom">
-            <div className="kairo-account-card">
-              <div className="kairo-account-row">
-                <div className="kairo-account-avatar">
-                  <KairoMark small />
+          <div className="ZUQEN-side-bottom">
+            <div className="ZUQEN-account-card">
+              <div className="ZUQEN-account-row">
+                <div className="ZUQEN-account-avatar">
+                  <ZUQENMark small />
                 </div>
 
                 <div>
-                  <div className="kairo-account-title">
-                    KAIRO AI
+                  <div className="ZUQEN-account-title">
+                    ZUQEN AI
                   </div>
 
-                  <div className="kairo-account-sub">
+                  <div className="ZUQEN-account-sub">
                     Intelligent companion
                   </div>
                 </div>
 
-                <div className="kairo-online" />
+                <div className="ZUQEN-online" />
               </div>
             </div>
           </div>
@@ -3457,12 +3457,12 @@ export default function Home() {
 
       {/* MAIN */}
 
-      <section className="kairo-main">
-        <header className="kairo-topbar">
-          <div className="kairo-topbar-left">
+      <section className="ZUQEN-main">
+        <header className="ZUQEN-topbar">
+          <div className="ZUQEN-topbar-left">
             {!sidebar && (
               <button
-                className="kairo-top-action"
+                className="ZUQEN-top-action"
                 onClick={() =>
                   setSidebar(true)
                 }
@@ -3476,23 +3476,23 @@ export default function Home() {
               </button>
             )}
 
-            <KairoMark small />
+            <ZUQENMark small />
 
-            <div className="kairo-topbar-info">
-              <div className="kairo-topbar-name">
-                KAIRO AI
+            <div className="ZUQEN-topbar-info">
+              <div className="ZUQEN-topbar-name">
+                ZUQEN AI
               </div>
 
-              <div className="kairo-topbar-status">
+              <div className="ZUQEN-topbar-status">
                 <span className="status-dot" />
                 Online · Groq intelligence
               </div>
             </div>
           </div>
 
-          <div className="kairo-topbar-actions">
+          <div className="ZUQEN-topbar-actions">
             <button
-              className="kairo-top-action"
+              className="ZUQEN-top-action"
               onClick={
                 toggleTheme
               }
@@ -3528,14 +3528,14 @@ export default function Home() {
             {/* AGENT SELECTOR */}
 
             <div
-              className="kairo-agent-selector"
+              className="ZUQEN-agent-selector"
               onClick={(event) =>
                 event.stopPropagation()
               }
             >
               <button
                 type="button"
-                className={`kairo-agent-button ${
+                className={`ZUQEN-agent-button ${
                   agentOpen
                     ? "active"
                     : ""
@@ -3550,15 +3550,15 @@ export default function Home() {
                   agentOpen
                 }
               >
-                <span className="kairo-agent-icon">
+                <span className="ZUQEN-agent-icon">
                   ✦
                 </span>
 
-                <span className="kairo-agent-label">
+                <span className="ZUQEN-agent-label">
                   {selectedAgent}
                 </span>
 
-                <span className="kairo-agent-chevron">
+                <span className="ZUQEN-agent-chevron">
                   {agentOpen
                     ? "⌃"
                     : "⌄"}
@@ -3566,32 +3566,32 @@ export default function Home() {
               </button>
 
               {agentOpen && (
-                <div className="kairo-agent-dropdown">
-                  <div className="kairo-agent-dropdown-title">
+                <div className="ZUQEN-agent-dropdown">
+                  <div className="ZUQEN-agent-dropdown-title">
                     SELECT AGENT
                   </div>
 
                   <button
                     type="button"
-                    className={`kairo-agent-option ${
+                    className={`ZUQEN-agent-option ${
                       selectedAgent ===
-                      "Kairo AI"
+                      "ZUQEN AI"
                         ? "selected"
                         : ""
                     }`}
                     onClick={() =>
                       selectAgent(
-                        "Kairo AI"
+                        "ZUQEN AI"
                       )
                     }
                   >
-                    <span className="kairo-agent-option-icon">
+                    <span className="ZUQEN-agent-option-icon">
                       ✦
                     </span>
 
                     <span>
                       <strong>
-                        Kairo AI
+                        ZUQEN AI
                       </strong>
 
                       <small>
@@ -3600,8 +3600,8 @@ export default function Home() {
                     </span>
 
                     {selectedAgent ===
-                      "Kairo AI" && (
-                      <span className="kairo-agent-check">
+                      "ZUQEN AI" && (
+                      <span className="ZUQEN-agent-check">
                         ✓
                       </span>
                     )}
@@ -3609,7 +3609,7 @@ export default function Home() {
 
                   <button
                     type="button"
-                    className={`kairo-agent-option ${
+                    className={`ZUQEN-agent-option ${
                       selectedAgent ===
                       "Website Builder"
                         ? "selected"
@@ -3621,7 +3621,7 @@ export default function Home() {
                       )
                     }
                   >
-                    <span className="kairo-agent-option-icon">
+                    <span className="ZUQEN-agent-option-icon">
                       ⌘
                     </span>
 
@@ -3631,21 +3631,21 @@ export default function Home() {
                       </strong>
 
                       <small>
-                        Build websites with Kairo
+                        Build websites with ZUQEN
                       </small>
                     </span>
 
                     {selectedAgent ===
                       "Website Builder" && (
-                      <span className="kairo-agent-check">
+                      <span className="ZUQEN-agent-check">
                         ✓
                       </span>
                     )}
                   </button>
 
-                  <div className="kairo-agent-divider" />
+                  <div className="ZUQEN-agent-divider" />
 
-                  <div className="kairo-agent-coming">
+                  <div className="ZUQEN-agent-coming">
                     <span>
                       ◈
                     </span>
@@ -3659,7 +3659,7 @@ export default function Home() {
             </div>
 
             <button
-              className="kairo-top-action"
+              className="ZUQEN-top-action"
               disabled={!authReady}
               onClick={() =>
                 void createChat()
@@ -3674,31 +3674,31 @@ export default function Home() {
           </div>
         </header>
 
-        <div className="kairo-messages">
+        <div className="ZUQEN-messages">
           {messages.length === 0 ? (
-            <div className="kairo-welcome">
-              <div className="kairo-welcome-orb">
-                <div className="kairo-orb-inner">
-                  <div className="kairo-orb-center">
-                    <div className="kairo-orb-core" />
+            <div className="ZUQEN-welcome">
+              <div className="ZUQEN-welcome-orb">
+                <div className="ZUQEN-orb-inner">
+                  <div className="ZUQEN-orb-center">
+                    <div className="ZUQEN-orb-core" />
                   </div>
                 </div>
               </div>
 
-              <div className="kairo-welcome-badge">
+              <div className="ZUQEN-welcome-badge">
                 <span className="badge-dot" />
                 Your private AI workspace
               </div>
 
-              <h1 className="kairo-welcome-title">
+              <h1 className="ZUQEN-welcome-title">
                 Meet{" "}
-                <span className="kairo-gradient">
-                  KAIRO
+                <span className="ZUQEN-gradient">
+                  ZUQEN
                 </span>
               </h1>
 
-              <p className="kairo-welcome-copy">
-                Kairo AI is your intelligent
+              <p className="ZUQEN-welcome-copy">
+                ZUQEN AI is your intelligent
                 AI companion for chatting,
                 learning, brainstorming,
                 writing code, analyzing
@@ -3706,34 +3706,34 @@ export default function Home() {
                 things done.
               </p>
 
-              <div className="kairo-pills">
-                <span className="kairo-pill">
+              <div className="ZUQEN-pills">
+                <span className="ZUQEN-pill">
                   Ask anything
                 </span>
 
-                <span className="kairo-pill">
+                <span className="ZUQEN-pill">
                   Upload files
                 </span>
 
-                <span className="kairo-pill">
+                <span className="ZUQEN-pill">
                   Analyze ideas
                 </span>
 
-                <span className="kairo-pill">
+                <span className="ZUQEN-pill">
                   Build projects
                 </span>
               </div>
 
-              <div className="kairo-prompts">
+              <div className="ZUQEN-prompts">
                 <button
-                  className="kairo-prompt"
+                  className="ZUQEN-prompt"
                   onClick={() =>
                     setInput(
                       "Explain quantum physics in a simple way"
                     )
                   }
                 >
-                  <div className="kairo-prompt-icon">
+                  <div className="ZUQEN-prompt-icon">
                     <Icon size={17}>
                       <circle
                         cx="12"
@@ -3744,16 +3744,16 @@ export default function Home() {
                     </Icon>
                   </div>
 
-                  <div className="kairo-prompt-label">
+                  <div className="ZUQEN-prompt-label">
                     LEARN
                   </div>
 
-                  <div className="kairo-prompt-title">
+                  <div className="ZUQEN-prompt-title">
                     Explain something difficult
                     in a simple way.
                   </div>
 
-                  <div className="kairo-prompt-arrow">
+                  <div className="ZUQEN-prompt-arrow">
                     <Icon size={15}>
                       <path d="M5 12h14" />
                       <path d="m13 6 6 6-6 6" />
@@ -3762,14 +3762,14 @@ export default function Home() {
                 </button>
 
                 <button
-                  className="kairo-prompt"
+                  className="ZUQEN-prompt"
                   onClick={() =>
                     setInput(
                       "Help me build a modern website"
                     )
                   }
                 >
-                  <div className="kairo-prompt-icon">
+                  <div className="ZUQEN-prompt-icon">
                     <Icon size={17}>
                       <path d="m8 9-4 3 4 3" />
                       <path d="m16 9 4 3-4 3" />
@@ -3777,16 +3777,16 @@ export default function Home() {
                     </Icon>
                   </div>
 
-                  <div className="kairo-prompt-label">
+                  <div className="ZUQEN-prompt-label">
                     BUILD
                   </div>
 
-                  <div className="kairo-prompt-title">
+                  <div className="ZUQEN-prompt-title">
                     Turn an idea into a real
                     project.
                   </div>
 
-                  <div className="kairo-prompt-arrow">
+                  <div className="ZUQEN-prompt-arrow">
                     <Icon size={15}>
                       <path d="M5 12h14" />
                       <path d="m13 6 6 6-6 6" />
@@ -3795,14 +3795,14 @@ export default function Home() {
                 </button>
 
                 <button
-                  className="kairo-prompt"
+                  className="ZUQEN-prompt"
                   onClick={() =>
                     setInput(
                       "Give me a creative idea for a new project"
                     )
                   }
                 >
-                  <div className="kairo-prompt-icon">
+                  <div className="ZUQEN-prompt-icon">
                     <Icon size={17}>
                       <path d="M9 18h6" />
                       <path d="M10 22h4" />
@@ -3810,16 +3810,16 @@ export default function Home() {
                     </Icon>
                   </div>
 
-                  <div className="kairo-prompt-label">
+                  <div className="ZUQEN-prompt-label">
                     CREATE
                   </div>
 
-                  <div className="kairo-prompt-title">
+                  <div className="ZUQEN-prompt-title">
                     Explore a fresh idea and make
                     it real.
                   </div>
 
-                  <div className="kairo-prompt-arrow">
+                  <div className="ZUQEN-prompt-arrow">
                     <Icon size={15}>
                       <path d="M5 12h14" />
                       <path d="m13 6 6 6-6 6" />
@@ -3828,12 +3828,12 @@ export default function Home() {
                 </button>
               </div>
 
-              <div className="kairo-welcome-footer">
-                KAIRO · Think beyond the obvious
+              <div className="ZUQEN-welcome-footer">
+                ZUQEN · Think beyond the obvious
               </div>
             </div>
           ) : (
-            <div className="kairo-message-list">
+            <div className="ZUQEN-message-list">
               {messages.map(
                 (message) => {
                   const files =
@@ -3849,11 +3849,11 @@ export default function Home() {
                         key={
                           message.id
                         }
-                        className="kairo-message user"
+                        className="ZUQEN-message user"
                       >
-                        <div className="kairo-user-bubble">
+                        <div className="ZUQEN-user-bubble">
                           {message.content && (
-                            <div className="kairo-message-text">
+                            <div className="ZUQEN-message-text">
                               {
                                 message.content
                               }
@@ -3862,17 +3862,17 @@ export default function Home() {
 
                           {files.length >
                             0 && (
-                            <div className="kairo-files">
+                            <div className="ZUQEN-files">
                               {files.map(
                                 (
                                   file,
                                   index
                                 ) => (
                                   <div
-                                    className="kairo-file-card"
+                                    className="ZUQEN-file-card"
                                     key={`${file.name}-${index}`}
                                   >
-                                    <div className="kairo-file-icon">
+                                    <div className="ZUQEN-file-icon">
                                       <Icon
                                         size={
                                           15
@@ -3882,14 +3882,14 @@ export default function Home() {
                                       </Icon>
                                     </div>
 
-                                    <div className="kairo-file-info">
-                                      <div className="kairo-file-name">
+                                    <div className="ZUQEN-file-info">
+                                      <div className="ZUQEN-file-name">
                                         {
                                           file.name
                                         }
                                       </div>
 
-                                      <div className="kairo-file-size">
+                                      <div className="ZUQEN-file-size">
                                         {file.size
                                           ? formatFileSize(
                                               file.size
@@ -3913,7 +3913,7 @@ export default function Home() {
                             }}
                           >
                             <button
-                              className="kairo-message-action"
+                              className="ZUQEN-message-action"
                               onClick={() =>
                                 editMessage(
                                   message
@@ -3938,32 +3938,32 @@ export default function Home() {
                       key={
                         message.id
                       }
-                      className="kairo-message"
+                      className="ZUQEN-message"
                     >
-                      <div className="kairo-assistant-message">
-                        <div className="kairo-assistant-mark">
-                          <div className="kairo-assistant-mark-inner" />
+                      <div className="ZUQEN-assistant-message">
+                        <div className="ZUQEN-assistant-mark">
+                          <div className="ZUQEN-assistant-mark-inner" />
                         </div>
 
-                        <div className="kairo-assistant-content">
-                          <div className="kairo-assistant-header">
-                            <span className="kairo-assistant-name">
-                              KAIRO
+                        <div className="ZUQEN-assistant-content">
+                          <div className="ZUQEN-assistant-header">
+                            <span className="ZUQEN-assistant-name">
+                              ZUQEN
                             </span>
 
-                            <span className="kairo-ai-badge">
+                            <span className="ZUQEN-ai-badge">
                               AI
                             </span>
                           </div>
 
                           {message.content ? (
-                            <div className="kairo-assistant-text">
+                            <div className="ZUQEN-assistant-text">
                               {
                                 message.content
                               }
                             </div>
                           ) : loading ? (
-                            <div className="kairo-thinking">
+                            <div className="ZUQEN-thinking">
                               <span />
                               <span />
                               <span />
@@ -3979,30 +3979,30 @@ export default function Home() {
 
                           {files.length >
                             0 && (
-                            <div className="kairo-files">
+                            <div className="ZUQEN-files">
                               {files.map(
                                 (
                                   file,
                                   index
                                 ) => (
                                   <div
-                                    className="kairo-file-card"
+                                    className="ZUQEN-file-card"
                                     key={`${file.name}-${index}`}
                                   >
-                                    <div className="kairo-file-icon">
+                                    <div className="ZUQEN-file-icon">
                                       <Icon size={15}>
                                         <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
                                       </Icon>
                                     </div>
 
-                                    <div className="kairo-file-info">
-                                      <div className="kairo-file-name">
+                                    <div className="ZUQEN-file-info">
+                                      <div className="ZUQEN-file-name">
                                         {
                                           file.name
                                         }
                                       </div>
 
-                                      <div className="kairo-file-size">
+                                      <div className="ZUQEN-file-size">
                                         {file.size
                                           ? formatFileSize(
                                               file.size
@@ -4020,9 +4020,9 @@ export default function Home() {
                             !message.content.startsWith(
                               "⚠️"
                             ) && (
-                              <div className="kairo-actions">
+                              <div className="ZUQEN-actions">
                                 <button
-                                  className="kairo-message-action"
+                                  className="ZUQEN-message-action"
                                   onClick={() =>
                                     copyMessage(
                                       message.content
@@ -4044,7 +4044,7 @@ export default function Home() {
                                 </button>
 
                                 <button
-                                  className="kairo-message-action"
+                                  className="ZUQEN-message-action"
                                   disabled={
                                     loading
                                   }
@@ -4077,11 +4077,11 @@ export default function Home() {
 
         {/* COMPOSER */}
 
-        <div className="kairo-composer-area">
-          <div className="kairo-composer-width">
+        <div className="ZUQEN-composer-area">
+          <div className="ZUQEN-composer-width">
             {editingId && (
-              <div className="kairo-edit-bar">
-                <div className="kairo-edit-label">
+              <div className="ZUQEN-edit-bar">
+                <div className="ZUQEN-edit-label">
                   <Icon size={13}>
                     <path d="M12 20h9" />
                     <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z" />
@@ -4091,7 +4091,7 @@ export default function Home() {
                 </div>
 
                 <button
-                  className="kairo-cancel"
+                  className="ZUQEN-cancel"
                   onClick={
                     cancelEdit
                   }
@@ -4103,17 +4103,17 @@ export default function Home() {
 
             {attachments.length >
               0 && (
-              <div className="kairo-pending-files">
+              <div className="ZUQEN-pending-files">
                 {attachments.map(
                   (
                     file,
                     index
                   ) => (
                     <div
-                      className="kairo-pending"
+                      className="ZUQEN-pending"
                       key={`${file.name}-${index}`}
                     >
-                      <div className="kairo-pending-icon">
+                      <div className="ZUQEN-pending-icon">
                         <Icon size={13}>
                           <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
                         </Icon>
@@ -4124,13 +4124,13 @@ export default function Home() {
                           minWidth: 0,
                         }}
                       >
-                        <div className="kairo-pending-name">
+                        <div className="ZUQEN-pending-name">
                           {
                             file.name
                           }
                         </div>
 
-                        <div className="kairo-pending-size">
+                        <div className="ZUQEN-pending-size">
                           {file.size
                             ? formatFileSize(
                                 file.size
@@ -4140,7 +4140,7 @@ export default function Home() {
                       </div>
 
                       <button
-                        className="kairo-remove"
+                        className="ZUQEN-remove"
                         onClick={() =>
                           removeAttachment(
                             index
@@ -4158,9 +4158,9 @@ export default function Home() {
               </div>
             )}
 
-            <div className="kairo-composer">
+            <div className="ZUQEN-composer">
               <button
-                className="kairo-tool"
+                className="ZUQEN-tool"
                 disabled={
                   uploading ||
                   loading
@@ -4176,7 +4176,7 @@ export default function Home() {
               </button>
 
               <button
-                className="kairo-tool"
+                className="ZUQEN-tool"
                 disabled={
                   uploading ||
                   loading
@@ -4221,7 +4221,7 @@ export default function Home() {
               />
 
               <textarea
-                className="kairo-textarea"
+                className="ZUQEN-textarea"
                 value={input}
                 onChange={(event) =>
                   setInput(
@@ -4240,12 +4240,12 @@ export default function Home() {
                     ? "Uploading to secure storage..."
                     : editingId
                     ? "Edit your message..."
-                    : "Message KAIRO..."
+                    : "Message ZUQEN..."
                 }
               />
 
               <button
-                className="kairo-send"
+                className="ZUQEN-send"
                 disabled={
                   loading ||
                   uploading ||
@@ -4270,7 +4270,7 @@ export default function Home() {
                       borderRadius:
                         "50%",
                       animation:
-                        "kairo-spin 1s linear infinite",
+                        "ZUQEN-spin 1s linear infinite",
                     }}
                   />
                 ) : (
@@ -4285,10 +4285,10 @@ export default function Home() {
               </button>
             </div>
 
-            <div className="kairo-disclaimer">
+            <div className="ZUQEN-disclaimer">
               <span>✦</span>
 
-              KAIRO can make mistakes.
+              ZUQEN can make mistakes.
               Check important
               information.
 
@@ -4303,7 +4303,7 @@ export default function Home() {
       {menuOpen &&
         menuPosition && (
           <div
-            className="kairo-menu"
+            className="ZUQEN-menu"
             style={{
               top: menuPosition.top,
               left: menuPosition.left,
