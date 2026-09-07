@@ -208,7 +208,10 @@ function selectAgent(agent: string) {
     router.push("/image-generator");
     return;
   }
-
+if (agent === "Video Generator") {
+  router.push("/video-generator");
+  return;
+}
   setSelectedAgent(agent);
 }
 
@@ -3674,6 +3677,35 @@ function selectAgent(agent: string) {
 
   {selectedAgent ===
     "Image Generator" && (
+    <span className="ZUQEN-agent-check">
+      ✓
+    </span>
+  )}
+</button>
+<button
+  type="button"
+  className={`ZUQEN-agent-option ${
+    selectedAgent === "Video Generator"
+      ? "selected"
+      : ""
+  }`}
+  onClick={() => selectAgent("Video Generator")}
+>
+  <span className="ZUQEN-agent-option-icon">
+    ▶
+  </span>
+
+  <span>
+    <strong>
+      Video Generator
+    </strong>
+
+    <small>
+      Create videos with ZUQEN
+    </small>
+  </span>
+
+  {selectedAgent === "Video Generator" && (
     <span className="ZUQEN-agent-check">
       ✓
     </span>
