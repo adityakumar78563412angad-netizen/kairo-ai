@@ -196,12 +196,16 @@ export default function Home() {
       return next;
     });
   }
-
- function selectAgent(agent: string) {
+function selectAgent(agent: string) {
   setAgentOpen(false);
 
   if (agent === "Website Builder") {
     router.push("/website-builder");
+    return;
+  }
+
+  if (agent === "Image Generator") {
+    router.push("/image-generator");
     return;
   }
 
