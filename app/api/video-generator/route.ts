@@ -51,7 +51,7 @@ export async function POST(request: Request) {
   {
     model: "Wan-AI/Wan2.2-TI2V-5B",
     inputs: prompt,
-    provider: "auto",
+    provider: "fal-ai",
   }
 );
 
