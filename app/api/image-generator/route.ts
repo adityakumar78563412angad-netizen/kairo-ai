@@ -1,11 +1,13 @@
+
 import { NextResponse } from "next/server";
-import { GoogleGenAI } from "@google/genai";
+import { InferenceClient } from "@huggingface/inference";
 
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
+
     const prompt =
       typeof body?.prompt === "string"
         ? body.prompt.trim()
@@ -32,81 +34,104 @@ export async function POST(request: Request) {
       );
     }
 
-    const apiKey =
-      process.env.GEMINI_API_KEY ||
-      process.env.GOOGLE_API_KEY;
+    const token = process.env.HF_TOKEN;
 
-    if (!apiKey) {
+    if (!token) {
       return NextResponse.json(
         {
           success: false,
           error:
-            "Gemini API key is not configured.",
+            "Hugging Face token is not configured. Please add HF_TOKEN to your environment variables.",
         },
         { status: 500 }
       );
     }
 
-    const ai = new GoogleGenAI({
-      apiKey,
-    });
+    const client = new InferenceClient(token);
 
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash-image",
-      contents: prompt,
-      config: {
-        responseModalities: ["TEXT", "IMAGE"],
+    const image = await client.textToImage(
+      {
+        model: "black-forest-labs/FLUX.1-schnell",
+        inputs: prompt,
+        provider: "auto",
       },
+      {
+        outputType: "dataUrl",
+      }
+    );
+
+    if (!image) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "Hugging Face did not return an image.",
+        },
+        { status: 502 }
+      );
+    }
+
+    return NextResponse.json({
+      success: true,
+      image,
+      text: "Image generated successfully by ZUQEN.",
     });
+  } catch (error: unknown) {
+    console.error(
+      "ZUQEN image generation error:",
+      error
+    );
 
-    const parts = response.candidates?.[0]?.content?.parts || [];
+    let message =
+      "Image generation failed. Please try again.";
 
-    const textParts: string[] = [];
+    if (error instanceof Error) {
+      message = error.message;
+    }
 
-    for (const part of parts) {
-      if (part.text) {
-        textParts.push(part.text);
-      }
+    const lowerMessage = message.toLowerCase();
 
-      const inlineData = part.inlineData;
-
-      if (
-        inlineData?.data &&
-        inlineData?.mimeType
-      ) {
-        const imageUrl = `data:${inlineData.mimeType};base64,${inlineData.data}`;
-
-        return NextResponse.json({
-          success: true,
-          image: imageUrl,
-          text: textParts.join("\n").trim(),
-        });
-      }
+    if (
+      lowerMessage.includes("401") ||
+      lowerMessage.includes("unauthorized") ||
+      lowerMessage.includes("invalid token")
+    ) {
+      message =
+        "Hugging Face authentication failed. Please check your HF_TOKEN and make sure it has Inference permission.";
+    } else if (
+      lowerMessage.includes("403") ||
+      lowerMessage.includes("forbidden")
+    ) {
+      message =
+        "Hugging Face denied the request. Please check your token permissions.";
+    } else if (
+      lowerMessage.includes("429") ||
+      lowerMessage.includes("rate limit") ||
+      lowerMessage.includes("quota")
+    ) {
+      message =
+        "Hugging Face rate limit or available credits were reached. Please try again later.";
+    } else if (
+      lowerMessage.includes("model") &&
+      lowerMessage.includes("not found")
+    ) {
+      message =
+        "The selected image model is currently unavailable.";
+    } else if (
+      lowerMessage.includes("timeout") ||
+      lowerMessage.includes("timed out")
+    ) {
+      message =
+        "Image generation timed out. Please try again.";
     }
 
     return NextResponse.json(
       {
         success: false,
-        error:
-          "The AI did not return an image. Please try another prompt.",
-      },
-      { status: 502 }
-    );
-  } catch (error) {
-    console.error(
-      "Image generation failed:",
-      error
-    );
-
-    return NextResponse.json(
-      {
-        success: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : "Image generation failed.",
+        error: message,
       },
       { status: 500 }
     );
   }
 }
+

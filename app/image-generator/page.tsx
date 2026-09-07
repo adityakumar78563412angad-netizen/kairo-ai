@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState } from "react";
@@ -7,7 +8,6 @@ export default function ImageGeneratorPage() {
   const [image, setImage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [resultText, setResultText] = useState("");
 
   async function generateImage() {
     const trimmedPrompt = prompt.trim();
@@ -17,49 +17,52 @@ export default function ImageGeneratorPage() {
     setLoading(true);
     setError("");
     setImage(null);
-    setResultText("");
 
     try {
-      const response = await fetch(
-        "/api/image-generator",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            prompt: trimmedPrompt,
-          }),
-        }
-      );
+      const response = await fetch("/api/image-generator", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          prompt: trimmedPrompt,
+        }),
+      });
 
-      const result = await response.json();
+      let result: {
+        success?: boolean;
+        image?: string;
+        error?: string;
+      };
+
+      try {
+        result = await response.json();
+      } catch {
+        throw new Error(
+          `Server returned an invalid response (${response.status}).`
+        );
+      }
 
       if (!response.ok || !result.success) {
         throw new Error(
-          result.error ||
-            "Image generation failed."
+          result.error || "Image generation failed."
         );
       }
 
       if (!result.image) {
         throw new Error(
-          "No image was returned by the AI."
+          "The AI did not return an image."
         );
       }
 
       setImage(result.image);
-      setResultText(result.text || "");
     } catch (err) {
-      console.error(
-        "Image generation failed:",
-        err
-      );
+      console.error("Image generation failed:", err);
 
       setError(
         err instanceof Error
           ? err.message
-          : "Image generation failed."
+          : "Something went wrong while generating the image."
       );
     } finally {
       setLoading(false);
@@ -70,186 +73,273 @@ export default function ImageGeneratorPage() {
     if (!image) return;
 
     const link = document.createElement("a");
+
     link.href = image;
     link.download = "zuqen-generated-image.png";
+
     document.body.appendChild(link);
     link.click();
     link.remove();
   }
 
+  function clearImage() {
+    setImage(null);
+    setError("");
+  }
+
   return (
-    <main className="min-h-screen bg-black text-white">
-      <div className="mx-auto flex min-h-screen w-full max-w-6xl flex-col px-6 py-8">
+    <main className="min-h-screen bg-[#050505] text-white">
+      {/* Background glow */}
+      <div className="pointer-events-none fixed inset-0 overflow-hidden">
+        <div className="absolute left-1/2 top-[-250px] h-[500px] w-[700px] -translate-x-1/2 rounded-full bg-white/[0.035] blur-[120px]" />
+        <div className="absolute bottom-[-250px] left-[-200px] h-[500px] w-[500px] rounded-full bg-white/[0.02] blur-[120px]" />
+      </div>
+
+      <div className="relative mx-auto flex min-h-screen w-full max-w-7xl flex-col px-5 py-5 sm:px-8 sm:py-7">
+
         {/* Header */}
-        <header className="mb-10 flex items-center justify-between">
+        <header className="flex items-center justify-between border-b border-white/[0.07] pb-5">
           <button
             type="button"
             onClick={() => window.history.back()}
-            className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-white/80 transition hover:bg-white/10"
+            className="group flex items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.035] px-3.5 py-2 text-sm text-white/65 transition hover:border-white/15 hover:bg-white/[0.07] hover:text-white"
           >
-            ← Back
+            <span className="text-base transition-transform group-hover:-translate-x-0.5">
+              ←
+            </span>
+
+            <span>Back</span>
           </button>
 
-          <div className="text-center">
-            <div className="text-xs font-medium uppercase tracking-[0.3em] text-white/40">
+          <div className="absolute left-1/2 -translate-x-1/2 text-center">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.35em] text-white/35">
               ZUQEN
             </div>
 
-            <h1 className="mt-1 text-xl font-semibold">
+            <div className="mt-0.5 text-sm font-medium text-white/80">
               Image Generator
-            </h1>
+            </div>
           </div>
 
-          <div className="w-[70px]" />
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/[0.08] bg-white/[0.035] text-sm text-white/40">
+            ✦
+          </div>
         </header>
 
         {/* Hero */}
-        <section className="mx-auto w-full max-w-3xl text-center">
-          <div className="mb-5 inline-flex h-14 w-14 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-2xl shadow-2xl">
+        <section className="mx-auto w-full max-w-4xl pt-14 text-center sm:pt-20">
+          <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-[20px] border border-white/10 bg-white/[0.055] text-2xl shadow-[0_0_50px_rgba(255,255,255,0.04)]">
             ✦
           </div>
 
-          <h2 className="text-4xl font-semibold tracking-tight sm:text-5xl">
-            Turn your ideas into
-            <span className="ml-2 bg-gradient-to-r from-white via-white/80 to-white/40 bg-clip-text text-transparent">
-              images.
+          <h1 className="text-4xl font-semibold tracking-[-0.04em] sm:text-6xl">
+            Create images with
+            <span className="ml-3 bg-gradient-to-r from-white via-white/70 to-white/30 bg-clip-text text-transparent">
+              ZUQEN.
             </span>
-          </h2>
+          </h1>
 
-          <p className="mx-auto mt-4 max-w-xl text-sm leading-6 text-white/50 sm:text-base">
-            Describe anything you want to create and
-            ZUQEN will transform your idea into an image.
+          <p className="mx-auto mt-5 max-w-2xl text-sm leading-7 text-white/40 sm:text-base">
+            Turn your imagination into visuals. Describe what
+            you want to create and let ZUQEN generate it for you.
           </p>
         </section>
 
-        {/* Prompt */}
-        <section className="mx-auto mt-12 w-full max-w-3xl">
-          <div className="rounded-3xl border border-white/10 bg-white/[0.035] p-4 shadow-2xl backdrop-blur-xl">
-            <textarea
-              value={prompt}
-              onChange={(event) => {
-                setPrompt(
-                  event.target.value.slice(0, 1000)
-                );
-                setError("");
-              }}
-              placeholder="Describe the image you want to create..."
-              rows={6}
-              disabled={loading}
-              className="w-full resize-none rounded-2xl border border-white/5 bg-black/30 p-5 text-sm leading-6 text-white outline-none placeholder:text-white/25 focus:border-white/15 disabled:opacity-50"
-            />
+        {/* Main generator */}
+        <section className="mx-auto mt-12 grid w-full max-w-6xl gap-6 lg:grid-cols-[0.9fr_1.1fr]">
 
-            <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="text-xs text-white/30">
-                {prompt.length}/1000 characters
-              </div>
+          {/* Prompt panel */}
+          <div className="rounded-[28px] border border-white/[0.08] bg-white/[0.025] p-5 shadow-2xl backdrop-blur-xl sm:p-6">
 
-              <button
-                type="button"
-                onClick={generateImage}
-                disabled={!prompt.trim() || loading}
-                className="rounded-2xl bg-white px-6 py-3 text-sm font-semibold text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-30"
-              >
-                {loading
-                  ? "✦ Generating..."
-                  : "✦ Generate Image"}
-              </button>
-            </div>
-          </div>
-        </section>
+            <div className="mb-5 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-white/80">
+                  Describe your image
+                </p>
 
-        {/* Error */}
-        {error && (
-          <div className="mx-auto mt-5 w-full max-w-3xl rounded-2xl border border-red-500/20 bg-red-500/10 px-5 py-4 text-sm text-red-300">
-            ⚠️ {error}
-          </div>
-        )}
-
-        {/* Result */}
-        <section className="mx-auto mt-8 w-full max-w-3xl">
-          {loading ? (
-            <div className="flex min-h-[360px] items-center justify-center rounded-3xl border border-white/10 bg-white/[0.02]">
-              <div className="text-center">
-                <div className="mx-auto mb-5 h-10 w-10 animate-spin rounded-full border-2 border-white/10 border-t-white" />
-
-                <h3 className="text-sm font-medium text-white/70">
-                  Creating your image...
-                </h3>
-
-                <p className="mt-2 text-xs text-white/30">
-                  ZUQEN is turning your prompt into an image.
+                <p className="mt-1 text-xs text-white/30">
+                  Be as creative as you want.
                 </p>
               </div>
-            </div>
-          ) : image ? (
-            <div className="overflow-hidden rounded-3xl border border-white/10 bg-white/[0.02]">
-              <div className="relative">
-                <img
-                  src={image}
-                  alt={prompt}
-                  className="block h-auto w-full"
-                />
-              </div>
 
-              <div className="flex flex-col gap-4 border-t border-white/10 p-5 sm:flex-row sm:items-center sm:justify-between">
-                <div className="min-w-0">
-                  <div className="text-xs uppercase tracking-wider text-white/30">
-                    Generated by ZUQEN
+              <div className="rounded-lg border border-white/[0.07] bg-white/[0.035] px-2.5 py-1 text-[10px] text-white/30">
+                AI
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-white/[0.07] bg-black/30 p-1.5 transition focus-within:border-white/15">
+              <textarea
+                value={prompt}
+                onChange={(event) => {
+                  setPrompt(
+                    event.target.value.slice(0, 1000)
+                  );
+                  setError("");
+                }}
+                onKeyDown={(event) => {
+                  if (
+                    (event.ctrlKey || event.metaKey) &&
+                    event.key === "Enter"
+                  ) {
+                    event.preventDefault();
+                    generateImage();
+                  }
+                }}
+                disabled={loading}
+                rows={9}
+                placeholder="A futuristic city floating above the clouds at sunset, cinematic lighting, ultra detailed..."
+                className="w-full resize-none bg-transparent p-4 text-sm leading-7 text-white outline-none placeholder:text-white/20 disabled:cursor-not-allowed disabled:opacity-50"
+              />
+            </div>
+
+            <div className="mt-4 flex items-center justify-between">
+              <span className="text-[11px] text-white/25">
+                {prompt.length}/1000
+              </span>
+
+              <span className="hidden text-[11px] text-white/20 sm:block">
+                Ctrl + Enter to generate
+              </span>
+            </div>
+
+            {error && (
+              <div className="mt-4 rounded-2xl border border-red-400/15 bg-red-400/[0.06] px-4 py-3">
+                <div className="flex gap-3">
+                  <span className="text-red-300/80">!</span>
+
+                  <div>
+                    <p className="text-xs font-medium text-red-200/90">
+                      Generation failed
+                    </p>
+
+                    <p className="mt-1 break-words text-[11px] leading-5 text-red-200/50">
+                      {error}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={generateImage}
+              disabled={!prompt.trim() || loading}
+              className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-white px-5 py-3.5 text-sm font-semibold text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-25"
+            >
+              {loading ? (
+                <>
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-black/20 border-t-black" />
+                  Creating image...
+                </>
+              ) : (
+                <>
+                  <span>✦</span>
+                  Generate Image
+                </>
+              )}
+            </button>
+          </div>
+
+          {/* Preview panel */}
+          <div className="relative min-h-[430px] overflow-hidden rounded-[28px] border border-white/[0.08] bg-white/[0.02]">
+
+            {loading ? (
+              <div className="flex h-full min-h-[430px] items-center justify-center">
+                <div className="text-center">
+                  <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04]">
+                    <div className="h-6 w-6 animate-spin rounded-full border-2 border-white/10 border-t-white" />
                   </div>
 
-                  <p className="mt-1 truncate text-sm text-white/60">
-                    {prompt}
+                  <p className="text-sm font-medium text-white/70">
+                    Creating your image
                   </p>
 
-                  {resultText && (
-                    <p className="mt-2 text-xs text-white/30">
-                      {resultText}
-                    </p>
-                  )}
-                </div>
-
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={generateImage}
-                    className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-white/80 transition hover:bg-white/10"
-                  >
-                    ↻ Regenerate
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={downloadImage}
-                    className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black transition hover:bg-white/90"
-                  >
-                    ↓ Download
-                  </button>
+                  <p className="mx-auto mt-2 max-w-xs text-xs leading-5 text-white/30">
+                    ZUQEN is transforming your prompt into a
+                    visual. This may take a moment.
+                  </p>
                 </div>
               </div>
-            </div>
-          ) : (
-            <div className="flex min-h-[360px] items-center justify-center rounded-3xl border border-dashed border-white/10 bg-white/[0.02]">
-              <div className="text-center">
-                <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-white/5 text-xl text-white/40">
-                  ◇
+            ) : image ? (
+              <div className="flex h-full flex-col">
+
+                <div className="relative flex flex-1 items-center justify-center bg-black/20 p-3">
+                  <img
+                    src={image}
+                    alt={prompt}
+                    className="max-h-[650px] w-full rounded-2xl object-contain"
+                  />
                 </div>
 
-                <h3 className="text-sm font-medium text-white/60">
-                  Your generated image will appear here
-                </h3>
+                <div className="border-t border-white/[0.08] bg-black/20 p-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-white/25">
+                        Generated by ZUQEN
+                      </p>
 
-                <p className="mt-2 text-xs text-white/30">
-                  Enter a prompt above to get started.
-                </p>
+                      <p className="mt-1 truncate text-xs text-white/45">
+                        {prompt}
+                      </p>
+                    </div>
+
+                    <div className="flex shrink-0 gap-2">
+                      <button
+                        type="button"
+                        onClick={clearImage}
+                        className="rounded-xl border border-white/[0.08] bg-white/[0.04] px-3.5 py-2 text-xs text-white/60 transition hover:bg-white/[0.08] hover:text-white"
+                      >
+                        New
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={generateImage}
+                        className="rounded-xl border border-white/[0.08] bg-white/[0.04] px-3.5 py-2 text-xs text-white/60 transition hover:bg-white/[0.08] hover:text-white"
+                      >
+                        ↻ Regenerate
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={downloadImage}
+                        className="rounded-xl bg-white px-4 py-2 text-xs font-semibold text-black transition hover:bg-white/90"
+                      >
+                        ↓ Download
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </div>
-            </div>
-          )}
+            ) : (
+              <div className="flex h-full min-h-[430px] items-center justify-center">
+                <div className="px-6 text-center">
+                  <div className="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-[24px] border border-white/[0.07] bg-white/[0.025] text-2xl text-white/20">
+                    ◇
+                  </div>
+
+                  <h3 className="text-sm font-medium text-white/55">
+                    Your creation will appear here
+                  </h3>
+
+                  <p className="mx-auto mt-2 max-w-sm text-xs leading-5 text-white/25">
+                    Write a prompt on the left and generate
+                    your first image with ZUQEN.
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
         </section>
 
-        <footer className="mt-auto pt-10 text-center text-xs text-white/20">
-          ZUQEN · Create beyond the obvious
+        {/* Footer */}
+        <footer className="mt-auto pt-14 text-center">
+          <p className="text-[10px] uppercase tracking-[0.3em] text-white/15">
+            ZUQEN · Create beyond the obvious
+          </p>
         </footer>
       </div>
     </main>
   );
 }
+
