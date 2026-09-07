@@ -3647,6 +3647,38 @@ function selectAgent(agent: string) {
                     )}
                   </button>
 
+                  <button
+  type="button"
+  className={`ZUQEN-agent-option ${
+    selectedAgent === "Image Generator"
+      ? "selected"
+      : ""
+  }`}
+  onClick={() =>
+    selectAgent("Image Generator")
+  }
+>
+  <span className="ZUQEN-agent-option-icon">
+    ◇
+  </span>
+
+  <span>
+    <strong>
+      Image Generator
+    </strong>
+
+    <small>
+      Create images with ZUQEN
+    </small>
+  </span>
+
+  {selectedAgent ===
+    "Image Generator" && (
+    <span className="ZUQEN-agent-check">
+      ✓
+    </span>
+  )}
+</button>
                   <div className="ZUQEN-agent-divider" />
 
                   <div className="ZUQEN-agent-coming">
