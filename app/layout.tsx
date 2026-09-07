@@ -13,51 +13,66 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  applicationName: "ZUQEN AI",
-icons: {
-  icon: "/icon.png",
-  apple: "/icon.png",
-},
+  metadataBase: new URL("https://zuqen-ai-alpha.vercel.app/"),
+
+  applicationName: "ZUQEN",
+
   title: {
-    default: "ZUQEN AI — Your Intelligent AI Companion",
-    template: "%s | ZUQEN AI",
+    default: "ZUQEN — Your Intelligent AI Companion",
+    template: "%s | ZUQEN",
   },
 
   description:
-    "ZUQEN AI is your intelligent AI companion for chatting, creating, learning, brainstorming, writing code, analyzing information, and getting things done.",
+    "ZUQEN is your intelligent AI companion for chatting, coding, creating, and getting things done with AI.",
 
   keywords: [
+    "ZUQEN",
     "ZUQEN AI",
-    "ZUQEN AI chatbot",
     "ZUQEN AI assistant",
+    "ZUQEN chatbot",
     "AI assistant",
+    "AI companion",
     "AI chatbot",
+    "AI coding assistant",
+    "AI website builder",
   ],
 
-  metadataBase: new URL("https://ZUQEN-ai-alpha.vercel.app"),
+  authors: [{ name: "ZUQEN" }],
+  creator: "ZUQEN",
+  publisher: "ZUQEN",
 
   alternates: {
-    canonical: "/",
+    canonical: "https://zuqen-ai-alpha.vercel.app/",
   },
 
-  verification: {
-    google: "L1BTfuJSNKz-nvLpgAHLOuKRdvn1grRo16EPq7GTMLQ",
+  icons: {
+    icon: "/icon.png",
+    apple: "/icon.png",
   },
 
   openGraph: {
-    title: "ZUQEN AI — Your Intelligent AI Companion",
-    description:
-      "Chat, create, learn, brainstorm, write code, and get things done with ZUQEN AI.",
-    url: "https://ZUQEN-ai-alpha.vercel.app/",
-    siteName: "ZUQEN AI",
     type: "website",
+    url: "https://zuqen-ai-alpha.vercel.app/",
+    siteName: "ZUQEN",
+    title: "ZUQEN — Your Intelligent AI Companion",
+    description:
+      "ZUQEN is your intelligent AI companion for chatting, coding, creating, and getting things done with AI.",
+    images: [
+      {
+        url: "/icon.png",
+        width: 512,
+        height: 512,
+        alt: "ZUQEN",
+      },
+    ],
   },
 
   twitter: {
     card: "summary",
-    title: "ZUQEN AI — Your Intelligent AI Companion",
+    title: "ZUQEN — Your Intelligent AI Companion",
     description:
-      "Chat, create, learn, brainstorm, write code, and get things done with ZUQEN AI.",
+      "ZUQEN is your intelligent AI companion for chatting, coding, creating, and getting things done with AI.",
+    images: ["/icon.png"],
   },
 
   robots: {
@@ -71,42 +86,26 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const structuredData = {
-    "@context": "https://schema.org",
-    "@graph": [
-      {
-        "@type": "WebSite",
-        "@id": "https://ZUQEN-ai-alpha.vercel.app/#website",
-        name: "ZUQEN AI",
-        alternateName: "ZUQEN AI",
-        url: "https://ZUQEN-ai-alpha.vercel.app/",
-      },
-      {
-        "@type": "WebApplication",
-        "@id": "https://ZUQEN-ai-alpha.vercel.app/#app",
-        name: "ZUQEN AI",
-        description:
-          "ZUQEN AI is your intelligent AI companion for chatting, creating, learning, brainstorming, writing code, analyzing information, and getting things done.",
-        url: "https://ZUQEN-ai-alpha.vercel.app/",
-        applicationCategory: "BusinessApplication",
-        operatingSystem: "Web",
-      },
-    ],
-  };
-
   return (
-    <html
-      lang="en"
-      className={`${geistSans.variable} ${geistMono.variable}`}
-    >
-      <body>
+    <html lang="en">
+      <head>
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{
-            __html: JSON.stringify(structuredData),
+            __html: JSON.stringify({
+              "@context": "https://schema.org",
+              "@type": "WebSite",
+              name: "ZUQEN",
+              alternateName: "ZUQEN AI",
+              url: "https://zuqen-ai-alpha.vercel.app/",
+            }),
           }}
         />
+      </head>
 
+      <body
+        className={`${geistSans.variable} ${geistMono.variable}`}
+      >
         {children}
       </body>
     </html>
