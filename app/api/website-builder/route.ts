@@ -1,11 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
+import { createServerSupabaseClient } from "@/lib/supabase-server";
 
 export const runtime = "nodejs";
+
+// =========================================================
+// CONFIG
+// =========================================================
 
 const apiKey =
   process.env.GEMINI_API_KEY ||
   process.env.GOOGLE_API_KEY;
+
+const GENERATE_CREDIT_COST = 100;
+const EDIT_CREDIT_COST = 50;
+
+const MAX_GENERATE_PROMPT_LENGTH = 10000;
+const MAX_EDIT_INSTRUCTION_LENGTH = 5000;
+const MAX_HTML_LENGTH = 200000;
 
 if (!apiKey) {
   console.warn(
@@ -19,28 +31,9 @@ const ai = apiKey
     })
   : null;
 
-/*
-|--------------------------------------------------------------------------
-| ZUQEN WEBSITE BUILDER CREDIT CONFIG
-|--------------------------------------------------------------------------
-|
-| IMPORTANT:
-| Actual credit deduction should happen server-side.
-|
-| Generate = base cost
-| Edit     = base cost
-|
-| Later we will connect these constants to your central
-| Supabase credit system.
-|--------------------------------------------------------------------------
-*/
-
-const GENERATE_CREDIT_COST = 100;
-const EDIT_CREDIT_COST = 50;
-
-const MAX_GENERATE_PROMPT_LENGTH = 10000;
-const MAX_EDIT_INSTRUCTION_LENGTH = 5000;
-const MAX_HTML_LENGTH = 200000;
+// =========================================================
+// WEBSITE GENERATION INSTRUCTIONS
+// =========================================================
 
 const GENERATE_SYSTEM_INSTRUCTION = `
 You are ZUQEN AI Website Builder.
@@ -79,6 +72,10 @@ IMPORTANT RULES:
 25. The final answer must be ONLY HTML.
 `;
 
+// =========================================================
+// WEBSITE EDIT INSTRUCTIONS
+// =========================================================
+
 const EDIT_SYSTEM_INSTRUCTION = `
 You are ZUQEN AI, an expert website editor.
 
@@ -110,23 +107,16 @@ IMPORTANT RULES:
 20. The final answer must be ONLY HTML.
 `;
 
+// =========================================================
+// HELPERS
+// =========================================================
+
 function cleanHtml(text: string) {
   let html = text.trim();
 
-  html = html.replace(
-    /^```html\s*/i,
-    ""
-  );
-
-  html = html.replace(
-    /^```\s*/i,
-    ""
-  );
-
-  html = html.replace(
-    /\s*```$/i,
-    ""
-  );
+  html = html.replace(/^```html\s*/i, "");
+  html = html.replace(/^```\s*/i, "");
+  html = html.replace(/\s*```$/i, "");
 
   const doctypeIndex = html
     .toLowerCase()
@@ -142,36 +132,62 @@ function cleanHtml(text: string) {
 function isValidHtml(html: string) {
   const lower = html.toLowerCase();
 
-  return (
-    lower.includes("<!doctype html>") &&
-    lower.includes("<html") &&
-    lower.includes("</html>") &&
-    lower.includes("<head") &&
-    lower.includes("</head>") &&
-    lower.includes("<body") &&
-    lower.includes("</body>")
-  );
+  if (!lower.includes("<!doctype html>")) {
+    return false;
+  }
+
+  if (!lower.includes("<html")) {
+    return false;
+  }
+
+  if (!lower.includes("</html>")) {
+    return false;
+  }
+
+  if (!lower.includes("<head")) {
+    return false;
+  }
+
+  if (!lower.includes("<body")) {
+    return false;
+  }
+
+  // Prevent generated websites from escaping the preview iframe.
+  if (lower.includes("<iframe")) {
+    return false;
+  }
+
+  if (lower.includes("<object")) {
+    return false;
+  }
+
+  if (lower.includes("<embed")) {
+    return false;
+  }
+
+  return true;
 }
 
-/*
-|--------------------------------------------------------------------------
-| BASIC SECURITY CHECK
-|--------------------------------------------------------------------------
-|
-| We don't allow the AI output to create an iframe/object/embed that could
-| attempt to escape the preview sandbox.
-|--------------------------------------------------------------------------
-*/
-
-function containsUnsafeEmbed(html: string) {
-  const lower = html.toLowerCase();
-
-  return (
-    lower.includes("<iframe") ||
-    lower.includes("<object") ||
-    lower.includes("<embed")
+function creditsResponse(
+  response: NextResponse,
+  balance: number
+) {
+  response.headers.set(
+    "X-Zuqen-Credits-Remaining",
+    String(balance)
   );
+
+  response.headers.set(
+    "Cache-Control",
+    "no-store, max-age=0"
+  );
+
+  return response;
 }
+
+// =========================================================
+// GEMINI: GENERATE WEBSITE
+// =========================================================
 
 async function generateWebsite(
   prompt: string
@@ -220,14 +236,18 @@ ${prompt}
     );
   }
 
-  if (containsUnsafeEmbed(html)) {
+  if (html.length > MAX_HTML_LENGTH) {
     throw new Error(
-      "Generated website contains an unsupported embedded element."
+      "Generated website is too large."
     );
   }
 
   return html;
 }
+
+// =========================================================
+// GEMINI: EDIT WEBSITE
+// =========================================================
 
 async function editWebsite(
   html: string,
@@ -287,54 +307,142 @@ Return the complete modified website.
     );
   }
 
-  if (
-    containsUnsafeEmbed(updatedHtml)
-  ) {
+  if (updatedHtml.length > MAX_HTML_LENGTH) {
     throw new Error(
-      "Edited website contains an unsupported embedded element."
+      "Edited website is too large."
     );
   }
 
   return updatedHtml;
 }
 
-/*
-|--------------------------------------------------------------------------
-| CREDIT RESPONSE HELPER
-|--------------------------------------------------------------------------
-*/
+// =========================================================
+// CREDIT RESULT TYPE
+// =========================================================
 
-function creditResponse(
-  response: NextResponse,
-  remaining: number | null
-) {
-  if (
-    remaining !== null &&
-    Number.isFinite(remaining)
-  ) {
-    response.headers.set(
-      "X-Zuqen-Credits-Remaining",
-      String(remaining)
-    );
+type CreditResult = {
+  success: boolean;
+  code: string;
+  balance: number | null;
+  required?: number;
+  amount?: number;
+  error?: string;
+};
+
+// =========================================================
+// CONSUME CREDITS
+// =========================================================
+
+async function consumeCredits(
+  amount: number,
+  agent: string,
+  description: string,
+  referenceId?: string
+): Promise<CreditResult> {
+  const supabase =
+    await createServerSupabaseClient();
+
+  const {
+    data: {
+      user,
+    },
+    error: userError,
+  } = await supabase.auth.getUser();
+
+  if (userError || !user) {
+    return {
+      success: false,
+      code: "authentication_required",
+      balance: 0,
+    };
   }
 
-  return response;
+  const {
+    data,
+    error,
+  } = await supabase.rpc(
+    "consume_credits",
+    {
+      p_amount: amount,
+      p_agent: agent,
+      p_description: description,
+      p_reference_id:
+        referenceId ?? null,
+    }
+  );
+
+  if (error) {
+    console.error(
+      "Credit consumption error:",
+      error
+    );
+
+    return {
+      success: false,
+      code: "credit_consumption_error",
+      balance: null,
+      error: error.message,
+    };
+  }
+
+  let result: any;
+
+  try {
+    result =
+      typeof data === "string"
+        ? JSON.parse(data)
+        : data;
+  } catch {
+    return {
+      success: false,
+      code: "credit_consumption_error",
+      balance: null,
+      error:
+        "Invalid credit system response.",
+    };
+  }
+
+  return {
+    success:
+      Boolean(result?.success),
+
+    code:
+      result?.code ??
+      "credit_consumption_error",
+
+    balance:
+      result?.balance !== undefined &&
+      result?.balance !== null
+        ? Number(result.balance)
+        : null,
+
+    required:
+      result?.required !== undefined
+        ? Number(result.required)
+        : undefined,
+
+    amount:
+      result?.amount !== undefined
+        ? Number(result.amount)
+        : undefined,
+  };
 }
 
-/*
-|--------------------------------------------------------------------------
-| POST
-|--------------------------------------------------------------------------
-*/
+// =========================================================
+// POST API
+// =========================================================
 
 export async function POST(
   request: NextRequest
 ) {
   try {
+    // -----------------------------------------------------
+    // GEMINI CHECK
+    // -----------------------------------------------------
+
     if (!ai) {
       return NextResponse.json(
         {
-          success: false,
           error:
             "Gemini API key is not configured. Add GEMINI_API_KEY to your environment variables.",
         },
@@ -342,45 +450,57 @@ export async function POST(
       );
     }
 
-    let body: Record<
-      string,
-      unknown
-    >;
+    // -----------------------------------------------------
+    // AUTH CHECK
+    // -----------------------------------------------------
 
-    try {
-      body = await request.json();
-    } catch {
+    const supabase =
+      await createServerSupabaseClient();
+
+    const {
+      data: {
+        user,
+      },
+      error: userError,
+    } = await supabase.auth.getUser();
+
+    if (userError || !user) {
       return NextResponse.json(
         {
-          success: false,
           error:
-            "Invalid JSON request.",
+            "Authentication required.",
+          code:
+            "authentication_required",
         },
-        { status: 400 }
+        { status: 401 }
       );
     }
 
+    // -----------------------------------------------------
+    // REQUEST BODY
+    // -----------------------------------------------------
+
+    const body =
+      await request.json();
+
     const action =
-      typeof body.action === "string"
+      typeof body?.action === "string"
         ? body.action
         : "generate";
 
-    /*
-    |--------------------------------------------------------------------------
-    | GENERATE
-    |--------------------------------------------------------------------------
-    */
+    // =====================================================
+    // GENERATE WEBSITE
+    // =====================================================
 
     if (action === "generate") {
       const prompt =
-        typeof body.prompt === "string"
+        typeof body?.prompt === "string"
           ? body.prompt.trim()
           : "";
 
       if (!prompt) {
         return NextResponse.json(
           {
-            success: false,
             error:
               "Website prompt is required.",
           },
@@ -394,7 +514,6 @@ export async function POST(
       ) {
         return NextResponse.json(
           {
-            success: false,
             error:
               "Prompt is too long. Please keep it under 10,000 characters.",
           },
@@ -402,113 +521,145 @@ export async function POST(
         );
       }
 
-      /*
-       * ---------------------------------------------------------------
-       * CREDIT CHECK
-       * ---------------------------------------------------------------
-       *
-       * IMPORTANT:
-       * Your central Supabase credit system will be connected here.
-       *
-       * We intentionally DO NOT fake a deduction.
-       * The server must deduct credits atomically before/after generation.
-       * The exact RPC name depends on the SQL you already created.
-       *
-       * Current cost:
-       */
-
-      const requiredCredits =
-        GENERATE_CREDIT_COST;
-
-      /*
-       * TODO:
-       *
-       * const creditResult =
-       *   await deductCredits({
-       *     request,
-       *     amount: requiredCredits,
-       *     agent: "website-builder",
-       *     action: "generate",
-       *   });
-       *
-       * if (!creditResult.success) {
-       *   return NextResponse.json(
-       *     {
-       *       success: false,
-       *       code: "insufficient_credits",
-       *       error: "Not enough ZUQEN credits.",
-       *       balance: creditResult.balance,
-       *       required: requiredCredits,
-       *       missing: creditResult.missing,
-       *     },
-       *     { status: 402 }
-       *   );
-       * }
-       */
+      // ---------------------------------------------------
+      // GENERATE WEBSITE
+      // ---------------------------------------------------
 
       const html =
-        await generateWebsite(
-          prompt
+        await generateWebsite(prompt);
+
+      // ---------------------------------------------------
+      // CONSUME 100 CREDITS
+      // ---------------------------------------------------
+
+      const creditResult =
+        await consumeCredits(
+          GENERATE_CREDIT_COST,
+          "website_builder",
+          "Website generation",
+          crypto.randomUUID()
         );
 
-      /*
-       * ---------------------------------------------------------------
-       * SUCCESS
-       * ---------------------------------------------------------------
-       *
-       * Actual balance will be returned once the central credit
-       * function is connected.
-       */
+      // ---------------------------------------------------
+      // INSUFFICIENT CREDITS
+      // ---------------------------------------------------
+
+      if (
+        !creditResult.success &&
+        creditResult.code ===
+          "insufficient_credits"
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "Insufficient credits.",
+            code:
+              "insufficient_credits",
+            required:
+              GENERATE_CREDIT_COST,
+            balance:
+              Number(
+                creditResult.balance ?? 0
+              ),
+          },
+          { status: 402 }
+        );
+      }
+
+      // ---------------------------------------------------
+      // AUTH ERROR
+      // ---------------------------------------------------
+
+      if (
+        !creditResult.success &&
+        creditResult.code ===
+          "authentication_required"
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "Authentication required.",
+            code:
+              "authentication_required",
+          },
+          { status: 401 }
+        );
+      }
+
+      // ---------------------------------------------------
+      // OTHER CREDIT ERROR
+      // ---------------------------------------------------
+
+      if (!creditResult.success) {
+        return NextResponse.json(
+          {
+            error:
+              "Website was generated, but credits could not be deducted. Please try again.",
+            code:
+              "credit_consumption_error",
+          },
+          { status: 500 }
+        );
+      }
+
+      // ---------------------------------------------------
+      // SAFE REMAINING BALANCE
+      // ---------------------------------------------------
+
+      const remainingBalance =
+        Number(
+          creditResult.balance ?? 0
+        );
+
+      // ---------------------------------------------------
+      // SUCCESS RESPONSE
+      // ---------------------------------------------------
 
       const response =
         NextResponse.json({
           success: true,
+
           action: "generate",
+
           html,
+
           credits: {
-            cost: requiredCredits,
+            cost:
+              GENERATE_CREDIT_COST,
+
+            remaining:
+              remainingBalance,
           },
         });
 
-      return creditResponse(
+      return creditsResponse(
         response,
-        null
+        remainingBalance
       );
     }
 
-    /*
-    |--------------------------------------------------------------------------
-    | EDIT
-    |--------------------------------------------------------------------------
-    */
+    // =====================================================
+    // EDIT WEBSITE
+    // =====================================================
 
     if (action === "edit") {
       const html =
-        typeof body.html === "string"
+        typeof body?.html === "string"
           ? body.html.trim()
           : "";
 
-      /*
-       * Frontend editor currently sends `prompt`.
-       * To make the API backward compatible, we accept BOTH:
-       *
-       * prompt
-       * instruction
-       */
-
       const instruction =
-        typeof body.instruction ===
+        typeof body?.instruction ===
         "string"
           ? body.instruction.trim()
-          : typeof body.prompt ===
-            "string"
-          ? body.prompt.trim()
-          : "";
+          : typeof body?.prompt ===
+              "string"
+            ? body.prompt.trim()
+            : "";
 
       if (!html) {
         return NextResponse.json(
           {
-            success: false,
             error:
               "Existing website HTML is required.",
           },
@@ -519,7 +670,6 @@ export async function POST(
       if (!instruction) {
         return NextResponse.json(
           {
-            success: false,
             error:
               "Website change instruction is required.",
           },
@@ -533,7 +683,6 @@ export async function POST(
       ) {
         return NextResponse.json(
           {
-            success: false,
             error:
               "Website code is too large to edit.",
           },
@@ -547,7 +696,6 @@ export async function POST(
       ) {
         return NextResponse.json(
           {
-            success: false,
             error:
               "Edit instruction is too long.",
           },
@@ -555,40 +703,9 @@ export async function POST(
         );
       }
 
-      /*
-       * ---------------------------------------------------------------
-       * CREDIT CHECK
-       * ---------------------------------------------------------------
-       */
-
-      const requiredCredits =
-        EDIT_CREDIT_COST;
-
-      /*
-       * TODO:
-       *
-       * const creditResult =
-       *   await deductCredits({
-       *     request,
-       *     amount: requiredCredits,
-       *     agent: "website-builder",
-       *     action: "edit",
-       *   });
-       *
-       * if (!creditResult.success) {
-       *   return NextResponse.json(
-       *     {
-       *       success: false,
-       *       code: "insufficient_credits",
-       *       error: "Not enough ZUQEN credits.",
-       *       balance: creditResult.balance,
-       *       required: requiredCredits,
-       *       missing: creditResult.missing,
-       *     },
-       *     { status: 402 }
-       *   );
-       * }
-       */
+      // ---------------------------------------------------
+      // EDIT WEBSITE
+      // ---------------------------------------------------
 
       const updatedHtml =
         await editWebsite(
@@ -596,31 +713,122 @@ export async function POST(
           instruction
         );
 
+      // ---------------------------------------------------
+      // CONSUME 50 CREDITS
+      // ---------------------------------------------------
+
+      const creditResult =
+        await consumeCredits(
+          EDIT_CREDIT_COST,
+          "website_builder",
+          "Website AI edit",
+          crypto.randomUUID()
+        );
+
+      // ---------------------------------------------------
+      // INSUFFICIENT CREDITS
+      // ---------------------------------------------------
+
+      if (
+        !creditResult.success &&
+        creditResult.code ===
+          "insufficient_credits"
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "Insufficient credits.",
+            code:
+              "insufficient_credits",
+            required:
+              EDIT_CREDIT_COST,
+            balance:
+              Number(
+                creditResult.balance ?? 0
+              ),
+          },
+          { status: 402 }
+        );
+      }
+
+      // ---------------------------------------------------
+      // AUTH ERROR
+      // ---------------------------------------------------
+
+      if (
+        !creditResult.success &&
+        creditResult.code ===
+          "authentication_required"
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "Authentication required.",
+            code:
+              "authentication_required",
+          },
+          { status: 401 }
+        );
+      }
+
+      // ---------------------------------------------------
+      // OTHER CREDIT ERROR
+      // ---------------------------------------------------
+
+      if (!creditResult.success) {
+        return NextResponse.json(
+          {
+            error:
+              "Website was edited, but credits could not be deducted. Please try again.",
+            code:
+              "credit_consumption_error",
+          },
+          { status: 500 }
+        );
+      }
+
+      // ---------------------------------------------------
+      // SAFE REMAINING BALANCE
+      // ---------------------------------------------------
+
+      const remainingBalance =
+        Number(
+          creditResult.balance ?? 0
+        );
+
+      // ---------------------------------------------------
+      // SUCCESS RESPONSE
+      // ---------------------------------------------------
+
       const response =
         NextResponse.json({
           success: true,
+
           action: "edit",
+
           html: updatedHtml,
+
           credits: {
-            cost: requiredCredits,
+            cost:
+              EDIT_CREDIT_COST,
+
+            remaining:
+              remainingBalance,
           },
         });
 
-      return creditResponse(
+      return creditsResponse(
         response,
-        null
+        remainingBalance
       );
     }
 
-    /*
-    |--------------------------------------------------------------------------
-    | INVALID ACTION
-    |--------------------------------------------------------------------------
-    */
+    // =====================================================
+    // INVALID ACTION
+    // =====================================================
 
     return NextResponse.json(
       {
-        success: false,
         error:
           "Invalid website builder action.",
       },
@@ -628,20 +836,21 @@ export async function POST(
     );
   } catch (error) {
     console.error(
-      "Website Builder Gemini error:",
+      "Website Builder error:",
       error
     );
 
     const message =
       error instanceof Error
         ? error.message
-        : "Unknown Gemini API error.";
+        : "Unknown Website Builder error.";
 
     return NextResponse.json(
       {
-        success: false,
         error:
           `Website Builder failed: ${message}`,
+        code:
+          "website_builder_error",
       },
       { status: 500 }
     );
