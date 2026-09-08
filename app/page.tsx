@@ -3721,7 +3721,7 @@ if (agent === "Video Generator") {
 <button
   type="button"
   className={`ZUQEN-agent-option ${
-    selectedAgent === "Voice Generator"
+    selectedAgent === "voice-generator"
       ? "selected"
       : ""
   }`}
