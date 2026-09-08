@@ -8,6 +8,7 @@ type ElevenLabsVoice = {
   labels?: Record<string, string> | null;
   category?: string | null;
   voice_type?: string | null;
+
   verified_languages?: Array<{
     language?: string;
     model_id?: string;
@@ -24,101 +25,218 @@ type ElevenLabsResponse = {
   next_page_token?: string | null;
 };
 
-export async function GET(request: NextRequest) {
+export const runtime = "nodejs";
+
+export async function GET(
+  request: NextRequest
+) {
   try {
-    const apiKey = process.env.ELEVENLABS_API_KEY;
+    const apiKey =
+      process.env.ELEVENLABS_API_KEY;
 
     if (!apiKey) {
+      console.error(
+        "ELEVENLABS_API_KEY is missing."
+      );
+
       return NextResponse.json(
         {
-          error: "ElevenLabs API key is not configured.",
+          success: false,
+          error:
+            "ElevenLabs API key is not configured.",
+          code:
+            "api_key_missing",
         },
-        { status: 500 }
+        {
+          status: 500,
+        }
       );
     }
 
-    const { searchParams } = new URL(request.url);
+    const { searchParams } =
+      new URL(request.url);
 
-    const search = searchParams.get("search")?.trim();
-    const gender = searchParams.get("gender");
-    const age = searchParams.get("age");
-    const language = searchParams.get("language");
-    const accent = searchParams.get("accent");
-    const category = searchParams.get("category");
-    const voiceType = searchParams.get("voice_type");
-    const sort = searchParams.get("sort");
-    const sortDirection = searchParams.get("sort_direction");
-    const nextPageToken = searchParams.get("next_page_token");
+    const search =
+      searchParams
+        .get("search")
+        ?.trim();
 
-    const pageSizeValue = Number(
-      searchParams.get("page_size") || "50"
-    );
+    const gender =
+      searchParams.get("gender");
+
+    const age =
+      searchParams.get("age");
+
+    const language =
+      searchParams.get("language");
+
+    const accent =
+      searchParams.get("accent");
+
+    const category =
+      searchParams.get("category");
+
+    const voiceType =
+      searchParams.get(
+        "voice_type"
+      );
+
+    const sort =
+      searchParams.get("sort");
+
+    const sortDirection =
+      searchParams.get(
+        "sort_direction"
+      );
+
+    const nextPageToken =
+      searchParams.get(
+        "next_page_token"
+      );
+
+    const pageSizeValue =
+      Number(
+        searchParams.get(
+          "page_size"
+        ) || "50"
+      );
 
     const pageSize = Math.min(
-      Math.max(pageSizeValue, 1),
+      Math.max(
+        Number.isFinite(
+          pageSizeValue
+        )
+          ? pageSizeValue
+          : 50,
+        1
+      ),
       100
     );
 
-    const params = new URLSearchParams();
+    const params =
+      new URLSearchParams();
 
-    params.set("page_size", String(pageSize));
-    params.set("include_total_count", "true");
+    params.set(
+      "page_size",
+      String(pageSize)
+    );
+
+    params.set(
+      "include_total_count",
+      "true"
+    );
 
     if (search) {
-      params.set("search", search);
+      params.set(
+        "search",
+        search
+      );
     }
 
-    if (gender && gender !== "all") {
-      params.set("gender", gender);
+    if (
+      gender &&
+      gender !== "all"
+    ) {
+      params.set(
+        "gender",
+        gender
+      );
     }
 
-    if (age && age !== "all") {
-      params.set("age", age);
+    if (
+      age &&
+      age !== "all"
+    ) {
+      params.set(
+        "age",
+        age
+      );
     }
 
-    if (language && language !== "all") {
-      params.set("language", language);
+    if (
+      language &&
+      language !== "all"
+    ) {
+      params.set(
+        "language",
+        language
+      );
     }
 
-    if (accent && accent !== "all") {
-      params.set("accent", accent);
+    if (
+      accent &&
+      accent !== "all"
+    ) {
+      params.set(
+        "accent",
+        accent
+      );
     }
 
-    if (category && category !== "all") {
-      params.set("category", category);
+    if (
+      category &&
+      category !== "all"
+    ) {
+      params.set(
+        "category",
+        category
+      );
     }
 
-    if (voiceType && voiceType !== "all") {
-      params.set("voice_type", voiceType);
+    if (
+      voiceType &&
+      voiceType !== "all"
+    ) {
+      params.set(
+        "voice_type",
+        voiceType
+      );
     }
 
     if (sort) {
-      params.set("sort", sort);
+      params.set(
+        "sort",
+        sort
+      );
     }
 
     if (sortDirection) {
-      params.set("sort_direction", sortDirection);
+      params.set(
+        "sort_direction",
+        sortDirection
+      );
     }
 
     if (nextPageToken) {
-      params.set("next_page_token", nextPageToken);
+      params.set(
+        "next_page_token",
+        nextPageToken
+      );
     }
 
-    const response = await fetch(
-      `https://api.elevenlabs.io/v2/voices?${params.toString()}`,
-      {
-        method: "GET",
-        headers: {
-          "xi-api-key": apiKey,
-          Accept: "application/json",
-        },
-        cache: "no-store",
-      }
-    );
+    const response =
+      await fetch(
+        `https://api.elevenlabs.io/v2/voices?${params.toString()}`,
+        {
+          method: "GET",
 
-    const data: ElevenLabsResponse = await response
-      .json()
-      .catch(() => ({}));
+          headers: {
+            "xi-api-key":
+              apiKey,
+            Accept:
+              "application/json",
+          },
+
+          cache: "no-store",
+        }
+      );
+
+    const data: ElevenLabsResponse =
+      await response
+        .json()
+        .catch(
+          () => ({})
+        );
 
     if (!response.ok) {
       console.error(
@@ -129,74 +247,90 @@ export async function GET(request: NextRequest) {
 
       return NextResponse.json(
         {
+          success: false,
           error:
             "Failed to load voices from ElevenLabs.",
+          code:
+            "voices_request_failed",
         },
-        { status: response.status }
+        {
+          status:
+            response.status,
+        }
       );
     }
 
-    const voices = (data.voices || []).map((voice) => {
-      const labels = voice.labels || {};
+    const voices =
+      (data.voices || []).map(
+        (voice) => {
+          const labels =
+            voice.labels ||
+            {};
 
-      const firstLanguage =
-        voice.verified_languages?.[0];
+          const firstLanguage =
+            voice
+              .verified_languages?.[0];
 
-      return {
-        id: voice.voice_id,
+          return {
+            id:
+              voice.voice_id,
 
-        name:
-          voice.name ||
-          "Unnamed Voice",
+            name:
+              voice.name ||
+              "Unnamed Voice",
 
-        description:
-          voice.description ||
-          labels.description ||
-          "ElevenLabs AI voice",
+            description:
+              voice.description ||
+              labels.description ||
+              "ElevenLabs AI voice",
 
-        previewUrl:
-          voice.preview_url ||
-          firstLanguage?.preview_url ||
-          null,
+            previewUrl:
+              voice.preview_url ||
+              firstLanguage?.preview_url ||
+              null,
 
-        gender:
-          labels.gender ||
-          null,
+            gender:
+              labels.gender ||
+              null,
 
-        age:
-          labels.age ||
-          null,
+            age:
+              labels.age ||
+              null,
 
-        accent:
-          labels.accent ||
-          firstLanguage?.accent ||
-          null,
+            accent:
+              labels.accent ||
+              firstLanguage?.accent ||
+              null,
 
-        language:
-          firstLanguage?.language ||
-          labels.language ||
-          null,
+            language:
+              firstLanguage?.language ||
+              labels.language ||
+              null,
 
-        locale:
-          firstLanguage?.locale ||
-          null,
+            locale:
+              firstLanguage?.locale ||
+              null,
 
-        category:
-          voice.category ||
-          null,
+            category:
+              voice.category ||
+              null,
 
-        voiceType:
-          voice.voice_type ||
-          null,
-      };
-    });
+            voiceType:
+              voice.voice_type ||
+              null,
+          };
+        }
+      );
 
     return NextResponse.json(
       {
+        success: true,
+
         voices,
 
         hasMore:
-          data.has_more ?? false,
+          data.has_more ??
+          false,
 
         totalCount:
           data.total_count ??
@@ -205,12 +339,25 @@ export async function GET(request: NextRequest) {
         nextPageToken:
           data.next_page_token ??
           null,
+
+        provider:
+          "elevenlabs",
+
+        feature:
+          "voice-generator",
       },
       {
         status: 200,
+
         headers: {
           "Cache-Control":
             "no-store, max-age=0",
+
+          "X-Zuquen-Provider":
+            "elevenlabs",
+
+          "X-Zuquen-Feature":
+            "voice-generator",
         },
       }
     );
@@ -222,10 +369,15 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json(
       {
+        success: false,
         error:
-          "Something went wrong while loading voices.",
+          "Something went wrong while loading voices from ElevenLabs.",
+        code:
+          "voices_load_failed",
       },
-      { status: 500 }
+      {
+        status: 500,
+      }
     );
   }
 }

@@ -6,10 +6,6 @@ const OUTPUT_FORMAT = "mp3_44100_128";
 
 const MAX_CHARS_PER_REQUEST = 40000;
 
-// Flash v2.5 approximate pricing:
-// 1 credit ≈ 2 characters
-const ESTIMATED_CREDITS_PER_CHARACTER = 0.5;
-
 type ElevenLabsError = {
   detail?: {
     type?: string;
@@ -25,6 +21,24 @@ type ElevenLabsError = {
 type GeneratedChunk = {
   audio: ArrayBuffer;
   characterCost: number;
+  requestId: string | null;
+};
+
+type ElevenLabsSubscription = {
+  tier?: string;
+  character_count?: number;
+  character_limit?: number;
+  max_credit_limit_extension?: number | "unlimited" | null;
+  can_extend_character_limit?: boolean;
+  next_character_count_reset_unix?: number | null;
+  current_overage?: {
+    amount?: string;
+    currency?: string;
+  } | null;
+  status?: string;
+  currency?: string | null;
+  billing_period?: string | null;
+  character_refresh_period?: string | null;
 };
 
 function splitText(
@@ -41,18 +55,16 @@ function splitText(
     return [cleanText];
   }
 
-  const sentences =
-    cleanText.split(
-      /(?<=[.!?।])\s+/
-    );
+  const sentences = cleanText.split(
+    /(?<=[.!?।])\s+/
+  );
 
   const chunks: string[] = [];
 
   let current = "";
 
   for (const sentence of sentences) {
-    const trimmedSentence =
-      sentence.trim();
+    const trimmedSentence = sentence.trim();
 
     if (!trimmedSentence) {
       continue;
@@ -66,19 +78,12 @@ function splitText(
         maxChars
     ) {
       chunks.push(current.trim());
-
       current = "";
     }
 
-    if (
-      trimmedSentence.length >
-      maxChars
-    ) {
+    if (trimmedSentence.length > maxChars) {
       if (current) {
-        chunks.push(
-          current.trim()
-        );
-
+        chunks.push(current.trim());
         current = "";
       }
 
@@ -89,10 +94,7 @@ function splitText(
       ) {
         chunks.push(
           trimmedSentence
-            .slice(
-              i,
-              i + maxChars
-            )
+            .slice(i, i + maxChars)
             .trim()
         );
       }
@@ -107,12 +109,61 @@ function splitText(
   }
 
   if (current.trim()) {
-    chunks.push(
-      current.trim()
-    );
+    chunks.push(current.trim());
   }
 
   return chunks;
+}
+
+/**
+ * Reads the current ElevenLabs subscription/quota.
+ *
+ * This is the real provider-side usage information.
+ */
+async function getElevenLabsSubscription(
+  apiKey: string
+): Promise<ElevenLabsSubscription> {
+  const response = await fetch(
+    "https://api.elevenlabs.io/v1/user/subscription",
+    {
+      method: "GET",
+      headers: {
+        "xi-api-key": apiKey,
+        Accept: "application/json",
+      },
+      cache: "no-store",
+    }
+  );
+
+  const data =
+    await response
+      .json()
+      .catch(() => ({}));
+
+  if (!response.ok) {
+    const message =
+      data?.detail?.message ||
+      data?.message ||
+      `ElevenLabs subscription request failed with status ${response.status}.`;
+
+    const error = new Error(message) as Error & {
+      statusCode?: number;
+      errorCode?: string;
+      requestId?: string;
+    };
+
+    error.statusCode = response.status;
+    error.errorCode =
+      data?.detail?.code ||
+      data?.detail?.status;
+
+    error.requestId =
+      data?.detail?.request_id;
+
+    throw error;
+  }
+
+  return data as ElevenLabsSubscription;
 }
 
 async function generateChunk(
@@ -125,36 +176,31 @@ async function generateChunk(
     `${encodeURIComponent(voiceId)}` +
     `?output_format=${OUTPUT_FORMAT}`;
 
-  const response =
-    await fetch(url, {
-      method: "POST",
+  const response = await fetch(url, {
+    method: "POST",
 
-      headers: {
-        "xi-api-key": apiKey,
-        "Content-Type":
-          "application/json",
-        Accept: "audio/mpeg",
-      },
+    headers: {
+      "xi-api-key": apiKey,
+      "Content-Type": "application/json",
+      Accept: "audio/mpeg",
+    },
 
-      body: JSON.stringify({
-        text,
-        model_id: MODEL_ID,
-      }),
-    });
+    body: JSON.stringify({
+      text,
+      model_id: MODEL_ID,
+    }),
+  });
 
   if (!response.ok) {
-    let errorData: ElevenLabsError =
-      {};
+    let errorData: ElevenLabsError = {};
 
     try {
-      errorData =
-        await response.json();
+      errorData = await response.json();
     } catch {
       // Ignore invalid JSON.
     }
 
-    const detail =
-      errorData?.detail;
+    const detail = errorData?.detail;
 
     const error = new Error(
       detail?.message ||
@@ -162,12 +208,11 @@ async function generateChunk(
         `ElevenLabs request failed with status ${response.status}.`
     );
 
-    const typedError =
-      error as Error & {
-        statusCode?: number;
-        errorCode?: string;
-        requestId?: string;
-      };
+    const typedError = error as Error & {
+      statusCode?: number;
+      errorCode?: string;
+      requestId?: string;
+    };
 
     typedError.statusCode =
       response.status;
@@ -186,28 +231,44 @@ async function generateChunk(
     await response.arrayBuffer();
 
   /*
-   * ElevenLabs can return the actual
-   * character cost in this response
-   * header.
+   * ElevenLabs exposes the actual
+   * character cost in the response.
    */
   const characterCostHeader =
     response.headers.get(
       "character-cost"
     );
 
-  const characterCost =
+  const parsedCharacterCost =
     characterCostHeader
       ? Number(characterCostHeader)
+      : NaN;
+
+  /*
+   * If ElevenLabs doesn't return the
+   * header, text length is the safest
+   * usage fallback.
+   */
+  const characterCost =
+    Number.isFinite(
+      parsedCharacterCost
+    )
+      ? parsedCharacterCost
       : text.length;
+
+  const requestId =
+    response.headers.get(
+      "request-id"
+    ) ||
+    response.headers.get(
+      "x-request-id"
+    ) ||
+    null;
 
   return {
     audio,
-    characterCost:
-      Number.isFinite(
-        characterCost
-      )
-        ? characterCost
-        : text.length,
+    characterCost,
+    requestId,
   };
 }
 
@@ -225,24 +286,21 @@ export async function POST(
       await request.json();
 
     const text =
-      typeof body?.text ===
-      "string"
+      typeof body?.text === "string"
         ? body.text.trim()
         : "";
 
     const voiceId =
-      typeof body?.voiceId ===
-      "string"
+      typeof body?.voiceId === "string"
         ? body.voiceId.trim()
         : "";
 
     if (!text) {
       return NextResponse.json(
         {
-          error:
-            "Text is required.",
-          code:
-            "text_required",
+          success: false,
+          error: "Text is required.",
+          code: "text_required",
         },
         {
           status: 400,
@@ -253,10 +311,9 @@ export async function POST(
     if (!voiceId) {
       return NextResponse.json(
         {
-          error:
-            "Voice ID is required.",
-          code:
-            "voice_required",
+          success: false,
+          error: "Voice ID is required.",
+          code: "voice_required",
         },
         {
           status: 400,
@@ -276,6 +333,7 @@ export async function POST(
     ) {
       return NextResponse.json(
         {
+          success: false,
           error:
             `Text is too long. Maximum supported length is ${MAX_CHARS_PER_REQUEST.toLocaleString()} characters.`,
           code:
@@ -294,8 +352,7 @@ export async function POST(
      */
 
     const apiKey =
-      process.env
-        .ELEVENLABS_API_KEY;
+      process.env.ELEVENLABS_API_KEY;
 
     if (!apiKey) {
       console.error(
@@ -304,10 +361,10 @@ export async function POST(
 
       return NextResponse.json(
         {
+          success: false,
           error:
             "ElevenLabs API key is not configured.",
-          code:
-            "api_key_missing",
+          code: "api_key_missing",
         },
         {
           status: 500,
@@ -317,18 +374,16 @@ export async function POST(
 
     /*
      * --------------------------------------------------
-     * 4. SUPABASE SERVER CLIENT
+     * 4. AUTHENTICATION
      * --------------------------------------------------
+     *
+     * We keep ZUQEN authentication.
+     *
+     * The old ZUQEN credit wallet is NOT used.
      */
 
     const supabase =
       await createServerSupabaseClient();
-
-    /*
-     * --------------------------------------------------
-     * 5. CHECK AUTHENTICATION
-     * --------------------------------------------------
-     */
 
     const {
       data: {
@@ -344,6 +399,7 @@ export async function POST(
     ) {
       return NextResponse.json(
         {
+          success: false,
           error:
             "You must be signed in to generate voice.",
           code:
@@ -357,97 +413,122 @@ export async function POST(
 
     /*
      * --------------------------------------------------
-     * 6. CALCULATE ESTIMATED ZUQEN CREDITS
+     * 5. READ REAL ELEVENLABS QUOTA
      * --------------------------------------------------
      */
 
-    const estimatedCredits =
-      Math.ceil(
-        text.length *
-          ESTIMATED_CREDITS_PER_CHARACTER
-      );
+    let subscription:
+      ElevenLabsSubscription;
 
-    console.log(
-      `[Voice Credits] User: ${user.id}`
-    );
+    try {
+      subscription =
+        await getElevenLabsSubscription(
+          apiKey
+        );
+    } catch (quotaError) {
+      const typedError =
+        quotaError as Error & {
+          statusCode?: number;
+          errorCode?: string;
+          requestId?: string;
+        };
 
-    console.log(
-      `[Voice Credits] Characters: ${text.length}`
-    );
-
-    console.log(
-      `[Voice Credits] Estimated cost: ${estimatedCredits}`
-    );
-
-    /*
-     * --------------------------------------------------
-     * 7. GET CURRENT CREDIT BALANCE
-     * --------------------------------------------------
-     */
-
-    const {
-      data: currentBalanceData,
-      error:
-        balanceError,
-    } =
-      await supabase.rpc(
-        "get_credit_balance"
-      );
-
-    if (balanceError) {
       console.error(
-        "Credit balance error:",
-        balanceError
+        "ElevenLabs subscription error:",
+        typedError
       );
 
       return NextResponse.json(
         {
+          success: false,
           error:
-            "Unable to check your ZUQEN credit balance.",
+            "Unable to read the current ElevenLabs usage.",
           code:
-            "credit_balance_error",
+            "elevenlabs_usage_check_failed",
         },
         {
-          status: 500,
+          status:
+            typedError.statusCode &&
+            typedError.statusCode >= 400 &&
+            typedError.statusCode < 600
+              ? typedError.statusCode
+              : 502,
         }
       );
     }
 
-    const currentBalance =
+    const characterCount =
       Number(
-        currentBalanceData ?? 0
+        subscription.character_count ??
+          0
+      );
+
+    const characterLimit =
+      Number(
+        subscription.character_limit ??
+          0
+      );
+
+    const remainingCharacters =
+      Math.max(
+        0,
+        characterLimit -
+          characterCount
       );
 
     console.log(
-      `[Voice Credits] Current balance: ${currentBalance}`
+      `[Voice Provider] User: ${user.id}`
+    );
+
+    console.log(
+      `[Voice Provider] ElevenLabs tier: ${subscription.tier ?? "unknown"}`
+    );
+
+    console.log(
+      `[Voice Provider] Used characters: ${characterCount}`
+    );
+
+    console.log(
+      `[Voice Provider] Character limit: ${characterLimit}`
+    );
+
+    console.log(
+      `[Voice Provider] Remaining characters: ${remainingCharacters}`
     );
 
     /*
      * --------------------------------------------------
-     * 8. CHECK ENOUGH CREDITS
+     * 6. PROVIDER-SIDE PRECHECK
      * --------------------------------------------------
+     *
+     * This prevents obviously impossible requests
+     * before sending them to ElevenLabs.
+     *
+     * We do NOT create an artificial ZUQEN price.
      */
 
     if (
-      currentBalance <
-      estimatedCredits
+      characterLimit > 0 &&
+      remainingCharacters < text.length &&
+      subscription.max_credit_limit_extension !==
+        "unlimited"
     ) {
       return NextResponse.json(
         {
+          success: false,
           error:
-            "Not enough ZUQEN credits for this voice generation.",
+            "Your ElevenLabs character quota is not enough for this voice generation.",
           code:
-            "insufficient_credits",
+            "elevenlabs_quota_exceeded",
 
-          required:
-            estimatedCredits,
+          provider: "elevenlabs",
+          feature: "voice-generator",
 
-          balance:
-            currentBalance,
-
-          missing:
-            estimatedCredits -
-            currentBalance,
+          usage: {
+            characterCount,
+            characterLimit,
+            remainingCharacters,
+          },
         },
         {
           status: 402,
@@ -457,7 +538,7 @@ export async function POST(
 
     /*
      * --------------------------------------------------
-     * 9. SPLIT TEXT
+     * 7. SPLIT TEXT
      * --------------------------------------------------
      */
 
@@ -468,19 +549,22 @@ export async function POST(
       );
 
     console.log(
-      `[Voice] Chunks: ${chunks.length}`
+      `[Voice Provider] Chunks: ${chunks.length}`
     );
 
     /*
      * --------------------------------------------------
-     * 10. GENERATE AUDIO
+     * 8. GENERATE AUDIO
      * --------------------------------------------------
      */
 
-    const audioChunks: ArrayBuffer[] =
-      [];
+    const audioChunks:
+      ArrayBuffer[] = [];
 
     let actualCharacterCost = 0;
+
+    const requestIds:
+      string[] = [];
 
     for (
       let i = 0;
@@ -488,7 +572,7 @@ export async function POST(
       i++
     ) {
       console.log(
-        `[Voice] Generating chunk ${i + 1}/${chunks.length}...`
+        `[Voice Provider] Generating chunk ${i + 1}/${chunks.length}...`
       );
 
       const result =
@@ -505,155 +589,67 @@ export async function POST(
       actualCharacterCost +=
         result.characterCost;
 
+      if (result.requestId) {
+        requestIds.push(
+          result.requestId
+        );
+      }
+
       console.log(
-        `[Voice] Chunk ${i + 1} character cost: ${result.characterCost}`
+        `[Voice Provider] Chunk ${i + 1} character cost: ${result.characterCost}`
       );
     }
 
     /*
      * --------------------------------------------------
-     * 11. CALCULATE ACTUAL ZUQEN COST
+     * 9. REFRESH PROVIDER QUOTA
      * --------------------------------------------------
+     *
+     * The generation has succeeded.
+     *
+     * Read subscription again so ZUQEN receives the
+     * latest provider-side usage.
      */
 
-    const actualCredits =
-      Math.ceil(
-        actualCharacterCost *
-          ESTIMATED_CREDITS_PER_CHARACTER
-      );
+    let finalSubscription:
+      ElevenLabsSubscription =
+        subscription;
 
-    console.log(
-      `[Voice Credits] Actual characters: ${actualCharacterCost}`
-    );
-
-    console.log(
-      `[Voice Credits] Actual ZUQEN cost: ${actualCredits}`
-    );
-
-    /*
-     * --------------------------------------------------
-     * 12. SAFETY CHECK AGAINST BALANCE
-     * --------------------------------------------------
-     */
-
-    if (
-      currentBalance <
-      actualCredits
-    ) {
-      console.error(
-        `[Voice Credits] Actual cost exceeds balance. Balance=${currentBalance}, Cost=${actualCredits}`
-      );
-
-      return NextResponse.json(
-        {
-          error:
-            "Your ZUQEN credit balance is not enough for the completed voice generation.",
-          code:
-            "insufficient_credits",
-
-          required:
-            actualCredits,
-
-          balance:
-            currentBalance,
-        },
-        {
-          status: 402,
-        }
+    try {
+      finalSubscription =
+        await getElevenLabsSubscription(
+          apiKey
+        );
+    } catch (refreshError) {
+      console.warn(
+        "Unable to refresh ElevenLabs usage after generation:",
+        refreshError
       );
     }
 
-    /*
-     * --------------------------------------------------
-     * 13. CONSUME ZUQEN CREDITS
-     * --------------------------------------------------
-     */
-
-    const {
-      data: consumeResult,
-      error:
-        consumeError,
-    } =
-      await supabase.rpc(
-        "consume_credits",
-        {
-          p_amount:
-            actualCredits,
-
-          p_agent:
-            "voice-generator",
-
-          p_description:
-            `Voice generation using ${MODEL_ID}`,
-
-          p_reference_id:
-            crypto.randomUUID(),
-        }
-      );
-
-    if (consumeError) {
-      console.error(
-        "Credit consumption error:",
-        consumeError
-      );
-
-      return NextResponse.json(
-        {
-          error:
-            "Voice was generated, but we could not process your ZUQEN credits. Please contact support.",
-          code:
-            "credit_processing_error",
-        },
-        {
-          status: 500,
-        }
-      );
-    }
-
-    /*
-     * --------------------------------------------------
-     * 14. CHECK CONSUMPTION RESULT
-     * --------------------------------------------------
-     */
-
-    if (
-      !consumeResult?.success
-    ) {
-      console.error(
-        "Credit consumption rejected:",
-        consumeResult
-      );
-
-      return NextResponse.json(
-        {
-          error:
-            "Not enough ZUQEN credits.",
-          code:
-            "insufficient_credits",
-
-          required:
-            actualCredits,
-
-          balance:
-            consumeResult?.balance ??
-            currentBalance,
-        },
-        {
-          status: 402,
-        }
-      );
-    }
-
-    const newBalance =
+    const finalCharacterCount =
       Number(
-        consumeResult.balance ??
-          currentBalance -
-            actualCredits
+        finalSubscription.character_count ??
+          characterCount +
+            actualCharacterCost
+      );
+
+    const finalCharacterLimit =
+      Number(
+        finalSubscription.character_limit ??
+          characterLimit
+      );
+
+    const finalRemainingCharacters =
+      Math.max(
+        0,
+        finalCharacterLimit -
+          finalCharacterCount
       );
 
     /*
      * --------------------------------------------------
-     * 15. COMBINE AUDIO
+     * 10. COMBINE AUDIO
      * --------------------------------------------------
      */
 
@@ -691,7 +687,7 @@ export async function POST(
 
     /*
      * --------------------------------------------------
-     * 16. SUCCESS
+     * 11. SUCCESS
      * --------------------------------------------------
      */
 
@@ -712,15 +708,23 @@ export async function POST(
     );
 
     console.log(
-      `Characters: ${actualCharacterCost}`
+      `Provider: ElevenLabs`
     );
 
     console.log(
-      `Credits used: ${actualCredits}`
+      `Model: ${MODEL_ID}`
     );
 
     console.log(
-      `Credits remaining: ${newBalance}`
+      `Actual character cost: ${actualCharacterCost}`
+    );
+
+    console.log(
+      `Provider characters used: ${finalCharacterCount}`
+    );
+
+    console.log(
+      `Provider characters remaining: ${finalRemainingCharacters}`
     );
 
     console.log(
@@ -729,8 +733,14 @@ export async function POST(
 
     /*
      * --------------------------------------------------
-     * 17. RETURN AUDIO
+     * 12. RETURN AUDIO
      * --------------------------------------------------
+     *
+     * IMPORTANT:
+     *
+     * No get_credit_balance()
+     * No consume_credits()
+     * No fake ZUQEN cost.
      */
 
     return new NextResponse(
@@ -758,15 +768,38 @@ export async function POST(
               chunks.length
             ),
 
-          "X-Zuqen-Credits-Used":
+          "X-Zuquen-Provider":
+            "elevenlabs",
+
+          "X-Zuquen-Feature":
+            "voice-generator",
+
+          "X-ElevenLabs-Character-Cost":
             String(
-              actualCredits
+              actualCharacterCost
             ),
 
-          "X-Zuqen-Credits-Remaining":
+          "X-ElevenLabs-Character-Count":
             String(
-              newBalance
+              finalCharacterCount
             ),
+
+          "X-ElevenLabs-Character-Limit":
+            String(
+              finalCharacterLimit
+            ),
+
+          "X-ElevenLabs-Characters-Remaining":
+            String(
+              finalRemainingCharacters
+            ),
+
+          "X-ElevenLabs-Usage-Tracked":
+            "true",
+
+          "X-ElevenLabs-Tier":
+            finalSubscription.tier ??
+            "unknown",
         },
       }
     );
@@ -816,16 +849,20 @@ export async function POST(
 
     if (
       typedError?.errorCode ===
-      "quota_exceeded"
+        "quota_exceeded" ||
+      typedError?.statusCode === 402
     ) {
       return NextResponse.json(
         {
+          success: false,
           error:
-            "The ElevenLabs account does not have enough credits for this generation.",
+            "The ElevenLabs account does not have enough available credits for this generation.",
           code:
             "elevenlabs_quota_exceeded",
-          message:
-            typedError.message,
+          provider:
+            "elevenlabs",
+          feature:
+            "voice-generator",
           requestId:
             typedError.requestId ??
             null,
@@ -846,15 +883,84 @@ export async function POST(
     ) {
       return NextResponse.json(
         {
+          success: false,
           error:
             "The selected voice could not be found.",
           code:
             "voice_not_found",
-          message:
-            typedError.message,
+          provider:
+            "elevenlabs",
+          feature:
+            "voice-generator",
+          requestId:
+            typedError.requestId ??
+            null,
         },
         {
           status: 404,
+        }
+      );
+    }
+
+    /*
+     * Authentication
+     */
+
+    if (
+      typedError?.statusCode === 401
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "ElevenLabs authentication failed. Please check your API key.",
+          code:
+            "elevenlabs_authentication_failed",
+        },
+        {
+          status: 401,
+        }
+      );
+    }
+
+    /*
+     * Permission
+     */
+
+    if (
+      typedError?.statusCode === 403
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "ElevenLabs denied this request. Please check the API key permissions.",
+          code:
+            "elevenlabs_permission_denied",
+        },
+        {
+          status: 403,
+        }
+      );
+    }
+
+    /*
+     * Rate limit
+     */
+
+    if (
+      typedError?.statusCode === 429
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "ElevenLabs rate limit was reached. Please try again later.",
+          code:
+            "elevenlabs_rate_limited",
+        },
+        {
+          status: 429,
         }
       );
     }
@@ -865,14 +971,17 @@ export async function POST(
 
     return NextResponse.json(
       {
+        success: false,
         error:
           typedError?.message ||
           "Failed to generate voice.",
-
         code:
           typedError?.errorCode ||
           "generation_failed",
-
+        provider:
+          "elevenlabs",
+        feature:
+          "voice-generator",
         requestId:
           typedError?.requestId ??
           null,
