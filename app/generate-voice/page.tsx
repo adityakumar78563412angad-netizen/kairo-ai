@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 type Voice = {
   id: string;
@@ -16,12 +22,39 @@ type Voice = {
   voiceType: string | null;
 };
 
+type VoicesResponse = {
+  voices?: Voice[];
+  hasMore?: boolean;
+  totalCount?: number;
+  nextPageToken?: string | null;
+  error?: string;
+};
+
+const MAX_TEXT_LENGTH = 40000;
+
+// Flash v2.5 is billed at approximately 1 credit per 2 characters.
+// This is only an estimate for UI purposes.
+const ESTIMATED_CREDITS_PER_CHARACTER = 0.5;
+
 export default function GenerateVoicePage() {
   const [text, setText] = useState("");
-  const [voices, setVoices] = useState<Voice[]>([]);
 
+  const [voices, setVoices] = useState<Voice[]>([]);
   const [selectedVoice, setSelectedVoice] =
-    useState("");
+    useState<Voice | null>(null);
+
+  const [search, setSearch] = useState("");
+
+  const [gender, setGender] = useState("all");
+  const [age, setAge] = useState("all");
+  const [language, setLanguage] = useState("all");
+  const [accent, setAccent] = useState("all");
+  const [category, setCategory] = useState("all");
+  const [voiceType, setVoiceType] = useState("all");
+
+  const [sort, setSort] = useState("name");
+  const [sortDirection, setSortDirection] =
+    useState("asc");
 
   const [loadingVoices, setLoadingVoices] =
     useState(true);
@@ -32,41 +65,13 @@ export default function GenerateVoicePage() {
   const [generating, setGenerating] =
     useState(false);
 
-  const [error, setError] =
-    useState("");
-
-  const [audioUrl, setAudioUrl] =
-    useState("");
-
-  const [playingPreview, setPlayingPreview] =
+  const [previewingVoiceId, setPreviewingVoiceId] =
     useState<string | null>(null);
 
-  const [search, setSearch] =
-    useState("");
+  const [audioUrl, setAudioUrl] =
+    useState<string | null>(null);
 
-  const [gender, setGender] =
-    useState("all");
-
-  const [age, setAge] =
-    useState("all");
-
-  const [language, setLanguage] =
-    useState("all");
-
-  const [accent, setAccent] =
-    useState("all");
-
-  const [category, setCategory] =
-    useState("all");
-
-  const [voiceType, setVoiceType] =
-    useState("all");
-
-  const [sort, setSort] =
-    useState("name");
-
-  const [sortDirection, setSortDirection] =
-    useState("asc");
+  const [error, setError] = useState("");
 
   const [hasMore, setHasMore] =
     useState(false);
@@ -77,205 +82,403 @@ export default function GenerateVoicePage() {
   const [totalCount, setTotalCount] =
     useState(0);
 
-  const previewAudioRef =
-    useRef<HTMLAudioElement | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(
+    null
+  );
 
   const searchTimerRef =
-    useRef<NodeJS.Timeout | null>(null);
+    useRef<ReturnType<typeof setTimeout> | null>(
+      null
+    );
 
-  const maxCharacters = 5000;
+  const textLength = text.length;
+
+  const estimatedCredits = Math.ceil(
+    textLength *
+      ESTIMATED_CREDITS_PER_CHARACTER
+  );
+
+  const textIsTooLong =
+    textLength > MAX_TEXT_LENGTH;
+
+  const canGenerate =
+    text.trim().length > 0 &&
+    selectedVoice !== null &&
+    !generating &&
+    !textIsTooLong;
+
+  const loadVoices = useCallback(
+    async (loadMore = false) => {
+      try {
+        if (loadMore) {
+          setLoadingMore(true);
+        } else {
+          setLoadingVoices(true);
+          setError("");
+        }
+
+        const params =
+          new URLSearchParams();
+
+        params.set("page_size", "50");
+
+        if (search.trim()) {
+          params.set(
+            "search",
+            search.trim()
+          );
+        }
+
+        if (gender !== "all") {
+          params.set("gender", gender);
+        }
+
+        if (age !== "all") {
+          params.set("age", age);
+        }
+
+        if (language !== "all") {
+          params.set(
+            "language",
+            language
+          );
+        }
+
+        if (accent !== "all") {
+          params.set(
+            "accent",
+            accent
+          );
+        }
+
+        if (category !== "all") {
+          params.set(
+            "category",
+            category
+          );
+        }
+
+        if (voiceType !== "all") {
+          params.set(
+            "voice_type",
+            voiceType
+          );
+        }
+
+        if (sort) {
+          params.set("sort", sort);
+        }
+
+        if (sortDirection) {
+          params.set(
+            "sort_direction",
+            sortDirection
+          );
+        }
+
+        if (
+          loadMore &&
+          nextPageToken
+        ) {
+          params.set(
+            "next_page_token",
+            nextPageToken
+          );
+        }
+
+        const response = await fetch(
+          `/api/voices?${params.toString()}`,
+          {
+            method: "GET",
+            cache: "no-store",
+          }
+        );
+
+        const data: VoicesResponse =
+          await response.json();
+
+        if (!response.ok) {
+          throw new Error(
+            data?.error ||
+              "Failed to load voices."
+          );
+        }
+
+        const newVoices =
+          data.voices || [];
+
+        setVoices((current) =>
+          loadMore
+            ? [...current, ...newVoices]
+            : newVoices
+        );
+
+        setHasMore(
+          data.hasMore ?? false
+        );
+
+        setNextPageToken(
+          data.nextPageToken ?? null
+        );
+
+        setTotalCount(
+          data.totalCount ??
+            newVoices.length
+        );
+
+        if (
+          !loadMore &&
+          newVoices.length > 0
+        ) {
+          setSelectedVoice((current) => {
+            if (current) {
+              const stillExists =
+                newVoices.some(
+                  (voice) =>
+                    voice.id ===
+                    current.id
+                );
+
+              if (stillExists) {
+                return current;
+              }
+            }
+
+            return newVoices[0];
+          });
+        }
+      } catch (err) {
+        console.error(
+          "Voice loading error:",
+          err
+        );
+
+        if (!loadMore) {
+          setError(
+            err instanceof Error
+              ? err.message
+              : "Failed to load voices."
+          );
+        }
+      } finally {
+        setLoadingVoices(false);
+        setLoadingMore(false);
+      }
+    },
+    [
+      search,
+      gender,
+      age,
+      language,
+      accent,
+      category,
+      voiceType,
+      sort,
+      sortDirection,
+      nextPageToken,
+    ]
+  );
 
   useEffect(() => {
     loadVoices(false);
+  }, [
+    gender,
+    age,
+    language,
+    accent,
+    category,
+    voiceType,
+    sort,
+    sortDirection,
+  ]);
 
-    return () => {
-      previewAudioRef.current?.pause();
-
-      if (audioUrl) {
-        URL.revokeObjectURL(audioUrl);
-      }
-
-      if (searchTimerRef.current) {
-        clearTimeout(searchTimerRef.current);
-      }
-    };
-  }, []);
-
-  async function loadVoices(
-    loadMore = false
-  ) {
-    try {
-      if (loadMore) {
-        setLoadingMore(true);
-      } else {
-        setLoadingVoices(true);
-        setError("");
-      }
-
-      const params = new URLSearchParams();
-
-      params.set("page_size", "50");
-
-      if (search.trim()) {
-        params.set(
-          "search",
-          search.trim()
-        );
-      }
-
-      if (gender !== "all") {
-        params.set("gender", gender);
-      }
-
-      if (age !== "all") {
-        params.set("age", age);
-      }
-
-      if (language !== "all") {
-        params.set(
-          "language",
-          language
-        );
-      }
-
-      if (accent !== "all") {
-        params.set(
-          "accent",
-          accent
-        );
-      }
-
-      if (category !== "all") {
-        params.set(
-          "category",
-          category
-        );
-      }
-
-      if (voiceType !== "all") {
-        params.set(
-          "voice_type",
-          voiceType
-        );
-      }
-
-      params.set("sort", sort);
-      params.set(
-        "sort_direction",
-        sortDirection
-      );
-
-      if (
-        loadMore &&
-        nextPageToken
-      ) {
-        params.set(
-          "next_page_token",
-          nextPageToken
-        );
-      }
-
-      const response = await fetch(
-        `/api/voices?${params.toString()}`,
-        {
-          cache: "no-store",
-        }
-      );
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(
-          data?.error ||
-            "Failed to load voices."
-        );
-      }
-
-      const loadedVoices =
-        data.voices || [];
-
-      if (loadMore) {
-        setVoices((current) => [
-          ...current,
-          ...loadedVoices,
-        ]);
-      } else {
-        setVoices(loadedVoices);
-
-        if (
-          loadedVoices.length > 0 &&
-          !selectedVoice
-        ) {
-          setSelectedVoice(
-            loadedVoices[0].id
-          );
-        }
-      }
-
-      setHasMore(
-        data.hasMore ?? false
-      );
-
-      setNextPageToken(
-        data.nextPageToken ?? null
-      );
-
-      setTotalCount(
-        data.totalCount ??
-          loadedVoices.length
-      );
-    } catch (err) {
-      console.error(err);
-
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Failed to load voices."
-      );
-    } finally {
-      setLoadingVoices(false);
-      setLoadingMore(false);
-    }
-  }
-
-  function applyFilters() {
-    setNextPageToken(null);
-    setHasMore(false);
-    loadVoices(false);
-  }
-
-  function handleSearchChange(
-    value: string
-  ) {
-    setSearch(value);
-
+  useEffect(() => {
     if (searchTimerRef.current) {
-      clearTimeout(searchTimerRef.current);
+      clearTimeout(
+        searchTimerRef.current
+      );
     }
 
     searchTimerRef.current =
       setTimeout(() => {
-        setNextPageToken(null);
         loadVoices(false);
       }, 500);
-  }
 
-  function handleFilterChange(
-    setter: (
-      value: string
-    ) => void,
-    value: string
-  ) {
-    setter(value);
+    return () => {
+      if (searchTimerRef.current) {
+        clearTimeout(
+          searchTimerRef.current
+        );
+      }
+    };
+  }, [search]);
 
-    setNextPageToken(null);
+  useEffect(() => {
+    return () => {
+      if (audioUrl) {
+        URL.revokeObjectURL(
+          audioUrl
+        );
+      }
+    };
+  }, [audioUrl]);
 
-    setTimeout(() => {
-      loadVoices(false);
-    }, 0);
-  }
+  const clearGeneratedAudio =
+    () => {
+      if (audioUrl) {
+        URL.revokeObjectURL(
+          audioUrl
+        );
+      }
 
-  function resetFilters() {
+      setAudioUrl(null);
+    };
+
+  const handleGenerate = async () => {
+    if (!canGenerate) {
+      return;
+    }
+
+    try {
+      setGenerating(true);
+      setError("");
+
+      clearGeneratedAudio();
+
+      const response = await fetch(
+        "/api/generate-voice",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type":
+              "application/json",
+          },
+          body: JSON.stringify({
+            text: text.trim(),
+            voiceId:
+              selectedVoice.id,
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        let data: {
+          error?: string;
+          message?: string;
+          code?: string;
+        } = {};
+
+        try {
+          data =
+            await response.json();
+        } catch {
+          // Ignore invalid JSON.
+        }
+
+        if (
+          data.code ===
+          "quota_exceeded"
+        ) {
+          throw new Error(
+            "Not enough ElevenLabs credits for this text. Please reduce the text length or add more credits to your ElevenLabs account."
+          );
+        }
+
+        throw new Error(
+          data.message ||
+            data.error ||
+            "Failed to generate voice."
+        );
+      }
+
+      const blob =
+        await response.blob();
+
+      if (
+        !blob ||
+        blob.size === 0
+      ) {
+        throw new Error(
+          "The generated audio is empty."
+        );
+      }
+
+      const url =
+        URL.createObjectURL(blob);
+
+      setAudioUrl(url);
+    } catch (err) {
+      console.error(
+        "Voice generation error:",
+        err
+      );
+
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Failed to generate voice."
+      );
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const handlePreview = (
+    voice: Voice
+  ) => {
+    if (!voice.previewUrl) {
+      return;
+    }
+
+    try {
+      if (
+        audioRef.current
+      ) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+
+      const audio =
+        new Audio(
+          voice.previewUrl
+        );
+
+      audioRef.current =
+        audio;
+
+      setPreviewingVoiceId(
+        voice.id
+      );
+
+      audio.onended = () => {
+        setPreviewingVoiceId(
+          null
+        );
+      };
+
+      audio.onerror = () => {
+        setPreviewingVoiceId(
+          null
+        );
+
+        setError(
+          "Unable to play this voice preview."
+        );
+      };
+
+      audio.play().catch(() => {
+        setPreviewingVoiceId(
+          null
+        );
+      });
+    } catch {
+      setPreviewingVoiceId(
+        null
+      );
+    }
+  };
+
+  const resetFilters = () => {
     setSearch("");
     setGender("all");
     setAge("all");
@@ -285,1600 +488,1012 @@ export default function GenerateVoicePage() {
     setVoiceType("all");
     setSort("name");
     setSortDirection("asc");
-    setNextPageToken(null);
-    setHasMore(false);
+  };
 
-    setTimeout(() => {
-      loadVoices(false);
-    }, 0);
-  }
-
-  function handlePreview(
-    voice: Voice
-  ) {
-    if (!voice.previewUrl) {
-      return;
-    }
-
-    if (
-      playingPreview === voice.id
-    ) {
-      previewAudioRef.current?.pause();
-
-      previewAudioRef.current = null;
-
-      setPlayingPreview(null);
-
-      return;
-    }
-
-    previewAudioRef.current?.pause();
-
-    const audio = new Audio(
-      voice.previewUrl
-    );
-
-    previewAudioRef.current = audio;
-
-    audio.onended = () => {
-      setPlayingPreview(null);
-      previewAudioRef.current = null;
-    };
-
-    audio.onerror = () => {
-      setPlayingPreview(null);
-      previewAudioRef.current = null;
-
-      setError(
-        "Unable to play this voice preview."
-      );
-    };
-
-    audio.play();
-
-    setPlayingPreview(
-      voice.id
-    );
-  }
-
-  async function generateVoice() {
-    if (!text.trim()) {
-      setError(
-        "Please enter some text first."
-      );
-      return;
-    }
-
-    if (!selectedVoice) {
-      setError(
-        "Please select a voice."
-      );
-      return;
-    }
-
-    try {
-      setGenerating(true);
-      setError("");
-
-      if (audioUrl) {
-        URL.revokeObjectURL(
-          audioUrl
-        );
-
-        setAudioUrl("");
-      }
-
-      const response =
-        await fetch(
-          "/api/generate-voice",
-          {
-            method: "POST",
-            headers: {
-              "Content-Type":
-                "application/json",
-            },
-            body: JSON.stringify({
-              text: text.trim(),
-              voiceId:
-                selectedVoice,
-            }),
-          }
-        );
-
-      if (!response.ok) {
-        let message =
-          "Failed to generate voice.";
-
-        try {
-          const data =
-            await response.json();
-
-          if (data?.error) {
-            message = data.error;
-          }
-        } catch {
-          // Ignore
-        }
-
-        throw new Error(message);
-      }
-
-      const blob =
-        await response.blob();
-
-      const url =
-        URL.createObjectURL(
-          blob
-        );
-
-      setAudioUrl(url);
-    } catch (err) {
-      console.error(err);
-
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Something went wrong."
-      );
-    } finally {
-      setGenerating(false);
-    }
-  }
-
-  function downloadAudio() {
-    if (!audioUrl) {
-      return;
-    }
-
-    const link =
-      document.createElement(
-        "a"
-      );
-
-    link.href = audioUrl;
-    link.download =
-      "zuqen-ai-voice.mp3";
-
-    document.body.appendChild(
-      link
-    );
-
-    link.click();
-
-    document.body.removeChild(
-      link
-    );
-  }
-
-  const selectedVoiceData =
-    voices.find(
-      (voice) =>
-        voice.id ===
-        selectedVoice
-    );
+  const filteredVoiceCount =
+    useMemo(() => {
+      return voices.length;
+    }, [voices]);
 
   return (
     <main className="voice-page">
       <div className="background-glow glow-one" />
       <div className="background-glow glow-two" />
 
-      <div className="voice-container">
-        {/* HEADER */}
-
-        <header className="voice-header">
-          <div>
-            <div className="voice-badge">
-              <span className="badge-dot" />
-              ZUQEN AI STUDIO
-            </div>
-
-            <h1>
-              AI Voice{" "}
-              <span>Generator</span>
-            </h1>
-
-            <p>
-              Create natural, expressive
-              AI voices with ZUQEN.
-            </p>
+      <header className="topbar">
+        <div>
+          <div className="brand">
+            ZUQEN AI
           </div>
 
-          <div className="header-mic">
-            🎙️
+          <div className="studio-label">
+            Voice Studio
           </div>
-        </header>
+        </div>
 
-        {/* MAIN */}
+        <div className="model-badge">
+          <span className="status-dot" />
+          Eleven Flash v2.5
+        </div>
+      </header>
 
-        <div className="voice-grid">
-          {/* EDITOR */}
+      <section className="hero">
+        <div>
+          <div className="eyebrow">
+            AI VOICE GENERATOR
+          </div>
 
-          <section className="editor-panel glass-panel">
-            <div className="panel-top">
-              <div>
-                <h2>
-                  Write your script
-                </h2>
+          <h1>
+            Turn your text into
+            <span> natural speech.</span>
+          </h1>
 
-                <p>
-                  Enter the text you
-                  want ZUQEN to speak.
-                </p>
-              </div>
+          <p>
+            Write anything, choose a voice,
+            and generate realistic speech
+            using ElevenLabs.
+          </p>
+        </div>
+      </section>
 
-              <div className="character-count">
-                {text.length.toLocaleString()}
-                {" / "}
-                {maxCharacters.toLocaleString()}
-              </div>
+      <section className="workspace">
+        <div className="editor-card card">
+          <div className="card-header">
+            <div>
+              <h2>Text to Speech</h2>
+              <p>
+                Enter the text you want
+                to convert into audio.
+              </p>
             </div>
 
-            <div className="text-editor">
-              <textarea
-                value={text}
-                maxLength={
-                  maxCharacters
-                }
-                onChange={(event) =>
-                  setText(
-                    event.target.value
-                  )
-                }
-                placeholder="Type or paste your text here..."
-              />
-
-              <div className="editor-footer">
-                <span>
-                  {text.length
-                    ? "Ready to generate"
-                    : "Start writing your script"}
-                </span>
-
-                <span>
-                  AI Voice
-                </span>
-              </div>
+            <div className="character-counter">
+              {textLength.toLocaleString()}
+              {" / "}
+              {MAX_TEXT_LENGTH.toLocaleString()}
             </div>
+          </div>
 
-            {selectedVoiceData && (
-              <div className="selected-voice">
-                <div className="selected-avatar">
-                  🎙️
-                </div>
+          <textarea
+            value={text}
+            maxLength={
+              MAX_TEXT_LENGTH
+            }
+            onChange={(event) =>
+              setText(
+                event.target.value
+              )
+            }
+            placeholder="Type or paste your text here..."
+            className="text-editor"
+          />
 
-                <div className="selected-info">
-                  <span>
-                    Selected voice
-                  </span>
+          <div className="editor-footer">
+            <span>
+              {textLength === 0
+                ? "Ready to generate"
+                : `${textLength.toLocaleString()} characters`}
+            </span>
 
-                  <strong>
-                    {
-                      selectedVoiceData.name
-                    }
-                  </strong>
-                </div>
-
-                <button
-                  type="button"
-                  className="change-voice"
-                  onClick={() =>
-                    document
-                      .getElementById(
-                        "voice-library"
-                      )
-                      ?.scrollIntoView({
-                        behavior:
-                          "smooth",
-                        block: "center",
-                      })
-                  }
-                >
-                  Change
-                </button>
-              </div>
+            {textLength > 0 && (
+              <span>
+                Estimated cost:{" "}
+                <strong>
+                  ~
+                  {estimatedCredits.toLocaleString()}
+                </strong>{" "}
+                credits
+              </span>
             )}
+          </div>
 
-            {error && (
-              <div className="error-box">
-                <span>!</span>
+          {textIsTooLong && (
+            <div className="warning-box">
+              <strong>
+                Text is too long.
+              </strong>
+              <span>
+                Please keep the text
+                below{" "}
+                {MAX_TEXT_LENGTH.toLocaleString()}{" "}
+                characters.
+              </span>
+            </div>
+          )}
 
-                <p>{error}</p>
+          {error && (
+            <div className="error-box">
+              <div className="error-icon">
+                !
               </div>
-            )}
-
-            <button
-              type="button"
-              className="generate-button"
-              onClick={
-                generateVoice
-              }
-              disabled={
-                generating ||
-                !text.trim() ||
-                !selectedVoice
-              }
-            >
-              {generating ? (
-                <>
-                  <span className="spinner" />
-                  Generating voice...
-                </>
-              ) : (
-                <>
-                  <span>✦</span>
-                  Generate Voice
-                  <span>→</span>
-                </>
-              )}
-            </button>
-
-            <p className="secure-note">
-              🔒 Your ElevenLabs API
-              key stays securely on
-              the server.
-            </p>
-          </section>
-
-          {/* VOICE LIBRARY */}
-
-          <section
-            className="voices-panel glass-panel"
-            id="voice-library"
-          >
-            <div className="panel-top">
-              <div>
-                <h2>
-                  Voice Library
-                </h2>
-
-                <p>
-                  Search and filter
-                  available voices.
-                </p>
-              </div>
-
-              <div className="voice-count">
-                {totalCount || voices.length}
-              </div>
-            </div>
-
-            {/* SEARCH */}
-
-            <div className="search-box">
-              <span>⌕</span>
-
-              <input
-                value={search}
-                onChange={(event) =>
-                  handleSearchChange(
-                    event.target.value
-                  )
-                }
-                placeholder="Search voices..."
-              />
-
-              {search && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSearch("");
-                    setTimeout(
-                      () =>
-                        loadVoices(
-                          false
-                        ),
-                      0
-                    );
-                  }}
-                >
-                  ×
-                </button>
-              )}
-            </div>
-
-            {/* FILTERS */}
-
-            <div className="filters">
-              <select
-                value={gender}
-                onChange={(event) =>
-                  handleFilterChange(
-                    setGender,
-                    event.target.value
-                  )
-                }
-              >
-                <option value="all">
-                  Gender: All
-                </option>
-
-                <option value="female">
-                  Female
-                </option>
-
-                <option value="male">
-                  Male
-                </option>
-
-                <option value="neutral">
-                  Neutral
-                </option>
-              </select>
-
-              <select
-                value={age}
-                onChange={(event) =>
-                  handleFilterChange(
-                    setAge,
-                    event.target.value
-                  )
-                }
-              >
-                <option value="all">
-                  Age: All
-                </option>
-
-                <option value="young">
-                  Young
-                </option>
-
-                <option value="middle-aged">
-                  Middle Aged
-                </option>
-
-                <option value="old">
-                  Old
-                </option>
-              </select>
-
-              <select
-                value={language}
-                onChange={(event) =>
-                  handleFilterChange(
-                    setLanguage,
-                    event.target.value
-                  )
-                }
-              >
-                <option value="all">
-                  Language: All
-                </option>
-
-                <option value="en">
-                  English
-                </option>
-
-                <option value="hi">
-                  Hindi
-                </option>
-
-                <option value="es">
-                  Spanish
-                </option>
-
-                <option value="fr">
-                  French
-                </option>
-
-                <option value="de">
-                  German
-                </option>
-
-                <option value="it">
-                  Italian
-                </option>
-
-                <option value="pt">
-                  Portuguese
-                </option>
-
-                <option value="ja">
-                  Japanese
-                </option>
-
-                <option value="ko">
-                  Korean
-                </option>
-
-                <option value="zh">
-                  Chinese
-                </option>
-
-                <option value="ar">
-                  Arabic
-                </option>
-              </select>
-
-              <select
-                value={accent}
-                onChange={(event) =>
-                  handleFilterChange(
-                    setAccent,
-                    event.target.value
-                  )
-                }
-              >
-                <option value="all">
-                  Accent: All
-                </option>
-
-                <option value="American">
-                  American
-                </option>
-
-                <option value="British">
-                  British
-                </option>
-
-                <option value="Australian">
-                  Australian
-                </option>
-
-                <option value="Indian">
-                  Indian
-                </option>
-
-                <option value="Canadian">
-                  Canadian
-                </option>
-              </select>
-
-              <select
-                value={category}
-                onChange={(event) =>
-                  handleFilterChange(
-                    setCategory,
-                    event.target.value
-                  )
-                }
-              >
-                <option value="all">
-                  Category: All
-                </option>
-
-                <option value="premade">
-                  Premade
-                </option>
-
-                <option value="professional">
-                  Professional
-                </option>
-
-                <option value="cloned">
-                  Cloned
-                </option>
-
-                <option value="generated">
-                  Generated
-                </option>
-              </select>
-
-              <select
-                value={voiceType}
-                onChange={(event) =>
-                  handleFilterChange(
-                    setVoiceType,
-                    event.target.value
-                  )
-                }
-              >
-                <option value="all">
-                  Type: All
-                </option>
-
-                <option value="default">
-                  Default
-                </option>
-
-                <option value="personal">
-                  Personal
-                </option>
-
-                <option value="community">
-                  Community
-                </option>
-
-                <option value="workspace">
-                  Workspace
-                </option>
-
-                <option value="saved">
-                  Saved
-                </option>
-              </select>
-            </div>
-
-            {/* SORT */}
-
-            <div className="library-tools">
-              <button
-                type="button"
-                className="reset-button"
-                onClick={
-                  resetFilters
-                }
-              >
-                Reset filters
-              </button>
-
-              <div className="sort-box">
-                <span>
-                  Sort:
-                </span>
-
-                <select
-                  value={sort}
-                  onChange={(event) => {
-                    setSort(
-                      event.target.value
-                    );
-
-                    setTimeout(
-                      () =>
-                        loadVoices(
-                          false
-                        ),
-                      0
-                    );
-                  }}
-                >
-                  <option value="name">
-                    Name
-                  </option>
-
-                  <option value="created_at_unix">
-                    Newest
-                  </option>
-                </select>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    const next =
-                      sortDirection ===
-                      "asc"
-                        ? "desc"
-                        : "asc";
-
-                    setSortDirection(
-                      next
-                    );
-
-                    setTimeout(
-                      () =>
-                        loadVoices(
-                          false
-                        ),
-                      0
-                    );
-                  }}
-                >
-                  {sortDirection ===
-                  "asc"
-                    ? "↑"
-                    : "↓"}
-                </button>
-              </div>
-            </div>
-
-            {/* VOICE LIST */}
-
-            <div className="voice-list">
-              {loadingVoices ? (
-                <>
-                  <div className="voice-skeleton" />
-                  <div className="voice-skeleton" />
-                  <div className="voice-skeleton" />
-                  <div className="voice-skeleton" />
-                </>
-              ) : voices.length ===
-                0 ? (
-                <div className="empty-voices">
-                  <div>
-                    🔎
-                  </div>
-
-                  <strong>
-                    No voices found
-                  </strong>
-
-                  <p>
-                    Try changing your
-                    search or filters.
-                  </p>
-
-                  <button
-                    type="button"
-                    onClick={
-                      resetFilters
-                    }
-                  >
-                    Clear filters
-                  </button>
-                </div>
-              ) : (
-                voices.map(
-                  (voice) => {
-                    const isSelected =
-                      selectedVoice ===
-                      voice.id;
-
-                    const isPlaying =
-                      playingPreview ===
-                      voice.id;
-
-                    return (
-                      <div
-                        key={
-                          voice.id
-                        }
-                        className={`voice-card ${
-                          isSelected
-                            ? "active"
-                            : ""
-                        }`}
-                        onClick={() =>
-                          setSelectedVoice(
-                            voice.id
-                          )
-                        }
-                      >
-                        <div className="voice-avatar">
-                          {voice.name
-                            .charAt(
-                              0
-                            )
-                            .toUpperCase()}
-                        </div>
-
-                        <div className="voice-details">
-                          <strong>
-                            {
-                              voice.name
-                            }
-                          </strong>
-
-                          <span>
-                            {[
-                              voice.gender,
-                              voice.age,
-                              voice.accent,
-                            ]
-                              .filter(
-                                Boolean
-                              )
-                              .join(
-                                " • "
-                              ) ||
-                              "AI Voice"}
-                          </span>
-                        </div>
-
-                        <button
-                          type="button"
-                          className={`preview-button ${
-                            isPlaying
-                              ? "playing"
-                              : ""
-                          }`}
-                          onClick={(
-                            event
-                          ) => {
-                            event.stopPropagation();
-
-                            handlePreview(
-                              voice
-                            );
-                          }}
-                          disabled={
-                            !voice.previewUrl
-                          }
-                        >
-                          {isPlaying
-                            ? "Ⅱ"
-                            : "▶"}
-                        </button>
-
-                        <div className="voice-check">
-                          {isSelected
-                            ? "✓"
-                            : ""}
-                        </div>
-                      </div>
-                    );
-                  }
-                )
-              )}
-            </div>
-
-            {/* LOAD MORE */}
-
-            {hasMore &&
-              !loadingVoices && (
-                <button
-                  type="button"
-                  className="load-more"
-                  onClick={() =>
-                    loadVoices(
-                      true
-                    )
-                  }
-                  disabled={
-                    loadingMore
-                  }
-                >
-                  {loadingMore ? (
-                    <>
-                      <span className="small-spinner" />
-                      Loading more...
-                    </>
-                  ) : (
-                    <>
-                      Load more voices
-                      <span>
-                        ↓
-                      </span>
-                    </>
-                  )}
-                </button>
-              )}
-
-            <div className="voice-tip">
-              <span>💡</span>
 
               <div>
                 <strong>
-                  Preview before
-                  generating
+                  Generation failed
                 </strong>
 
-                <p>
-                  Listen to a voice
-                  before using it in
-                  your generation.
-                </p>
+                <p>{error}</p>
               </div>
             </div>
-          </section>
-        </div>
+          )}
 
-        {/* RESULT */}
-
-        {audioUrl && (
-          <section className="result-panel glass-panel">
-            <div className="result-icon">
-              🎵
-            </div>
-
-            <div className="result-info">
-              <span>
-                VOICE GENERATED
+          <div className="selected-voice">
+            <div>
+              <span className="small-label">
+                SELECTED VOICE
               </span>
 
               <strong>
-                Your AI voice is ready
+                {selectedVoice
+                  ? selectedVoice.name
+                  : "No voice selected"}
               </strong>
 
-              <audio
-                className="audio-player"
-                src={audioUrl}
-                controls
-              />
+              {selectedVoice && (
+                <span className="voice-meta">
+                  {[
+                    selectedVoice.gender,
+                    selectedVoice.age,
+                    selectedVoice.accent,
+                  ]
+                    .filter(Boolean)
+                    .join(" • ")}
+                </span>
+              )}
             </div>
 
-            <button
-              type="button"
-              className="download-button"
-              onClick={
-                downloadAudio
+            <div className="selected-check">
+              ✓
+            </div>
+          </div>
+
+          <button
+            className="generate-button"
+            disabled={!canGenerate}
+            onClick={
+              handleGenerate
+            }
+          >
+            {generating ? (
+              <>
+                <span className="spinner" />
+                Generating voice...
+              </>
+            ) : (
+              <>
+                <span className="sparkle">
+                  ✦
+                </span>
+                Generate Voice
+              </>
+            )}
+          </button>
+
+          {audioUrl && (
+            <div className="result-card">
+              <div className="result-title">
+                <div>
+                  <span className="small-label">
+                    GENERATED AUDIO
+                  </span>
+
+                  <strong>
+                    Your voice is ready
+                  </strong>
+                </div>
+
+                <span className="success-badge">
+                  ✓ Ready
+                </span>
+              </div>
+
+              <audio
+                controls
+                src={audioUrl}
+                className="audio-player"
+              />
+
+              <a
+                href={audioUrl}
+                download="zuqen-ai-voice.mp3"
+                className="download-button"
+              >
+                ↓ Download MP3
+              </a>
+            </div>
+          )}
+        </div>
+
+        <aside className="library-card card">
+          <div className="card-header library-header">
+            <div>
+              <h2>Voice Library</h2>
+              <p>
+                Choose the perfect voice
+                for your content.
+              </p>
+            </div>
+
+            <div className="voice-count">
+              {totalCount > 0
+                ? totalCount.toLocaleString()
+                : filteredVoiceCount.toLocaleString()}
+            </div>
+          </div>
+
+          <div className="search-box">
+            <span>⌕</span>
+
+            <input
+              value={search}
+              onChange={(event) =>
+                setSearch(
+                  event.target.value
+                )
+              }
+              placeholder="Search voices..."
+            />
+          </div>
+
+          <div className="filters">
+            <select
+              value={gender}
+              onChange={(event) =>
+                setGender(
+                  event.target.value
+                )
               }
             >
-              ↓ Download MP3
-            </button>
-          </section>
-        )}
+              <option value="all">
+                All genders
+              </option>
+              <option value="female">
+                Female
+              </option>
+              <option value="male">
+                Male
+              </option>
+              <option value="neutral">
+                Neutral
+              </option>
+            </select>
 
-        <footer className="voice-footer">
-          Powered by{" "}
-          <strong>
-            ZUQEN AI
-          </strong>{" "}
-          × ElevenLabs
-        </footer>
-      </div>
+            <select
+              value={age}
+              onChange={(event) =>
+                setAge(
+                  event.target.value
+                )
+              }
+            >
+              <option value="all">
+                All ages
+              </option>
+              <option value="young">
+                Young
+              </option>
+              <option value="middle-aged">
+                Middle-aged
+              </option>
+              <option value="old">
+                Old
+              </option>
+            </select>
+
+            <select
+              value={language}
+              onChange={(event) =>
+                setLanguage(
+                  event.target.value
+                )
+              }
+            >
+              <option value="all">
+                All languages
+              </option>
+              <option value="en">
+                English
+              </option>
+              <option value="hi">
+                Hindi
+              </option>
+              <option value="es">
+                Spanish
+              </option>
+              <option value="fr">
+                French
+              </option>
+              <option value="de">
+                German
+              </option>
+              <option value="it">
+                Italian
+              </option>
+              <option value="pt">
+                Portuguese
+              </option>
+              <option value="ja">
+                Japanese
+              </option>
+              <option value="ko">
+                Korean
+              </option>
+              <option value="zh">
+                Chinese
+              </option>
+              <option value="ar">
+                Arabic
+              </option>
+            </select>
+
+            <select
+              value={accent}
+              onChange={(event) =>
+                setAccent(
+                  event.target.value
+                )
+              }
+            >
+              <option value="all">
+                All accents
+              </option>
+              <option value="american">
+                American
+              </option>
+              <option value="british">
+                British
+              </option>
+              <option value="australian">
+                Australian
+              </option>
+              <option value="indian">
+                Indian
+              </option>
+              <option value="canadian">
+                Canadian
+              </option>
+            </select>
+
+            <select
+              value={category}
+              onChange={(event) =>
+                setCategory(
+                  event.target.value
+                )
+              }
+            >
+              <option value="all">
+                All categories
+              </option>
+              <option value="premade">
+                Premade
+              </option>
+              <option value="professional">
+                Professional
+              </option>
+              <option value="cloned">
+                Cloned
+              </option>
+              <option value="generated">
+                Generated
+              </option>
+            </select>
+
+            <select
+              value={voiceType}
+              onChange={(event) =>
+                setVoiceType(
+                  event.target.value
+                )
+              }
+            >
+              <option value="all">
+                All types
+              </option>
+              <option value="default">
+                Default
+              </option>
+              <option value="personal">
+                Personal
+              </option>
+              <option value="community">
+                Community
+              </option>
+              <option value="workspace">
+                Workspace
+              </option>
+              <option value="saved">
+                Saved
+              </option>
+            </select>
+          </div>
+
+          <div className="library-actions">
+            <select
+              value={sort}
+              onChange={(event) =>
+                setSort(
+                  event.target.value
+                )
+              }
+            >
+              <option value="name">
+                Sort by name
+              </option>
+              <option value="created_at">
+                Sort by newest
+              </option>
+            </select>
+
+            <button
+              onClick={() =>
+                setSortDirection(
+                  (current) =>
+                    current === "asc"
+                      ? "desc"
+                      : "asc"
+                )
+              }
+              className="sort-button"
+              title="Change sort direction"
+            >
+              {sortDirection ===
+              "asc"
+                ? "↑"
+                : "↓"}
+            </button>
+
+            <button
+              onClick={
+                resetFilters
+              }
+              className="reset-button"
+            >
+              Reset
+            </button>
+          </div>
+
+          <div className="voices-list">
+            {loadingVoices ? (
+              <div className="loading-state">
+                <span className="spinner large" />
+                Loading voices...
+              </div>
+            ) : voices.length === 0 ? (
+              <div className="empty-state">
+                <div className="empty-icon">
+                  ♪
+                </div>
+
+                <strong>
+                  No voices found
+                </strong>
+
+                <p>
+                  Try changing your
+                  search or filters.
+                </p>
+              </div>
+            ) : (
+              voices.map((voice) => {
+                const isSelected =
+                  selectedVoice?.id ===
+                  voice.id;
+
+                const isPreviewing =
+                  previewingVoiceId ===
+                  voice.id;
+
+                return (
+                  <div
+                    key={voice.id}
+                    className={`voice-item ${
+                      isSelected
+                        ? "selected"
+                        : ""
+                    }`}
+                    onClick={() =>
+                      setSelectedVoice(
+                        voice
+                      )
+                    }
+                  >
+                    <div className="voice-avatar">
+                      {voice.name
+                        .charAt(0)
+                        .toUpperCase()}
+                    </div>
+
+                    <div className="voice-info">
+                      <strong>
+                        {voice.name}
+                      </strong>
+
+                      <span>
+                        {[
+                          voice.gender,
+                          voice.age,
+                          voice.accent,
+                        ]
+                          .filter(Boolean)
+                          .join(
+                            " • "
+                          ) ||
+                          "AI Voice"}
+                      </span>
+                    </div>
+
+                    {voice.previewUrl && (
+                      <button
+                        className="preview-button"
+                        onClick={(
+                          event
+                        ) => {
+                          event.stopPropagation();
+
+                          handlePreview(
+                            voice
+                          );
+                        }}
+                        title={
+                          isPreviewing
+                            ? "Playing"
+                            : "Preview"
+                        }
+                      >
+                        {isPreviewing
+                          ? "■"
+                          : "▶"}
+                      </button>
+                    )}
+
+                    {isSelected && (
+                      <div className="voice-selected">
+                        ✓
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {hasMore && (
+            <button
+              className="load-more"
+              disabled={loadingMore}
+              onClick={() =>
+                loadVoices(true)
+              }
+            >
+              {loadingMore ? (
+                <>
+                  <span className="spinner" />
+                  Loading...
+                </>
+              ) : (
+                "Load more voices"
+              )}
+            </button>
+          )}
+        </aside>
+      </section>
+
+      <footer className="footer">
+        <span>
+          ZUQEN AI Voice Studio
+        </span>
+
+        <span>
+          Powered by ElevenLabs
+        </span>
+      </footer>
 
       <style jsx>{`
-        * {
-          box-sizing: border-box;
-        }
-
         .voice-page {
           min-height: 100vh;
-          position: relative;
-          overflow: hidden;
-          padding: 48px 24px 36px;
           background:
             radial-gradient(
-              circle at 15% 10%,
-              rgba(99, 102, 241, 0.13),
-              transparent 32%
+              circle at 20% 10%,
+              rgba(124, 92, 255, 0.12),
+              transparent 35%
             ),
             radial-gradient(
-              circle at 90% 30%,
-              rgba(168, 85, 247, 0.12),
+              circle at 80% 30%,
+              rgba(0, 210, 255, 0.08),
               transparent 30%
             ),
             #07070b;
-          color: white;
+          color: #f5f5f7;
+          padding: 0 32px 50px;
+          position: relative;
+          overflow: hidden;
         }
 
         .background-glow {
-          position: absolute;
+          position: fixed;
           width: 500px;
           height: 500px;
           border-radius: 50%;
-          filter: blur(130px);
-          opacity: 0.12;
+          filter: blur(120px);
+          opacity: 0.08;
           pointer-events: none;
         }
 
         .glow-one {
-          top: -300px;
-          left: -180px;
-          background: #7c3aed;
+          top: -250px;
+          left: -200px;
+          background: #7c5cff;
         }
 
         .glow-two {
-          right: -200px;
+          right: -250px;
           bottom: -250px;
-          background: #2563eb;
+          background: #00d2ff;
         }
 
-        .voice-container {
-          width: min(1200px, 100%);
-          margin: auto;
-          position: relative;
-          z-index: 2;
-        }
-
-        .voice-header {
+        .topbar {
+          max-width: 1450px;
+          margin: 0 auto;
+          height: 86px;
           display: flex;
           align-items: center;
           justify-content: space-between;
-          gap: 30px;
-          margin-bottom: 34px;
+          border-bottom: 1px solid
+            rgba(255, 255, 255, 0.07);
         }
 
-        .voice-badge {
-          display: inline-flex;
+        .brand {
+          font-size: 18px;
+          font-weight: 900;
+          letter-spacing: 0.12em;
+        }
+
+        .studio-label {
+          color: #777783;
+          font-size: 12px;
+          margin-top: 4px;
+        }
+
+        .model-badge {
+          border: 1px solid
+            rgba(255, 255, 255, 0.1);
+          background: rgba(255, 255, 255, 0.04);
+          padding: 9px 13px;
+          border-radius: 999px;
+          font-size: 12px;
+          color: #bcbcc7;
+          display: flex;
           align-items: center;
           gap: 8px;
-          padding: 7px 12px;
-          border: 1px solid rgba(255,255,255,.1);
-          border-radius: 999px;
-          background: rgba(255,255,255,.04);
-          color: #aaa;
-          font-size: 11px;
-          font-weight: 700;
-          letter-spacing: 1.5px;
         }
 
-        .badge-dot {
-          width: 6px;
-          height: 6px;
+        .status-dot {
+          width: 7px;
+          height: 7px;
           border-radius: 50%;
-          background: #8b5cf6;
-          box-shadow: 0 0 12px #8b5cf6;
+          background: #56e39f;
+          box-shadow: 0 0 12px
+            rgba(86, 227, 159, 0.8);
         }
 
-        .voice-header h1 {
-          margin: 15px 0 8px;
-          font-size: clamp(36px,5vw,58px);
-          line-height: 1;
-          letter-spacing: -2.5px;
+        .hero {
+          max-width: 1450px;
+          margin: 0 auto;
+          padding: 55px 0 35px;
+        }
+
+        .eyebrow {
+          color: #8f78ff;
+          font-size: 11px;
           font-weight: 800;
+          letter-spacing: 0.18em;
+          margin-bottom: 14px;
         }
 
-        .voice-header h1 span {
-          background: linear-gradient(
-            100deg,
-            #a78bfa,
-            #60a5fa
+        .hero h1 {
+          font-size: clamp(
+            38px,
+            5vw,
+            70px
           );
-          -webkit-background-clip: text;
-          background-clip: text;
-          color: transparent;
-        }
-
-        .voice-header p {
+          line-height: 0.98;
+          letter-spacing: -0.055em;
           margin: 0;
-          color: #8f8f99;
+          max-width: 900px;
+        }
+
+        .hero h1 span {
+          color: #8872ff;
+        }
+
+        .hero p {
+          color: #858591;
+          max-width: 600px;
+          line-height: 1.7;
           font-size: 15px;
+          margin-top: 22px;
         }
 
-        .header-mic {
-          width: 74px;
-          height: 74px;
+        .workspace {
+          max-width: 1450px;
+          margin: 0 auto;
           display: grid;
-          place-items: center;
+          grid-template-columns:
+            minmax(0, 1.1fr)
+            minmax(380px, 0.9fr);
+          gap: 22px;
+          align-items: start;
+        }
+
+        .card {
+          border: 1px solid
+            rgba(255, 255, 255, 0.08);
+          background: rgba(
+            15,
+            15,
+            22,
+            0.88
+          );
           border-radius: 22px;
-          border: 1px solid rgba(255,255,255,.1);
-          background: rgba(139,92,246,.12);
-          font-size: 31px;
-        }
-
-        .voice-grid {
-          display: grid;
-          grid-template-columns: minmax(0,1.05fr) minmax(400px,.95fr);
-          gap: 20px;
-        }
-
-        .glass-panel {
-          border: 1px solid rgba(255,255,255,.09);
-          background: rgba(14,14,20,.78);
-          border-radius: 24px;
           box-shadow:
-            inset 0 1px rgba(255,255,255,.04),
-            0 25px 80px rgba(0,0,0,.25);
+            0 20px 80px
+              rgba(0, 0, 0, 0.28);
           backdrop-filter: blur(20px);
         }
 
-        .editor-panel,
-        .voices-panel {
-          padding: 24px;
+        .editor-card {
+          padding: 25px;
         }
 
-        .panel-top {
+        .library-card {
+          padding: 25px;
+          position: sticky;
+          top: 20px;
+        }
+
+        .card-header {
           display: flex;
+          align-items: flex-start;
           justify-content: space-between;
-          gap: 15px;
+          gap: 20px;
           margin-bottom: 18px;
         }
 
-        .panel-top h2 {
-          margin: 0 0 5px;
-          font-size: 17px;
+        .card-header h2 {
+          margin: 0;
+          font-size: 18px;
         }
 
-        .panel-top p {
-          margin: 0;
-          color: #777781;
+        .card-header p {
+          margin: 6px 0 0;
+          color: #777783;
           font-size: 12px;
         }
 
-        .character-count,
-        .voice-count {
-          color: #71717a;
-          font-size: 11px;
+        .character-counter {
+          color: #898994;
+          font-size: 12px;
           white-space: nowrap;
         }
 
         .text-editor {
-          overflow: hidden;
-          border: 1px solid rgba(255,255,255,.08);
-          border-radius: 18px;
-          background: rgba(5,5,9,.65);
-        }
-
-        .text-editor textarea {
-          display: block;
           width: 100%;
-          height: 270px;
-          resize: none;
-          outline: none;
-          border: 0;
+          min-height: 390px;
+          resize: vertical;
+          box-sizing: border-box;
+          border: 1px solid
+            rgba(255, 255, 255, 0.08);
+          background: rgba(
+            255,
+            255,
+            255,
+            0.025
+          );
+          border-radius: 15px;
+          color: #f4f4f6;
           padding: 20px;
-          background: transparent;
-          color: white;
-          font: inherit;
+          outline: none;
           font-size: 15px;
-          line-height: 1.7;
+          line-height: 1.8;
+          font-family: inherit;
+          transition: 0.2s ease;
         }
 
-        .text-editor textarea::placeholder {
-          color: #50505a;
+        .text-editor:focus {
+          border-color: rgba(
+            137,
+            114,
+            255,
+            0.55
+          );
+          box-shadow: 0 0 0 3px
+            rgba(137, 114, 255, 0.08);
+        }
+
+        .text-editor::placeholder {
+          color: #50505b;
         }
 
         .editor-footer {
           display: flex;
           justify-content: space-between;
-          padding: 10px 15px;
-          border-top: 1px solid rgba(255,255,255,.06);
-          color: #55555e;
-          font-size: 10px;
+          gap: 15px;
+          margin: 10px 2px 18px;
+          color: #686873;
+          font-size: 11px;
+        }
+
+        .editor-footer strong {
+          color: #a995ff;
+        }
+
+        .warning-box,
+        .error-box {
+          display: flex;
+          gap: 12px;
+          padding: 14px;
+          border-radius: 13px;
+          margin-bottom: 16px;
+          font-size: 12px;
+        }
+
+        .warning-box {
+          border: 1px solid
+            rgba(255, 184, 77, 0.2);
+          background: rgba(
+            255,
+            184,
+            77,
+            0.06
+          );
+          color: #ffcf87;
+        }
+
+        .warning-box span {
+          color: #a89575;
+        }
+
+        .error-box {
+          border: 1px solid
+            rgba(255, 80, 100, 0.25);
+          background: rgba(
+            255,
+            80,
+            100,
+            0.06
+          );
+          color: #ff9ba8;
+        }
+
+        .error-box p {
+          margin: 5px 0 0;
+          color: #c7848d;
+          line-height: 1.5;
+        }
+
+        .error-icon {
+          width: 22px;
+          height: 22px;
+          flex: 0 0 22px;
+          display: grid;
+          place-items: center;
+          border-radius: 50%;
+          background: rgba(
+            255,
+            80,
+            100,
+            0.15
+          );
+          font-weight: 900;
         }
 
         .selected-voice {
           display: flex;
+          justify-content: space-between;
           align-items: center;
-          gap: 12px;
-          margin-top: 14px;
-          padding: 12px;
-          border: 1px solid rgba(139,92,246,.18);
-          border-radius: 15px;
-          background: rgba(139,92,246,.06);
+          padding: 15px 16px;
+          border: 1px solid
+            rgba(137, 114, 255, 0.2);
+          background: rgba(
+            137,
+            114,
+            255,
+            0.055
+          );
+          border-radius: 14px;
+          margin-bottom: 12px;
         }
 
-        .selected-avatar {
-          width: 38px;
-          height: 38px;
+        .selected-voice > div:first-child {
+          display: flex;
+          flex-direction: column;
+          gap: 3px;
+        }
+
+        .small-label {
+          color: #777783;
+          font-size: 9px;
+          letter-spacing: 0.14em;
+          font-weight: 800;
+        }
+
+        .selected-voice strong {
+          font-size: 14px;
+        }
+
+        .voice-meta {
+          color: #7d7d88;
+          font-size: 10px;
+        }
+
+        .selected-check,
+        .voice-selected {
+          width: 24px;
+          height: 24px;
           display: grid;
           place-items: center;
-          border-radius: 11px;
-          background: rgba(255,255,255,.06);
-        }
-
-        .selected-info {
-          flex: 1;
-        }
-
-        .selected-info span {
-          display: block;
-          color: #666671;
-          font-size: 9px;
-          text-transform: uppercase;
-        }
-
-        .selected-info strong {
-          color: #ddd;
-          font-size: 13px;
-        }
-
-        .change-voice {
-          border: 0;
-          background: transparent;
-          color: #a78bfa;
-          cursor: pointer;
-          font-size: 11px;
-          font-weight: 700;
-        }
-
-        .error-box {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          margin-top: 14px;
-          padding: 11px 13px;
-          border: 1px solid rgba(239,68,68,.2);
-          border-radius: 12px;
-          background: rgba(239,68,68,.06);
-          color: #fca5a5;
-        }
-
-        .error-box p {
-          margin: 0;
-          font-size: 11px;
+          border-radius: 50%;
+          background: #7c5cff;
+          color: white;
+          font-size: 12px;
+          font-weight: 900;
         }
 
         .generate-button {
           width: 100%;
-          min-height: 52px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 10px;
-          margin-top: 16px;
           border: 0;
-          border-radius: 15px;
-          background: linear-gradient(
-            100deg,
-            #7c3aed,
-            #6366f1,
-            #3b82f6
-          );
-          color: white;
-          cursor: pointer;
-          font-size: 13px;
-          font-weight: 800;
-        }
-
-        .generate-button:disabled {
-          opacity: .45;
-          cursor: not-allowed;
-        }
-
-        .spinner,
-        .small-spinner {
-          width: 16px;
-          height: 16px;
-          border: 2px solid rgba(255,255,255,.3);
-          border-top-color: white;
-          border-radius: 50%;
-          animation: spin .8s linear infinite;
-        }
-
-        .small-spinner {
-          width: 13px;
-          height: 13px;
-        }
-
-        .secure-note {
-          margin: 11px 0 0;
-          text-align: center;
-          color: #50505a;
-          font-size: 9px;
-        }
-
-        /* SEARCH */
-
-        .search-box {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          height: 44px;
-          padding: 0 13px;
-          border: 1px solid rgba(255,255,255,.08);
-          border-radius: 13px;
-          background: rgba(5,5,9,.6);
-        }
-
-        .search-box > span {
-          color: #777;
-          font-size: 22px;
-        }
-
-        .search-box input {
-          flex: 1;
-          min-width: 0;
-          outline: none;
-          border: 0;
-          background: transparent;
-          color: white;
-          font-size: 12px;
-        }
-
-        .search-box input::placeholder {
-          color: #55555e;
-        }
-
-        .search-box button {
-          border: 0;
-          background: transparent;
-          color: #777;
-          cursor: pointer;
-          font-size: 18px;
-        }
-
-        /* FILTERS */
-
-        .filters {
-          display: grid;
-          grid-template-columns: repeat(2,1fr);
-          gap: 8px;
-          margin-top: 10px;
-        }
-
-        .filters select,
-        .sort-box select {
-          width: 100%;
-          min-width: 0;
-          height: 36px;
-          padding: 0 9px;
-          outline: none;
-          border: 1px solid rgba(255,255,255,.07);
-          border-radius: 10px;
-          background: #111118;
-          color: #aaa;
-          cursor: pointer;
-          font-size: 10px;
-        }
-
-        .library-tools {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 10px;
-          margin: 13px 0;
-        }
-
-        .reset-button {
-          border: 0;
-          background: transparent;
-          color: #777;
-          cursor: pointer;
-          font-size: 10px;
-        }
-
-        .reset-button:hover {
-          color: #a78bfa;
-        }
-
-        .sort-box {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          color: #666;
-          font-size: 10px;
-        }
-
-        .sort-box select {
-          width: 90px;
-          height: 30px;
-        }
-
-        .sort-box button {
-          width: 30px;
-          height: 30px;
-          border: 1px solid rgba(255,255,255,.07);
-          border-radius: 8px;
-          background: #111118;
-          color: #aaa;
-          cursor: pointer;
-        }
-
-        /* VOICES */
-
-        .voice-list {
-          display: flex;
-          flex-direction: column;
-          gap: 8px;
-          max-height: 440px;
-          overflow-y: auto;
-          padding-right: 3px;
-        }
-
-        .voice-list::-webkit-scrollbar {
-          width: 4px;
-        }
-
-        .voice-list::-webkit-scrollbar-thumb {
-          background: rgba(255,255,255,.1);
-          border-radius: 10px;
-        }
-
-        .voice-card {
-          min-height: 64px;
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          padding: 9px;
-          border: 1px solid rgba(255,255,255,.06);
           border-radius: 14px;
-          background: rgba(255,255,255,.025);
-          cursor: pointer;
-          transition: .2s;
-        }
-
-        .voice-card:hover {
-          background: rgba(255,255,255,.045);
-          border-color: rgba(255,255,255,.12);
-        }
-
-        .voice-card.active {
-          border-color: rgba(139,92,246,.45);
-          background: rgba(139,92,246,.08);
-        }
-
-        .voice-avatar {
-          width: 40px;
-          height: 40px;
-          flex-shrink: 0;
-          display: grid;
-          place-items: center;
-          border-radius: 11px;
+          padding: 15px 18px;
           background: linear-gradient(
-            145deg,
-            rgba(139,92,246,.24),
-            rgba(59,130,246,.15)
+            135deg,
+            #8b72ff,
+            #6b50ed
           );
-          color: #c4b5fd;
-          font-size: 14px;
+          color: white;
           font-weight: 800;
-        }
-
-        .voice-details {
-          flex: 1;
-          min-width: 0;
-        }
-
-        .voice-details strong {
-          display: block;
-          overflow: hidden;
-          color: #e7e7eb;
-          font-size: 12px;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-        }
-
-        .voice-details span {
-          display: block;
-          margin-top: 3px;
-          overflow: hidden;
-          color: #666671;
-          font-size: 9px;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-        }
-
-        .preview-button {
-          width: 31px;
-          height: 31px;
-          flex-shrink: 0;
-          border: 1px solid rgba(255,255,255,.09);
-          border-radius: 10px;
-          background: rgba(255,255,255,.04);
-          color: #aaa;
           cursor: pointer;
-        }
-
-        .preview-button:hover:not(:disabled) {
-          background: rgba(139,92,246,.12);
-          color: #c4b5fd;
-        }
-
-        .preview-button.playing {
-          background: rgba(139,92,246,.15);
-          color: #c4b5fd;
-        }
-
-        .preview-button:disabled {
-          opacity: .25;
-          cursor: not-allowed;
-        }
-
-        .voice-check {
-          width: 20px;
-          color: #a78bfa;
-          font-size: 13px;
-          font-weight: 900;
-          text-align: center;
-        }
-
-        /* LOAD MORE */
-
-        .load-more {
-          width: 100%;
-          height: 42px;
+          font-size: 14px;
           display: flex;
           align-items: center;
           justify-content: center;
           gap: 9px;
-          margin-top: 12px;
-          border: 1px solid rgba(139,92,246,.2);
-          border-radius: 12px;
-          background: rgba(139,92,246,.06);
-          color: #a78bfa;
-          cursor: pointer;
-          font-size: 11px;
-          font-weight: 700;
+          box-shadow: 0 12px 30px
+            rgba(124, 92, 255, 0.2);
+          transition: 0.2s ease;
         }
 
-        .load-more:disabled {
-          opacity: .5;
+        .generate-button:hover:not(
+            :disabled
+          ) {
+          transform: translateY(-1px);
+          box-shadow: 0 15px 35px
+            rgba(124, 92, 255, 0.3);
+        }
+
+        .generate-button:disabled {
+          opacity: 0.45;
           cursor: not-allowed;
+          box-shadow: none;
         }
 
-        .voice-skeleton {
-          height: 64px;
-          border-radius: 14px;
-          background: linear-gradient(
-            90deg,
-            rgba(255,255,255,.025),
-            rgba(255,255,255,.06),
-            rgba(255,255,255,.025)
-          );
-          background-size: 200% 100%;
-          animation: skeleton 1.4s infinite;
+        .sparkle {
+          font-size: 17px;
         }
 
-        .empty-voices {
-          padding: 45px 20px;
-          text-align: center;
-          border: 1px dashed rgba(255,255,255,.1);
-          border-radius: 15px;
+        .spinner {
+          width: 14px;
+          height: 14px;
+          border: 2px solid
+            rgba(255, 255, 255, 0.35);
+          border-top-color: white;
+          border-radius: 50%;
+          animation: spin 0.7s linear infinite;
         }
 
-        .empty-voices > div {
-          font-size: 28px;
-          margin-bottom: 10px;
-        }
-
-        .empty-voices strong {
-          display: block;
-          color: #ddd;
-          font-size: 13px;
-        }
-
-        .empty-voices p {
-          color: #666;
-          font-size: 10px;
-        }
-
-        .empty-voices button {
-          padding: 8px 14px;
-          border: 1px solid rgba(255,255,255,.1);
-          border-radius: 9px;
-          background: rgba(255,255,255,.04);
-          color: #aaa;
-          cursor: pointer;
-          font-size: 10px;
-        }
-
-        .voice-tip {
-          display: flex;
-          gap: 10px;
-          margin-top: 14px;
-          padding: 11px;
-          border-radius: 13px;
-          background: rgba(255,255,255,.025);
-        }
-
-        .voice-tip strong {
-          color: #9999a3;
-          font-size: 10px;
-        }
-
-        .voice-tip p {
-          margin: 3px 0 0;
-          color: #5e5e68;
-          font-size: 9px;
-        }
-
-        /* RESULT */
-
-        .result-panel {
-          display: flex;
-          align-items: center;
-          gap: 15px;
-          margin-top: 20px;
-          padding: 18px 20px;
-        }
-
-        .result-icon {
-          width: 48px;
-          height: 48px;
-          display: grid;
-          place-items: center;
-          border-radius: 14px;
-          background: rgba(139,92,246,.12);
-          font-size: 21px;
-        }
-
-        .result-info {
-          flex: 1;
-        }
-
-        .result-info span {
-          display: block;
-          color: #8b5cf6;
-          font-size: 8px;
-          font-weight: 800;
-          letter-spacing: 1px;
-        }
-
-        .result-info strong {
-          display: block;
-          margin: 3px 0 9px;
-          color: #ddd;
-          font-size: 13px;
-        }
-
-        .audio-player {
-          width: 100%;
-          max-width: 600px;
-          height: 35px;
-        }
-
-        .download-button {
-          padding: 11px 14px;
-          border: 1px solid rgba(255,255,255,.09);
-          border-radius: 11px;
-          background: rgba(255,255,255,.04);
-          color: #ddd;
-          cursor: pointer;
-          font-size: 10px;
-          font-weight: 700;
-        }
-
-        .voice-footer {
-          padding-top: 28px;
-          text-align: center;
-          color: #44444d;
-          font-size: 9px;
-        }
-
-        .voice-footer strong {
-          color: #777781;
+        .spinner.large {
+          width: 22px;
+          height: 22px;
         }
 
         @keyframes spin {
@@ -1887,57 +1502,426 @@ export default function GenerateVoicePage() {
           }
         }
 
-        @keyframes skeleton {
-          0% {
-            background-position: 200% 0;
-          }
-
-          100% {
-            background-position: -200% 0;
-          }
+        .result-card {
+          margin-top: 15px;
+          border: 1px solid
+            rgba(86, 227, 159, 0.15);
+          background: rgba(
+            86,
+            227,
+            159,
+            0.035
+          );
+          border-radius: 15px;
+          padding: 16px;
         }
 
-        @media (max-width: 900px) {
-          .voice-grid {
+        .result-title {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          margin-bottom: 13px;
+        }
+
+        .result-title > div {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+        }
+
+        .success-badge {
+          color: #72e4ad;
+          font-size: 10px;
+          font-weight: 800;
+          padding: 6px 9px;
+          border-radius: 999px;
+          background: rgba(
+            86,
+            227,
+            159,
+            0.08
+          );
+        }
+
+        .audio-player {
+          width: 100%;
+          height: 42px;
+        }
+
+        .download-button {
+          margin-top: 12px;
+          display: block;
+          text-align: center;
+          padding: 10px;
+          border-radius: 10px;
+          background: rgba(
+            255,
+            255,
+            255,
+            0.06
+          );
+          color: #dddde3;
+          text-decoration: none;
+          font-size: 11px;
+          font-weight: 700;
+        }
+
+        .download-button:hover {
+          background: rgba(
+            255,
+            255,
+            255,
+            0.1
+          );
+        }
+
+        .search-box {
+          height: 43px;
+          display: flex;
+          align-items: center;
+          gap: 9px;
+          padding: 0 13px;
+          border-radius: 12px;
+          border: 1px solid
+            rgba(255, 255, 255, 0.08);
+          background: rgba(
+            255,
+            255,
+            255,
+            0.025
+          );
+          margin-bottom: 10px;
+        }
+
+        .search-box span {
+          color: #73737e;
+          font-size: 20px;
+        }
+
+        .search-box input {
+          flex: 1;
+          min-width: 0;
+          background: transparent;
+          border: 0;
+          outline: 0;
+          color: white;
+          font-family: inherit;
+          font-size: 12px;
+        }
+
+        .search-box input::placeholder {
+          color: #565661;
+        }
+
+        .filters {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 7px;
+        }
+
+        .filters select,
+        .library-actions select {
+          min-width: 0;
+          height: 36px;
+          border: 1px solid
+            rgba(255, 255, 255, 0.07);
+          border-radius: 9px;
+          background: #15151d;
+          color: #a9a9b3;
+          padding: 0 9px;
+          font-size: 10px;
+          outline: none;
+        }
+
+        .library-actions {
+          display: flex;
+          gap: 7px;
+          margin: 10px 0;
+        }
+
+        .library-actions select {
+          flex: 1;
+        }
+
+        .sort-button,
+        .reset-button {
+          height: 36px;
+          border-radius: 9px;
+          border: 1px solid
+            rgba(255, 255, 255, 0.07);
+          background: rgba(
+            255,
+            255,
+            255,
+            0.04
+          );
+          color: #aaaab4;
+          padding: 0 10px;
+          cursor: pointer;
+          font-size: 10px;
+        }
+
+        .voices-list {
+          max-height: 590px;
+          overflow-y: auto;
+          padding-right: 3px;
+        }
+
+        .voices-list::-webkit-scrollbar {
+          width: 5px;
+        }
+
+        .voices-list::-webkit-scrollbar-thumb {
+          background: rgba(
+            255,
+            255,
+            255,
+            0.1
+          );
+          border-radius: 99px;
+        }
+
+        .voice-item {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          padding: 10px;
+          border-radius: 12px;
+          border: 1px solid transparent;
+          cursor: pointer;
+          transition: 0.15s ease;
+        }
+
+        .voice-item:hover {
+          background: rgba(
+            255,
+            255,
+            255,
+            0.035
+          );
+        }
+
+        .voice-item.selected {
+          background: rgba(
+            124,
+            92,
+            255,
+            0.07
+          );
+          border-color: rgba(
+            124,
+            92,
+            255,
+            0.2
+          );
+        }
+
+        .voice-avatar {
+          width: 38px;
+          height: 38px;
+          flex: 0 0 38px;
+          display: grid;
+          place-items: center;
+          border-radius: 11px;
+          background: linear-gradient(
+            135deg,
+            rgba(124, 92, 255, 0.28),
+            rgba(0, 210, 255, 0.12)
+          );
+          color: #c7bcff;
+          font-size: 13px;
+          font-weight: 800;
+        }
+
+        .voice-info {
+          flex: 1;
+          min-width: 0;
+          display: flex;
+          flex-direction: column;
+          gap: 3px;
+        }
+
+        .voice-info strong {
+          font-size: 12px;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        .voice-info span {
+          color: #696974;
+          font-size: 9px;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        .preview-button {
+          width: 29px;
+          height: 29px;
+          flex: 0 0 29px;
+          border-radius: 9px;
+          border: 1px solid
+            rgba(255, 255, 255, 0.08);
+          background: rgba(
+            255,
+            255,
+            255,
+            0.04
+          );
+          color: #aaaab5;
+          cursor: pointer;
+          font-size: 10px;
+        }
+
+        .voice-selected {
+          width: 20px;
+          height: 20px;
+          font-size: 10px;
+        }
+
+        .loading-state,
+        .empty-state {
+          min-height: 240px;
+          display: flex;
+          flex-direction: column;
+          justify-content: center;
+          align-items: center;
+          gap: 10px;
+          color: #777783;
+          text-align: center;
+        }
+
+        .empty-icon {
+          width: 45px;
+          height: 45px;
+          display: grid;
+          place-items: center;
+          border-radius: 14px;
+          background: rgba(
+            255,
+            255,
+            255,
+            0.04
+          );
+          font-size: 20px;
+        }
+
+        .empty-state strong {
+          color: #b4b4be;
+          font-size: 13px;
+        }
+
+        .empty-state p {
+          margin: 0;
+          font-size: 11px;
+        }
+
+        .load-more {
+          width: 100%;
+          margin-top: 10px;
+          height: 39px;
+          border-radius: 10px;
+          border: 1px solid
+            rgba(255, 255, 255, 0.08);
+          background: rgba(
+            255,
+            255,
+            255,
+            0.035
+          );
+          color: #aaaab5;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          font-size: 11px;
+        }
+
+        .load-more:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+
+        .voice-count {
+          color: #777783;
+          font-size: 11px;
+          white-space: nowrap;
+        }
+
+        .footer {
+          max-width: 1450px;
+          margin: 45px auto 0;
+          padding-top: 20px;
+          border-top: 1px solid
+            rgba(255, 255, 255, 0.06);
+          display: flex;
+          justify-content: space-between;
+          color: #4e4e58;
+          font-size: 10px;
+        }
+
+        @media (max-width: 1050px) {
+          .workspace {
             grid-template-columns: 1fr;
           }
+
+          .library-card {
+            position: static;
+          }
+
+          .voices-list {
+            max-height: 500px;
+          }
         }
 
-        @media (max-width: 600px) {
+        @media (max-width: 650px) {
           .voice-page {
-            padding: 25px 12px;
+            padding: 0 15px 35px;
           }
 
-          .voice-header h1 {
-            font-size: 38px;
+          .topbar {
+            height: 72px;
           }
 
-          .header-mic {
-            width: 55px;
-            height: 55px;
-            font-size: 23px;
+          .hero {
+            padding: 40px 0 28px;
           }
 
-          .editor-panel,
-          .voices-panel {
-            padding: 16px;
-            border-radius: 19px;
+          .hero h1 {
+            font-size: 42px;
+          }
+
+          .editor-card,
+          .library-card {
+            padding: 17px;
+            border-radius: 17px;
+          }
+
+          .text-editor {
+            min-height: 300px;
           }
 
           .filters {
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: 1fr;
           }
 
-          .result-panel {
+          .library-actions {
             flex-wrap: wrap;
           }
 
-          .result-info {
-            width: calc(100% - 63px);
+          .library-actions select {
+            min-width: 100%;
           }
 
-          .download-button {
-            width: 100%;
+          .footer {
+            flex-direction: column;
+            gap: 7px;
+          }
+
+          .model-badge {
+            display: none;
           }
         }
       `}</style>
