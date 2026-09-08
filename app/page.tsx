@@ -198,29 +198,30 @@ export default function Home() {
   }
 function selectAgent(agent: string) {
   setAgentOpen(false);
-const selectAgent = (agent: string) => {
-  if (agent === "Voice Generator") {
-    window.location.href = "/generate-voice";
-    return;
-  }
 
-  // Baaki existing agents ka code yahin rahega
-};
   if (agent === "Website Builder") {
+    setSelectedAgent(agent);
     router.push("/website-builder");
     return;
   }
 
   if (agent === "Image Generator") {
+    setSelectedAgent(agent);
     router.push("/image-generator");
     return;
   }
-if (agent === "Video Generator") {
-  router.push("/video-generator");
-  return;
-}
 
- 
+  if (agent === "Video Generator") {
+    setSelectedAgent(agent);
+    router.push("/video-generator");
+    return;
+  }
+
+  if (agent === "Voice Generator") {
+    setSelectedAgent(agent);
+    router.push("/generate-voice");
+    return;
+  }
 
   setSelectedAgent(agent);
 }
