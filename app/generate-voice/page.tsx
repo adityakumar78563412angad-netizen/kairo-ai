@@ -30,254 +30,554 @@ type VoicesResponse = {
   error?: string;
 };
 
+type CreditsResponse = {
+  balance?: number;
+  error?: string;
+  code?: string;
+};
+
 const MAX_TEXT_LENGTH = 40000;
 
-// Flash v2.5 is billed at approximately 1 credit per 2 characters.
-// This is only an estimate for UI purposes.
+/*
+ * ElevenLabs Flash v2.5 approximate pricing.
+ * 1 credit ≈ 2 characters.
+ *
+ * This is an estimate shown in the UI.
+ * The backend remains the final authority.
+ */
 const ESTIMATED_CREDITS_PER_CHARACTER = 0.5;
 
 export default function GenerateVoicePage() {
+  /*
+   * --------------------------------------------------
+   * TEXT
+   * --------------------------------------------------
+   */
+
   const [text, setText] = useState("");
 
-  const [voices, setVoices] = useState<Voice[]>([]);
+  /*
+   * --------------------------------------------------
+   * VOICES
+   * --------------------------------------------------
+   */
+
+  const [voices, setVoices] = useState<
+    Voice[]
+  >([]);
+
   const [selectedVoice, setSelectedVoice] =
     useState<Voice | null>(null);
 
-  const [search, setSearch] = useState("");
+  /*
+   * --------------------------------------------------
+   * FILTERS
+   * --------------------------------------------------
+   */
 
-  const [gender, setGender] = useState("all");
-  const [age, setAge] = useState("all");
-  const [language, setLanguage] = useState("all");
-  const [accent, setAccent] = useState("all");
-  const [category, setCategory] = useState("all");
-  const [voiceType, setVoiceType] = useState("all");
+  const [search, setSearch] =
+    useState("");
 
-  const [sort, setSort] = useState("name");
-  const [sortDirection, setSortDirection] =
-    useState("asc");
+  const [gender, setGender] =
+    useState("all");
 
-  const [loadingVoices, setLoadingVoices] =
-    useState(true);
+  const [age, setAge] =
+    useState("all");
 
-  const [loadingMore, setLoadingMore] =
-    useState(false);
+  const [language, setLanguage] =
+    useState("all");
 
-  const [generating, setGenerating] =
-    useState(false);
+  const [accent, setAccent] =
+    useState("all");
 
-  const [previewingVoiceId, setPreviewingVoiceId] =
-    useState<string | null>(null);
+  const [category, setCategory] =
+    useState("all");
 
-  const [audioUrl, setAudioUrl] =
-    useState<string | null>(null);
+  const [voiceType, setVoiceType] =
+    useState("all");
 
-  const [error, setError] = useState("");
+  /*
+   * --------------------------------------------------
+   * SORT
+   * --------------------------------------------------
+   */
 
-  const [hasMore, setHasMore] =
-    useState(false);
+  const [sort, setSort] =
+    useState("name");
 
-  const [nextPageToken, setNextPageToken] =
-    useState<string | null>(null);
+  const [
+    sortDirection,
+    setSortDirection,
+  ] = useState("asc");
 
-  const [totalCount, setTotalCount] =
-    useState(0);
+  /*
+   * --------------------------------------------------
+   * LOADING STATES
+   * --------------------------------------------------
+   */
 
-  const audioRef = useRef<HTMLAudioElement | null>(
-    null
-  );
+  const [
+    loadingVoices,
+    setLoadingVoices,
+  ] = useState(true);
 
-  const searchTimerRef =
-    useRef<ReturnType<typeof setTimeout> | null>(
+  const [
+    loadingMore,
+    setLoadingMore,
+  ] = useState(false);
+
+  const [
+    generating,
+    setGenerating,
+  ] = useState(false);
+
+  const [
+    previewingVoiceId,
+    setPreviewingVoiceId,
+  ] = useState<string | null>(null);
+
+  /*
+   * --------------------------------------------------
+   * CREDITS
+   * --------------------------------------------------
+   */
+
+  const [
+    creditBalance,
+    setCreditBalance,
+  ] = useState<number | null>(null);
+
+  const [
+    loadingCredits,
+    setLoadingCredits,
+  ] = useState(true);
+
+  const [
+    refreshingCredits,
+    setRefreshingCredits,
+  ] = useState(false);
+
+  /*
+   * --------------------------------------------------
+   * AUDIO
+   * --------------------------------------------------
+   */
+
+  const [
+    audioUrl,
+    setAudioUrl,
+  ] = useState<string | null>(null);
+
+  const audioRef =
+    useRef<HTMLAudioElement | null>(
       null
     );
 
-  const textLength = text.length;
+  /*
+   * --------------------------------------------------
+   * PAGINATION
+   * --------------------------------------------------
+   */
 
-  const estimatedCredits = Math.ceil(
-    textLength *
-      ESTIMATED_CREDITS_PER_CHARACTER
+  const [
+    hasMore,
+    setHasMore,
+  ] = useState(false);
+
+  const [
+    nextPageToken,
+    setNextPageToken,
+  ] = useState<string | null>(
+    null
   );
 
+  const [
+    totalCount,
+    setTotalCount,
+  ] = useState(0);
+
+  /*
+   * --------------------------------------------------
+   * ERROR
+   * --------------------------------------------------
+   */
+
+  const [error, setError] =
+    useState("");
+
+  /*
+   * --------------------------------------------------
+   * SEARCH TIMER
+   * --------------------------------------------------
+   */
+
+  const searchTimerRef =
+    useRef<
+      ReturnType<typeof setTimeout> | null
+    >(null);
+
+  /*
+   * --------------------------------------------------
+   * TEXT / CREDIT CALCULATIONS
+   * --------------------------------------------------
+   */
+
+  const textLength =
+    text.length;
+
+  const estimatedCredits =
+    Math.ceil(
+      textLength *
+        ESTIMATED_CREDITS_PER_CHARACTER
+    );
+
   const textIsTooLong =
-    textLength > MAX_TEXT_LENGTH;
+    textLength >
+    MAX_TEXT_LENGTH;
+
+  const remainingAfterGeneration =
+    creditBalance === null
+      ? null
+      : creditBalance -
+        estimatedCredits;
+
+  const hasEnoughCredits =
+    creditBalance !== null &&
+    creditBalance >=
+      estimatedCredits;
+
+  const creditsNeeded =
+    creditBalance === null
+      ? 0
+      : Math.max(
+          estimatedCredits -
+            creditBalance,
+          0
+        );
 
   const canGenerate =
     text.trim().length > 0 &&
     selectedVoice !== null &&
     !generating &&
-    !textIsTooLong;
+    !textIsTooLong &&
+    creditBalance !== null &&
+    hasEnoughCredits;
 
-  const loadVoices = useCallback(
-    async (loadMore = false) => {
-      try {
-        if (loadMore) {
-          setLoadingMore(true);
-        } else {
-          setLoadingVoices(true);
-          setError("");
-        }
+  /*
+   * --------------------------------------------------
+   * LOAD CREDIT BALANCE
+   * --------------------------------------------------
+   */
 
-        const params =
-          new URLSearchParams();
-
-        params.set("page_size", "50");
-
-        if (search.trim()) {
-          params.set(
-            "search",
-            search.trim()
-          );
-        }
-
-        if (gender !== "all") {
-          params.set("gender", gender);
-        }
-
-        if (age !== "all") {
-          params.set("age", age);
-        }
-
-        if (language !== "all") {
-          params.set(
-            "language",
-            language
-          );
-        }
-
-        if (accent !== "all") {
-          params.set(
-            "accent",
-            accent
-          );
-        }
-
-        if (category !== "all") {
-          params.set(
-            "category",
-            category
-          );
-        }
-
-        if (voiceType !== "all") {
-          params.set(
-            "voice_type",
-            voiceType
-          );
-        }
-
-        if (sort) {
-          params.set("sort", sort);
-        }
-
-        if (sortDirection) {
-          params.set(
-            "sort_direction",
-            sortDirection
-          );
-        }
-
-        if (
-          loadMore &&
-          nextPageToken
-        ) {
-          params.set(
-            "next_page_token",
-            nextPageToken
-          );
-        }
-
-        const response = await fetch(
-          `/api/voices?${params.toString()}`,
-          {
-            method: "GET",
-            cache: "no-store",
+  const loadCreditBalance =
+    useCallback(
+      async (
+        silent = false
+      ) => {
+        try {
+          if (silent) {
+            setRefreshingCredits(
+              true
+            );
+          } else {
+            setLoadingCredits(
+              true
+            );
           }
-        );
 
-        const data: VoicesResponse =
-          await response.json();
-
-        if (!response.ok) {
-          throw new Error(
-            data?.error ||
-              "Failed to load voices."
-          );
-        }
-
-        const newVoices =
-          data.voices || [];
-
-        setVoices((current) =>
-          loadMore
-            ? [...current, ...newVoices]
-            : newVoices
-        );
-
-        setHasMore(
-          data.hasMore ?? false
-        );
-
-        setNextPageToken(
-          data.nextPageToken ?? null
-        );
-
-        setTotalCount(
-          data.totalCount ??
-            newVoices.length
-        );
-
-        if (
-          !loadMore &&
-          newVoices.length > 0
-        ) {
-          setSelectedVoice((current) => {
-            if (current) {
-              const stillExists =
-                newVoices.some(
-                  (voice) =>
-                    voice.id ===
-                    current.id
-                );
-
-              if (stillExists) {
-                return current;
+          const response =
+            await fetch(
+              "/api/credits",
+              {
+                method: "GET",
+                cache: "no-store",
               }
-            }
+            );
 
-            return newVoices[0];
-          });
-        }
-      } catch (err) {
-        console.error(
-          "Voice loading error:",
-          err
-        );
+          const data: CreditsResponse =
+            await response.json();
 
-        if (!loadMore) {
-          setError(
-            err instanceof Error
-              ? err.message
-              : "Failed to load voices."
+          if (!response.ok) {
+            throw new Error(
+              data?.error ||
+                "Failed to load credits."
+            );
+          }
+
+          setCreditBalance(
+            Number(
+              data?.balance ?? 0
+            )
+          );
+        } catch (error) {
+          console.error(
+            "Credit balance loading error:",
+            error
+          );
+
+          setCreditBalance(
+            null
+          );
+        } finally {
+          setLoadingCredits(
+            false
+          );
+
+          setRefreshingCredits(
+            false
           );
         }
-      } finally {
-        setLoadingVoices(false);
-        setLoadingMore(false);
-      }
-    },
-    [
-      search,
-      gender,
-      age,
-      language,
-      accent,
-      category,
-      voiceType,
-      sort,
-      sortDirection,
-      nextPageToken,
-    ]
-  );
+      },
+      []
+    );
+
+  /*
+   * --------------------------------------------------
+   * INITIAL CREDIT LOAD
+   * --------------------------------------------------
+   */
+
+  useEffect(() => {
+    loadCreditBalance();
+  }, [
+    loadCreditBalance,
+  ]);
+
+  /*
+   * --------------------------------------------------
+   * LOAD VOICES
+   * --------------------------------------------------
+   */
+
+  const loadVoices =
+    useCallback(
+      async (
+        loadMore = false
+      ) => {
+        try {
+          if (loadMore) {
+            setLoadingMore(
+              true
+            );
+          } else {
+            setLoadingVoices(
+              true
+            );
+            setError("");
+          }
+
+          const params =
+            new URLSearchParams();
+
+          params.set(
+            "page_size",
+            "50"
+          );
+
+          if (search.trim()) {
+            params.set(
+              "search",
+              search.trim()
+            );
+          }
+
+          if (
+            gender !== "all"
+          ) {
+            params.set(
+              "gender",
+              gender
+            );
+          }
+
+          if (age !== "all") {
+            params.set(
+              "age",
+              age
+            );
+          }
+
+          if (
+            language !==
+            "all"
+          ) {
+            params.set(
+              "language",
+              language
+            );
+          }
+
+          if (
+            accent !== "all"
+          ) {
+            params.set(
+              "accent",
+              accent
+            );
+          }
+
+          if (
+            category !==
+            "all"
+          ) {
+            params.set(
+              "category",
+              category
+            );
+          }
+
+          if (
+            voiceType !==
+            "all"
+          ) {
+            params.set(
+              "voice_type",
+              voiceType
+            );
+          }
+
+          if (sort) {
+            params.set(
+              "sort",
+              sort
+            );
+          }
+
+          if (
+            sortDirection
+          ) {
+            params.set(
+              "sort_direction",
+              sortDirection
+            );
+          }
+
+          if (
+            loadMore &&
+            nextPageToken
+          ) {
+            params.set(
+              "next_page_token",
+              nextPageToken
+            );
+          }
+
+          const response =
+            await fetch(
+              `/api/voices?${params.toString()}`,
+              {
+                method: "GET",
+                cache: "no-store",
+              }
+            );
+
+          const data: VoicesResponse =
+            await response.json();
+
+          if (!response.ok) {
+            throw new Error(
+              data?.error ||
+                "Failed to load voices."
+            );
+          }
+
+          const newVoices =
+            data.voices ||
+            [];
+
+          setVoices(
+            (current) =>
+              loadMore
+                ? [
+                    ...current,
+                    ...newVoices,
+                  ]
+                : newVoices
+          );
+
+          setHasMore(
+            data.hasMore ??
+              false
+          );
+
+          setNextPageToken(
+            data.nextPageToken ??
+              null
+          );
+
+          setTotalCount(
+            data.totalCount ??
+              newVoices.length
+          );
+
+          if (
+            !loadMore &&
+            newVoices.length >
+              0
+          ) {
+            setSelectedVoice(
+              (current) => {
+                if (current) {
+                  const stillExists =
+                    newVoices.some(
+                      (voice) =>
+                        voice.id ===
+                        current.id
+                    );
+
+                  if (
+                    stillExists
+                  ) {
+                    return current;
+                  }
+                }
+
+                return newVoices[0];
+              }
+            );
+          }
+        } catch (err) {
+          console.error(
+            "Voice loading error:",
+            err
+          );
+
+          if (!loadMore) {
+            setError(
+              err instanceof Error
+                ? err.message
+                : "Failed to load voices."
+            );
+          }
+        } finally {
+          setLoadingVoices(
+            false
+          );
+
+          setLoadingMore(
+            false
+          );
+        }
+      },
+      [
+        search,
+        gender,
+        age,
+        language,
+        accent,
+        category,
+        voiceType,
+        sort,
+        sortDirection,
+        nextPageToken,
+      ]
+    );
+
+  /*
+   * --------------------------------------------------
+   * VOICE FILTER EFFECT
+   * --------------------------------------------------
+   */
 
   useEffect(() => {
     loadVoices(false);
@@ -292,8 +592,16 @@ export default function GenerateVoicePage() {
     sortDirection,
   ]);
 
+  /*
+   * --------------------------------------------------
+   * SEARCH EFFECT
+   * --------------------------------------------------
+   */
+
   useEffect(() => {
-    if (searchTimerRef.current) {
+    if (
+      searchTimerRef.current
+    ) {
       clearTimeout(
         searchTimerRef.current
       );
@@ -305,13 +613,21 @@ export default function GenerateVoicePage() {
       }, 500);
 
     return () => {
-      if (searchTimerRef.current) {
+      if (
+        searchTimerRef.current
+      ) {
         clearTimeout(
           searchTimerRef.current
         );
       }
     };
   }, [search]);
+
+  /*
+   * --------------------------------------------------
+   * AUDIO CLEANUP
+   * --------------------------------------------------
+   */
 
   useEffect(() => {
     return () => {
@@ -322,6 +638,12 @@ export default function GenerateVoicePage() {
       }
     };
   }, [audioUrl]);
+
+  /*
+   * --------------------------------------------------
+   * CLEAR GENERATED AUDIO
+   * --------------------------------------------------
+   */
 
   const clearGeneratedAudio =
     () => {
@@ -334,99 +656,215 @@ export default function GenerateVoicePage() {
       setAudioUrl(null);
     };
 
-  const handleGenerate = async () => {
-    if (!canGenerate) {
-      return;
-    }
+  /*
+   * --------------------------------------------------
+   * GENERATE VOICE
+   * --------------------------------------------------
+   */
 
-    try {
-      setGenerating(true);
-      setError("");
+  const handleGenerate =
+    async () => {
+      if (!canGenerate) {
+        return;
+      }
 
-      clearGeneratedAudio();
+      try {
+        setGenerating(true);
+        setError("");
 
-      const response = await fetch(
-        "/api/generate-voice",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type":
-              "application/json",
-          },
-          body: JSON.stringify({
-            text: text.trim(),
-            voiceId:
-              selectedVoice.id,
-          }),
-        }
-      );
+        clearGeneratedAudio();
 
-      if (!response.ok) {
-        let data: {
-          error?: string;
-          message?: string;
-          code?: string;
-        } = {};
+        const response =
+          await fetch(
+            "/api/generate-voice",
+            {
+              method: "POST",
 
-        try {
-          data =
-            await response.json();
-        } catch {
-          // Ignore invalid JSON.
-        }
+              headers: {
+                "Content-Type":
+                  "application/json",
+              },
 
-        if (
-          data.code ===
-          "quota_exceeded"
-        ) {
+              body: JSON.stringify({
+                text: text.trim(),
+                voiceId:
+                  selectedVoice.id,
+              }),
+            }
+          );
+
+        if (!response.ok) {
+          let data: {
+            error?: string;
+            message?: string;
+            code?: string;
+            balance?: number;
+            required?: number;
+            missing?: number;
+          } = {};
+
+          try {
+            data =
+              await response.json();
+          } catch {
+            // Ignore invalid JSON.
+          }
+
+          /*
+           * ZUQEN insufficient credits
+           */
+
+          if (
+            data.code ===
+            "insufficient_credits"
+          ) {
+            if (
+              typeof data.balance ===
+              "number"
+            ) {
+              setCreditBalance(
+                data.balance
+              );
+            }
+
+            const required =
+              Number(
+                data.required ??
+                  estimatedCredits
+              );
+
+            const balance =
+              Number(
+                data.balance ??
+                  creditBalance ??
+                  0
+              );
+
+            const missing =
+              Math.max(
+                required -
+                  balance,
+                0
+              );
+
+            throw new Error(
+              `Not enough ZUQEN credits. You need ${missing.toLocaleString()} more credits.`
+            );
+          }
+
+          /*
+           * ElevenLabs quota
+           */
+
+          if (
+            data.code ===
+            "elevenlabs_quota_exceeded"
+          ) {
+            throw new Error(
+              "The ElevenLabs account does not have enough credits for this generation."
+            );
+          }
+
+          /*
+           * Generic error
+           */
+
           throw new Error(
-            "Not enough ElevenLabs credits for this text. Please reduce the text length or add more credits to your ElevenLabs account."
+            data.message ||
+              data.error ||
+              "Failed to generate voice."
           );
         }
 
-        throw new Error(
-          data.message ||
-            data.error ||
-            "Failed to generate voice."
+        /*
+         * Get generated audio
+         */
+
+        const blob =
+          await response.blob();
+
+        if (
+          !blob ||
+          blob.size === 0
+        ) {
+          throw new Error(
+            "The generated audio is empty."
+          );
+        }
+
+        const url =
+          URL.createObjectURL(
+            blob
+          );
+
+        setAudioUrl(url);
+
+        /*
+         * Update ZUQEN balance
+         * from response header.
+         */
+
+        const remainingHeader =
+          response.headers.get(
+            "X-Zuqen-Credits-Remaining"
+          );
+
+        if (
+          remainingHeader
+        ) {
+          const newBalance =
+            Number(
+              remainingHeader
+            );
+
+          if (
+            Number.isFinite(
+              newBalance
+            )
+          ) {
+            setCreditBalance(
+              newBalance
+            );
+          } else {
+            await loadCreditBalance(
+              true
+            );
+          }
+        } else {
+          await loadCreditBalance(
+            true
+          );
+        }
+      } catch (err) {
+        console.error(
+          "Voice generation error:",
+          err
+        );
+
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Failed to generate voice."
+        );
+      } finally {
+        setGenerating(
+          false
         );
       }
+    };
 
-      const blob =
-        await response.blob();
-
-      if (
-        !blob ||
-        blob.size === 0
-      ) {
-        throw new Error(
-          "The generated audio is empty."
-        );
-      }
-
-      const url =
-        URL.createObjectURL(blob);
-
-      setAudioUrl(url);
-    } catch (err) {
-      console.error(
-        "Voice generation error:",
-        err
-      );
-
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Failed to generate voice."
-      );
-    } finally {
-      setGenerating(false);
-    }
-  };
+  /*
+   * --------------------------------------------------
+   * VOICE PREVIEW
+   * --------------------------------------------------
+   */
 
   const handlePreview = (
     voice: Voice
   ) => {
-    if (!voice.previewUrl) {
+    if (
+      !voice.previewUrl
+    ) {
       return;
     }
 
@@ -466,11 +904,13 @@ export default function GenerateVoicePage() {
         );
       };
 
-      audio.play().catch(() => {
-        setPreviewingVoiceId(
-          null
-        );
-      });
+      audio
+        .play()
+        .catch(() => {
+          setPreviewingVoiceId(
+            null
+          );
+        });
     } catch {
       setPreviewingVoiceId(
         null
@@ -478,27 +918,46 @@ export default function GenerateVoicePage() {
     }
   };
 
-  const resetFilters = () => {
-    setSearch("");
-    setGender("all");
-    setAge("all");
-    setLanguage("all");
-    setAccent("all");
-    setCategory("all");
-    setVoiceType("all");
-    setSort("name");
-    setSortDirection("asc");
-  };
+  /*
+   * --------------------------------------------------
+   * RESET FILTERS
+   * --------------------------------------------------
+   */
+
+  const resetFilters =
+    () => {
+      setSearch("");
+      setGender("all");
+      setAge("all");
+      setLanguage("all");
+      setAccent("all");
+      setCategory("all");
+      setVoiceType("all");
+      setSort("name");
+      setSortDirection(
+        "asc"
+      );
+    };
 
   const filteredVoiceCount =
     useMemo(() => {
       return voices.length;
     }, [voices]);
 
+  /*
+   * --------------------------------------------------
+   * UI
+   * --------------------------------------------------
+   */
+
   return (
     <main className="voice-page">
       <div className="background-glow glow-one" />
       <div className="background-glow glow-two" />
+
+      {/* ============================================
+          TOP BAR
+      ============================================ */}
 
       <header className="topbar">
         <div>
@@ -511,11 +970,32 @@ export default function GenerateVoicePage() {
           </div>
         </div>
 
-        <div className="model-badge">
-          <span className="status-dot" />
-          Eleven Flash v2.5
+        <div className="topbar-right">
+          <div className="top-credit-badge">
+            <span className="top-credit-icon">
+              ✦
+            </span>
+
+            <span>
+              {loadingCredits
+                ? "Loading..."
+                : creditBalance ===
+                  null
+                ? "Credits unavailable"
+                : `${creditBalance.toLocaleString()} credits`}
+            </span>
+          </div>
+
+          <div className="model-badge">
+            <span className="status-dot" />
+            Eleven Flash v2.5
+          </div>
         </div>
       </header>
+
+      {/* ============================================
+          HERO
+      ============================================ */}
 
       <section className="hero">
         <div>
@@ -525,22 +1005,36 @@ export default function GenerateVoicePage() {
 
           <h1>
             Turn your text into
-            <span> natural speech.</span>
+            <span>
+              {" "}
+              natural speech.
+            </span>
           </h1>
 
           <p>
-            Write anything, choose a voice,
-            and generate realistic speech
-            using ElevenLabs.
+            Write anything, choose a
+            voice, and generate realistic
+            speech using ElevenLabs.
           </p>
         </div>
       </section>
 
+      {/* ============================================
+          WORKSPACE
+      ============================================ */}
+
       <section className="workspace">
+        {/* ==========================================
+            EDITOR
+        ========================================== */}
+
         <div className="editor-card card">
           <div className="card-header">
             <div>
-              <h2>Text to Speech</h2>
+              <h2>
+                Text to Speech
+              </h2>
+
               <p>
                 Enter the text you want
                 to convert into audio.
@@ -587,11 +1081,16 @@ export default function GenerateVoicePage() {
             )}
           </div>
 
+          {/* ========================================
+              WARNING
+          ======================================== */}
+
           {textIsTooLong && (
             <div className="warning-box">
               <strong>
                 Text is too long.
               </strong>
+
               <span>
                 Please keep the text
                 below{" "}
@@ -600,6 +1099,10 @@ export default function GenerateVoicePage() {
               </span>
             </div>
           )}
+
+          {/* ========================================
+              ERROR
+          ======================================== */}
 
           {error && (
             <div className="error-box">
@@ -612,10 +1115,169 @@ export default function GenerateVoicePage() {
                   Generation failed
                 </strong>
 
-                <p>{error}</p>
+                <p>
+                  {error}
+                </p>
               </div>
             </div>
           )}
+
+          {/* ========================================
+              CREDIT SUMMARY
+          ======================================== */}
+
+          <div className="credit-summary">
+            <div className="credit-summary-header">
+              <div>
+                <span className="small-label">
+                  ZUQEN CREDITS
+                </span>
+
+                <strong>
+                  {loadingCredits
+                    ? "Loading..."
+                    : creditBalance ===
+                      null
+                    ? "Unavailable"
+                    : creditBalance.toLocaleString()}
+                </strong>
+              </div>
+
+              <button
+                type="button"
+                className="credit-refresh"
+                onClick={() =>
+                  loadCreditBalance(
+                    true
+                  )
+                }
+                disabled={
+                  loadingCredits ||
+                  refreshingCredits
+                }
+                title="Refresh credit balance"
+              >
+                {refreshingCredits
+                  ? "↻"
+                  : "⟳"}
+              </button>
+            </div>
+
+            <div className="credit-divider" />
+
+            <div className="credit-row">
+              <span>
+                Available credits
+              </span>
+
+              <strong>
+                {loadingCredits
+                  ? "—"
+                  : creditBalance ===
+                    null
+                  ? "—"
+                  : creditBalance.toLocaleString()}
+              </strong>
+            </div>
+
+            <div className="credit-row">
+              <span>
+                This generation
+              </span>
+
+              <strong>
+                {textLength === 0
+                  ? "0"
+                  : `~${estimatedCredits.toLocaleString()}`}
+              </strong>
+            </div>
+
+            <div className="credit-row remaining-row">
+              <span>
+                Remaining after generation
+              </span>
+
+              <strong
+                className={
+                  remainingAfterGeneration !==
+                    null &&
+                  remainingAfterGeneration <
+                    0
+                    ? "credits-danger"
+                    : ""
+                }
+              >
+                {textLength ===
+                0
+                  ? creditBalance ===
+                    null
+                    ? "—"
+                    : creditBalance.toLocaleString()
+                  : remainingAfterGeneration ===
+                    null
+                  ? "—"
+                  : remainingAfterGeneration >=
+                    0
+                  ? remainingAfterGeneration.toLocaleString()
+                  : `-${Math.abs(
+                      remainingAfterGeneration
+                    ).toLocaleString()}`}
+              </strong>
+            </div>
+
+            {/* ======================================
+                INSUFFICIENT CREDIT WARNING
+            ====================================== */}
+
+            {textLength > 0 &&
+              creditBalance !==
+                null &&
+              !hasEnoughCredits && (
+                <div className="credit-warning">
+                  <span className="credit-warning-icon">
+                    !
+                  </span>
+
+                  <div>
+                    <strong>
+                      Not enough credits
+                    </strong>
+
+                    <p>
+                      You need{" "}
+                      <b>
+                        {creditsNeeded.toLocaleString()}
+                      </b>{" "}
+                      more credits for
+                      this generation.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+            {/* ======================================
+                ESTIMATE NOTE
+            ====================================== */}
+
+            {textLength > 0 &&
+              hasEnoughCredits && (
+                <div className="credit-safe">
+                  <span>
+                    ✓
+                  </span>
+
+                  <p>
+                    You have enough
+                    credits for this
+                    generation.
+                  </p>
+                </div>
+              )}
+          </div>
+
+          {/* ========================================
+              SELECTED VOICE
+          ======================================== */}
 
           <div className="selected-voice">
             <div>
@@ -637,7 +1299,9 @@ export default function GenerateVoicePage() {
                     selectedVoice.accent,
                   ]
                     .filter(Boolean)
-                    .join(" • ")}
+                    .join(
+                      " • "
+                    )}
                 </span>
               )}
             </div>
@@ -647,9 +1311,15 @@ export default function GenerateVoicePage() {
             </div>
           </div>
 
+          {/* ========================================
+              GENERATE BUTTON
+          ======================================== */}
+
           <button
             className="generate-button"
-            disabled={!canGenerate}
+            disabled={
+              !canGenerate
+            }
             onClick={
               handleGenerate
             }
@@ -668,6 +1338,10 @@ export default function GenerateVoicePage() {
               </>
             )}
           </button>
+
+          {/* ========================================
+              RESULT
+          ======================================== */}
 
           {audioUrl && (
             <div className="result-card">
@@ -704,10 +1378,17 @@ export default function GenerateVoicePage() {
           )}
         </div>
 
+        {/* ==========================================
+            VOICE LIBRARY
+        ========================================== */}
+
         <aside className="library-card card">
           <div className="card-header library-header">
             <div>
-              <h2>Voice Library</h2>
+              <h2>
+                Voice Library
+              </h2>
+
               <p>
                 Choose the perfect voice
                 for your content.
@@ -721,8 +1402,14 @@ export default function GenerateVoicePage() {
             </div>
           </div>
 
+          {/* ========================================
+              SEARCH
+          ======================================== */}
+
           <div className="search-box">
-            <span>⌕</span>
+            <span>
+              ⌕
+            </span>
 
             <input
               value={search}
@@ -734,6 +1421,10 @@ export default function GenerateVoicePage() {
               placeholder="Search voices..."
             />
           </div>
+
+          {/* ========================================
+              FILTERS
+          ======================================== */}
 
           <div className="filters">
             <select
@@ -747,12 +1438,15 @@ export default function GenerateVoicePage() {
               <option value="all">
                 All genders
               </option>
+
               <option value="female">
                 Female
               </option>
+
               <option value="male">
                 Male
               </option>
+
               <option value="neutral">
                 Neutral
               </option>
@@ -769,12 +1463,15 @@ export default function GenerateVoicePage() {
               <option value="all">
                 All ages
               </option>
+
               <option value="young">
                 Young
               </option>
+
               <option value="middle-aged">
                 Middle-aged
               </option>
+
               <option value="old">
                 Old
               </option>
@@ -791,36 +1488,47 @@ export default function GenerateVoicePage() {
               <option value="all">
                 All languages
               </option>
+
               <option value="en">
                 English
               </option>
+
               <option value="hi">
                 Hindi
               </option>
+
               <option value="es">
                 Spanish
               </option>
+
               <option value="fr">
                 French
               </option>
+
               <option value="de">
                 German
               </option>
+
               <option value="it">
                 Italian
               </option>
+
               <option value="pt">
                 Portuguese
               </option>
+
               <option value="ja">
                 Japanese
               </option>
+
               <option value="ko">
                 Korean
               </option>
+
               <option value="zh">
                 Chinese
               </option>
+
               <option value="ar">
                 Arabic
               </option>
@@ -837,18 +1545,23 @@ export default function GenerateVoicePage() {
               <option value="all">
                 All accents
               </option>
+
               <option value="american">
                 American
               </option>
+
               <option value="british">
                 British
               </option>
+
               <option value="australian">
                 Australian
               </option>
+
               <option value="indian">
                 Indian
               </option>
+
               <option value="canadian">
                 Canadian
               </option>
@@ -865,15 +1578,19 @@ export default function GenerateVoicePage() {
               <option value="all">
                 All categories
               </option>
+
               <option value="premade">
                 Premade
               </option>
+
               <option value="professional">
                 Professional
               </option>
+
               <option value="cloned">
                 Cloned
               </option>
+
               <option value="generated">
                 Generated
               </option>
@@ -890,23 +1607,32 @@ export default function GenerateVoicePage() {
               <option value="all">
                 All types
               </option>
+
               <option value="default">
                 Default
               </option>
+
               <option value="personal">
                 Personal
               </option>
+
               <option value="community">
                 Community
               </option>
+
               <option value="workspace">
                 Workspace
               </option>
+
               <option value="saved">
                 Saved
               </option>
             </select>
           </div>
+
+          {/* ========================================
+              SORT
+          ======================================== */}
 
           <div className="library-actions">
             <select
@@ -920,6 +1646,7 @@ export default function GenerateVoicePage() {
               <option value="name">
                 Sort by name
               </option>
+
               <option value="created_at">
                 Sort by newest
               </option>
@@ -929,7 +1656,8 @@ export default function GenerateVoicePage() {
               onClick={() =>
                 setSortDirection(
                   (current) =>
-                    current === "asc"
+                    current ===
+                    "asc"
                       ? "desc"
                       : "asc"
                 )
@@ -953,13 +1681,19 @@ export default function GenerateVoicePage() {
             </button>
           </div>
 
+          {/* ========================================
+              VOICE LIST
+          ======================================== */}
+
           <div className="voices-list">
             {loadingVoices ? (
               <div className="loading-state">
                 <span className="spinner large" />
+
                 Loading voices...
               </div>
-            ) : voices.length === 0 ? (
+            ) : voices.length ===
+              0 ? (
               <div className="empty-state">
                 <div className="empty-icon">
                   ♪
@@ -975,95 +1709,113 @@ export default function GenerateVoicePage() {
                 </p>
               </div>
             ) : (
-              voices.map((voice) => {
-                const isSelected =
-                  selectedVoice?.id ===
-                  voice.id;
+              voices.map(
+                (voice) => {
+                  const isSelected =
+                    selectedVoice?.id ===
+                    voice.id;
 
-                const isPreviewing =
-                  previewingVoiceId ===
-                  voice.id;
+                  const isPreviewing =
+                    previewingVoiceId ===
+                    voice.id;
 
-                return (
-                  <div
-                    key={voice.id}
-                    className={`voice-item ${
-                      isSelected
-                        ? "selected"
-                        : ""
-                    }`}
-                    onClick={() =>
-                      setSelectedVoice(
-                        voice
-                      )
-                    }
-                  >
-                    <div className="voice-avatar">
-                      {voice.name
-                        .charAt(0)
-                        .toUpperCase()}
-                    </div>
-
-                    <div className="voice-info">
-                      <strong>
-                        {voice.name}
-                      </strong>
-
-                      <span>
-                        {[
-                          voice.gender,
-                          voice.age,
-                          voice.accent,
-                        ]
-                          .filter(Boolean)
-                          .join(
-                            " • "
-                          ) ||
-                          "AI Voice"}
-                      </span>
-                    </div>
-
-                    {voice.previewUrl && (
-                      <button
-                        className="preview-button"
-                        onClick={(
-                          event
-                        ) => {
-                          event.stopPropagation();
-
-                          handlePreview(
-                            voice
-                          );
-                        }}
-                        title={
-                          isPreviewing
-                            ? "Playing"
-                            : "Preview"
-                        }
-                      >
-                        {isPreviewing
-                          ? "■"
-                          : "▶"}
-                      </button>
-                    )}
-
-                    {isSelected && (
-                      <div className="voice-selected">
-                        ✓
+                  return (
+                    <div
+                      key={
+                        voice.id
+                      }
+                      className={`voice-item ${
+                        isSelected
+                          ? "selected"
+                          : ""
+                      }`}
+                      onClick={() =>
+                        setSelectedVoice(
+                          voice
+                        )
+                      }
+                    >
+                      <div className="voice-avatar">
+                        {voice.name
+                          .charAt(
+                            0
+                          )
+                          .toUpperCase()}
                       </div>
-                    )}
-                  </div>
-                );
-              })
+
+                      <div className="voice-info">
+                        <strong>
+                          {
+                            voice.name
+                          }
+                        </strong>
+
+                        <span>
+                          {[
+                            voice.gender,
+                            voice.age,
+                            voice.accent,
+                          ]
+                            .filter(
+                              Boolean
+                            )
+                            .join(
+                              " • "
+                            ) ||
+                            "AI Voice"}
+                        </span>
+                      </div>
+
+                      {voice.previewUrl && (
+                        <button
+                          className="preview-button"
+                          onClick={(
+                            event
+                          ) => {
+                            event.stopPropagation();
+
+                            handlePreview(
+                              voice
+                            );
+                          }}
+                          title={
+                            isPreviewing
+                              ? "Playing"
+                              : "Preview"
+                          }
+                        >
+                          {isPreviewing
+                            ? "■"
+                            : "▶"}
+                        </button>
+                      )}
+
+                      {isSelected && (
+                        <div className="voice-selected">
+                          ✓
+                        </div>
+                      )}
+                    </div>
+                  );
+                }
+              )
             )}
           </div>
+
+          {/* ========================================
+              LOAD MORE
+          ======================================== */}
 
           {hasMore && (
             <button
               className="load-more"
-              disabled={loadingMore}
+              disabled={
+                loadingMore
+              }
               onClick={() =>
-                loadVoices(true)
+                loadVoices(
+                  true
+                )
               }
             >
               {loadingMore ? (
@@ -1079,6 +1831,10 @@ export default function GenerateVoicePage() {
         </aside>
       </section>
 
+      {/* ============================================
+          FOOTER
+      ============================================ */}
+
       <footer className="footer">
         <span>
           ZUQEN AI Voice Studio
@@ -1088,6 +1844,10 @@ export default function GenerateVoicePage() {
           Powered by ElevenLabs
         </span>
       </footer>
+
+      {/* ============================================
+          STYLES
+      ============================================ */}
 
       <style jsx>{`
         .voice-page {
@@ -1135,10 +1895,11 @@ export default function GenerateVoicePage() {
         .topbar {
           max-width: 1450px;
           margin: 0 auto;
-          height: 86px;
+          min-height: 86px;
           display: flex;
           align-items: center;
           justify-content: space-between;
+          gap: 20px;
           border-bottom: 1px solid
             rgba(255, 255, 255, 0.07);
         }
@@ -1155,10 +1916,45 @@ export default function GenerateVoicePage() {
           margin-top: 4px;
         }
 
+        .topbar-right {
+          display: flex;
+          align-items: center;
+          gap: 9px;
+        }
+
+        .top-credit-badge {
+          border: 1px solid
+            rgba(137, 114, 255, 0.18);
+          background: rgba(
+            124,
+            92,
+            255,
+            0.07
+          );
+          padding: 9px 13px;
+          border-radius: 999px;
+          font-size: 11px;
+          color: #c5bbff;
+          display: flex;
+          align-items: center;
+          gap: 7px;
+          white-space: nowrap;
+        }
+
+        .top-credit-icon {
+          color: #a995ff;
+          font-size: 13px;
+        }
+
         .model-badge {
           border: 1px solid
             rgba(255, 255, 255, 0.1);
-          background: rgba(255, 255, 255, 0.04);
+          background: rgba(
+            255,
+            255,
+            255,
+            0.04
+          );
           padding: 9px 13px;
           border-radius: 999px;
           font-size: 12px;
@@ -1386,6 +2182,199 @@ export default function GenerateVoicePage() {
             0.15
           );
           font-weight: 900;
+        }
+
+        /* ==========================================
+           CREDIT SUMMARY
+        ========================================== */
+
+        .credit-summary {
+          border: 1px solid
+            rgba(137, 114, 255, 0.18);
+          background:
+            linear-gradient(
+              135deg,
+              rgba(124, 92, 255, 0.075),
+              rgba(255, 255, 255, 0.025)
+            );
+          border-radius: 15px;
+          padding: 16px;
+          margin-bottom: 12px;
+        }
+
+        .credit-summary-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 15px;
+        }
+
+        .credit-summary-header > div:first-child {
+          display: flex;
+          flex-direction: column;
+          gap: 5px;
+        }
+
+        .credit-summary-header strong {
+          font-size: 24px;
+          letter-spacing: -0.03em;
+        }
+
+        .credit-refresh {
+          width: 36px;
+          height: 36px;
+          border-radius: 10px;
+          border: 1px solid
+            rgba(255, 255, 255, 0.08);
+          background: rgba(
+            255,
+            255,
+            255,
+            0.045
+          );
+          color: #aaaab5;
+          cursor: pointer;
+          font-size: 17px;
+          transition: 0.2s ease;
+        }
+
+        .credit-refresh:hover:not(
+            :disabled
+          ) {
+          background: rgba(
+            255,
+            255,
+            255,
+            0.08
+          );
+          color: white;
+        }
+
+        .credit-refresh:disabled {
+          opacity: 0.45;
+          cursor: not-allowed;
+        }
+
+        .credit-divider {
+          height: 1px;
+          background: rgba(
+            255,
+            255,
+            255,
+            0.06
+          );
+          margin: 14px 0 10px;
+        }
+
+        .credit-row {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 15px;
+          padding: 7px 0;
+          color: #777783;
+          font-size: 11px;
+        }
+
+        .credit-row strong {
+          color: #bdbdc7;
+          font-size: 12px;
+        }
+
+        .remaining-row {
+          padding-top: 10px;
+          margin-top: 3px;
+          border-top: 1px solid
+            rgba(255, 255, 255, 0.04);
+        }
+
+        .remaining-row strong {
+          color: #a995ff;
+          font-size: 13px;
+        }
+
+        .credits-danger {
+          color: #ff7f8e !important;
+        }
+
+        .credit-warning {
+          display: flex;
+          align-items: flex-start;
+          gap: 10px;
+          margin-top: 12px;
+          padding: 11px;
+          border-radius: 11px;
+          border: 1px solid
+            rgba(255, 80, 100, 0.18);
+          background: rgba(
+            255,
+            80,
+            100,
+            0.055
+          );
+        }
+
+        .credit-warning-icon {
+          width: 20px;
+          height: 20px;
+          flex: 0 0 20px;
+          display: grid;
+          place-items: center;
+          border-radius: 50%;
+          background: rgba(
+            255,
+            80,
+            100,
+            0.15
+          );
+          color: #ff9ba8;
+          font-size: 11px;
+          font-weight: 900;
+        }
+
+        .credit-warning strong {
+          color: #ff9ba8;
+          font-size: 11px;
+        }
+
+        .credit-warning p {
+          margin: 4px 0 0;
+          color: #b87983;
+          font-size: 10px;
+          line-height: 1.5;
+        }
+
+        .credit-warning b {
+          color: #ff9ba8;
+        }
+
+        .credit-safe {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          margin-top: 11px;
+          padding: 9px 10px;
+          border-radius: 10px;
+          background: rgba(
+            86,
+            227,
+            159,
+            0.045
+          );
+          border: 1px solid
+            rgba(86, 227, 159, 0.1);
+        }
+
+        .credit-safe > span {
+          color: #72e4ad;
+          font-weight: 900;
+          font-size: 11px;
+        }
+
+        .credit-safe p {
+          margin: 0;
+          color: #759986;
+          font-size: 10px;
         }
 
         .selected-voice {
@@ -1876,13 +2865,33 @@ export default function GenerateVoicePage() {
           }
         }
 
+        @media (max-width: 750px) {
+          .topbar {
+            align-items: flex-start;
+            padding: 18px 0;
+          }
+
+          .topbar-right {
+            flex-direction: column;
+            align-items: flex-end;
+          }
+
+          .top-credit-badge {
+            font-size: 10px;
+          }
+        }
+
         @media (max-width: 650px) {
           .voice-page {
             padding: 0 15px 35px;
           }
 
           .topbar {
-            height: 72px;
+            min-height: 72px;
+          }
+
+          .model-badge {
+            display: none;
           }
 
           .hero {
@@ -1918,10 +2927,6 @@ export default function GenerateVoicePage() {
           .footer {
             flex-direction: column;
             gap: 7px;
-          }
-
-          .model-badge {
-            display: none;
           }
         }
       `}</style>
