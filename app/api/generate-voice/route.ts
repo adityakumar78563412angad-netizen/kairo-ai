@@ -10,14 +10,18 @@ export async function POST(request: NextRequest) {
 
     if (!text || typeof text !== "string") {
       return NextResponse.json(
-        { error: "Text is required." },
+        {
+          error: "Text is required.",
+        },
         { status: 400 }
       );
     }
 
     if (!voiceId || typeof voiceId !== "string") {
       return NextResponse.json(
-        { error: "Voice ID is required." },
+        {
+          error: "Voice ID is required.",
+        },
         { status: 400 }
       );
     }
@@ -28,10 +32,16 @@ export async function POST(request: NextRequest) {
       console.error("ELEVENLABS_API_KEY is missing.");
 
       return NextResponse.json(
-        { error: "ElevenLabs API key is not configured." },
+        {
+          error: "ElevenLabs API key is not configured.",
+        },
         { status: 500 }
       );
     }
+
+    console.log(
+      `Generating voice: ${text.length} characters, voice: ${voiceId}`
+    );
 
     const elevenlabs = new ElevenLabsClient({
       apiKey,
@@ -50,14 +60,31 @@ export async function POST(request: NextRequest) {
         "Cache-Control": "no-store",
       },
     });
-  } catch (error) {
-    console.error("ElevenLabs generation error:", error);
+  } catch (error: any) {
+    console.error("=================================");
+    console.error("ELEVENLABS GENERATION ERROR");
+    console.error("=================================");
+
+    console.error("Error:", error);
+    console.error("Message:", error?.message);
+    console.error("Status:", error?.statusCode);
+    console.error("Body:", error?.body);
+    console.error("Response:", error?.response);
+
+    let errorMessage = "Failed to generate voice.";
+
+    if (error?.message) {
+      errorMessage = error.message;
+    }
 
     return NextResponse.json(
       {
-        error: "Failed to generate voice.",
+        error: errorMessage,
+        status: error?.statusCode || 500,
       },
-      { status: 500 }
+      {
+        status: error?.statusCode || 500,
+      }
     );
   }
 }
