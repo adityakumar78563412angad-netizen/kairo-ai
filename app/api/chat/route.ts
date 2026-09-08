@@ -5,6 +5,8 @@ import {
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { NextResponse } from "next/server";
 
+import { checkFeatureAccess } from "@/lib/feature-access";
+
 export const runtime = "nodejs";
 
 type Attachment = {
@@ -215,6 +217,45 @@ export async function POST(
   req: Request
 ) {
   try {
+    // =======================================================
+    // 1. ZUQEN FEATURE ACCESS CHECK
+    // =======================================================
+
+    const featureAccess =
+      await checkFeatureAccess("chat");
+
+    if (!featureAccess.allowed) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: featureAccess.message,
+          code: featureAccess.code,
+          feature: "chat",
+        },
+        {
+          status: featureAccess.status,
+        }
+      );
+    }
+
+    console.log(
+      "ZUQEN CHAT ACCESS:",
+      {
+        userId:
+          featureAccess.userId,
+        feature:
+          featureAccess.featureKey,
+        provider:
+          featureAccess.provider,
+        packageType:
+          featureAccess.packageType,
+      }
+    );
+
+    // =======================================================
+    // 2. READ REQUEST BODY
+    // =======================================================
+
     const body =
       await req.json();
 
@@ -229,8 +270,10 @@ export async function POST(
           (m: any) =>
             (m?.role === "user" ||
               m?.role === "assistant") &&
-            typeof m?.content === "string" &&
-            m.content.trim().length > 0
+            typeof m?.content ===
+              "string" &&
+            m.content.trim().length >
+              0
         )
         .map(
           (m: any) => ({
@@ -241,11 +284,14 @@ export async function POST(
         );
 
     const attachments: Attachment[] =
-      Array.isArray(body?.attachments)
+      Array.isArray(
+        body?.attachments
+      )
         ? body.attachments.filter(
             (a: any) =>
               a &&
-              typeof a === "object"
+              typeof a ===
+                "object"
           )
         : [];
 
@@ -264,6 +310,10 @@ export async function POST(
       );
     }
 
+    // =======================================================
+    // 3. GROQ API KEY
+    // =======================================================
+
     const apiKey =
       process.env.GROQ_API_KEY?.trim();
 
@@ -279,17 +329,30 @@ export async function POST(
       );
     }
 
+    // =======================================================
+    // 4. DETECT IMAGE ATTACHMENTS
+    // =======================================================
+
     const imageAttachments =
       attachments.filter(
         isImageAttachment
       );
 
     const hasImages =
-      imageAttachments.length > 0;
+      imageAttachments.length >
+      0;
+
+    // =======================================================
+    // 5. SELECT GROQ MODEL
+    // =======================================================
 
     const model = hasImages
       ? "qwen/qwen3.6-27b"
       : "openai/gpt-oss-120b";
+
+    // =======================================================
+    // 6. SYSTEM PROMPT
+    // =======================================================
 
     const systemPrompt = `
 You are ZUQEN, a helpful, intelligent, friendly and natural AI assistant.
@@ -328,10 +391,14 @@ IMPORTANT:
 Be concise by default, but never omit important information needed to correctly answer the question.
 `;
 
+    // =======================================================
+    // 7. BUILD GROQ MESSAGES
+    // =======================================================
+
     let groqMessages: any[];
 
     if (hasImages) {
-      const imageParts = [];
+      const imageParts: any[] = [];
 
       for (
         const attachment of imageAttachments
@@ -367,12 +434,14 @@ Be concise by default, but never omit important information needed to correctly 
       groqMessages = [
         {
           role: "system",
-          content: systemPrompt,
+          content:
+            systemPrompt,
         },
 
         ...previousMessages.map(
           (message) => ({
-            role: message.role,
+            role:
+              message.role,
             content:
               message.content,
           })
@@ -387,6 +456,7 @@ Be concise by default, but never omit important information needed to correctly 
                 userText ||
                 "Please analyze the attached image.",
             },
+
             ...imageParts,
           ],
         },
@@ -395,12 +465,14 @@ Be concise by default, but never omit important information needed to correctly 
       groqMessages = [
         {
           role: "system",
-          content: systemPrompt,
+          content:
+            systemPrompt,
         },
 
         ...messages.map(
           (message) => ({
-            role: message.role,
+            role:
+              message.role,
             content:
               message.content,
           })
@@ -422,6 +494,10 @@ Be concise by default, but never omit important information needed to correctly 
       "ZUQEN IMAGE COUNT:",
       imageAttachments.length
     );
+
+    // =======================================================
+    // 8. CALL GROQ
+    // =======================================================
 
     const groqResponse =
       await fetch(
@@ -456,15 +532,18 @@ Be concise by default, but never omit important information needed to correctly 
         }
       );
 
-    /**
-     * Even if Groq returns an error,
-     * preserve its rate-limit information
-     * for debugging / future quota handling.
-     */
+    // =======================================================
+    // 9. READ REAL GROQ QUOTA
+    // =======================================================
+
     const groqQuotaHeaders =
       getGroqQuotaHeaders(
         groqResponse
       );
+
+    // =======================================================
+    // 10. HANDLE GROQ ERROR
+    // =======================================================
 
     if (!groqResponse.ok) {
       const errorText =
@@ -493,29 +572,39 @@ Be concise by default, but never omit important information needed to correctly 
           parsed?.error?.message ||
           parsed?.error ||
           errorText;
-      } catch {}
+      } catch {
+        // Keep original error text.
+      }
 
       return NextResponse.json(
         {
+          success: false,
           error:
             `Groq request failed: ${message}`,
-
+          feature:
+            "chat",
+          provider:
+            "groq",
           groqQuota:
             groqQuotaHeaders,
         },
         {
           status:
             groqResponse.status,
-
           headers:
             groqQuotaHeaders,
         }
       );
     }
 
+    // =======================================================
+    // 11. CHECK RESPONSE BODY
+    // =======================================================
+
     if (!groqResponse.body) {
       return NextResponse.json(
         {
+          success: false,
           error:
             "Groq returned no response body.",
         },
@@ -531,6 +620,10 @@ Be concise by default, but never omit important information needed to correctly 
       "GROQ QUOTA:",
       groqQuotaHeaders
     );
+
+    // =======================================================
+    // 12. STREAM GROQ RESPONSE
+    // =======================================================
 
     const encoder =
       new TextEncoder();
@@ -569,10 +662,13 @@ Be concise by default, but never omit important information needed to correctly 
                 );
 
               const lines =
-                buffer.split("\n");
+                buffer.split(
+                  "\n"
+                );
 
               buffer =
-                lines.pop() || "";
+                lines.pop() ||
+                "";
 
               for (
                 const line of lines
@@ -595,7 +691,8 @@ Be concise by default, but never omit important information needed to correctly 
 
                 if (
                   !data ||
-                  data === "[DONE]"
+                  data ===
+                    "[DONE]"
                 ) {
                   continue;
                 }
@@ -662,6 +759,10 @@ Be concise by default, but never omit important information needed to correctly 
         },
       });
 
+    // =======================================================
+    // 13. RESPONSE HEADERS
+    // =======================================================
+
     const responseHeaders =
       new Headers({
         "Content-Type":
@@ -675,12 +776,20 @@ Be concise by default, but never omit important information needed to correctly 
 
         "X-Accel-Buffering":
           "no",
+
+        "X-Zuquen-Provider":
+          "groq",
+
+        "X-Zuquen-Feature":
+          "chat",
+
+        "X-Zuquen-Feature-Access":
+          "granted",
       });
 
-    /**
-     * Forward Groq's REAL quota
-     * to the ZUQEN frontend.
-     */
+    // Forward Groq's REAL quota
+    // information to frontend.
+
     for (
       const [
         headerName,
@@ -695,6 +804,10 @@ Be concise by default, but never omit important information needed to correctly 
       );
     }
 
+    // =======================================================
+    // 14. RETURN STREAM
+    // =======================================================
+
     return new Response(
       stream,
       {
@@ -707,12 +820,13 @@ Be concise by default, but never omit important information needed to correctly 
     error
   ) {
     console.error(
-      "ZUQEN ROUTE ERROR:",
+      "ZUQEN CHAT ROUTE ERROR:",
       error
     );
 
     return NextResponse.json(
       {
+        success: false,
         error:
           error instanceof Error
             ? error.message
