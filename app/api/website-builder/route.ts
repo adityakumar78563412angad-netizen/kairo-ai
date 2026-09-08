@@ -86,7 +86,6 @@ function sleep(ms: number) {
 /* =========================================================
    HTML CLEANER
    ========================================================= */
-
 function cleanHtml(text: string): string {
   let html = text.trim();
 
@@ -94,147 +93,93 @@ function cleanHtml(text: string): string {
     return "";
   }
 
-  /*
-   * Remove markdown fences
-   */
+  // Remove markdown code fences
+  html = html.replace(/^```(?:html|HTML)?\s*/i, "");
+  html = html.replace(/\s*```$/i, "");
 
+  // Remove common AI prefixes
   html = html.replace(
-    /^```html\s*/i,
+    /^(here(?:'s| is)?\s+(?:the\s+)?(?:complete\s+)?html(?:\s+document)?[:\-]?\s*)/i,
     ""
   );
 
-  html = html.replace(
-    /^```\s*/i,
-    ""
-  );
+  html = html.trim();
 
-  html = html.replace(
-    /\s*```$/i,
-    ""
-  );
+  // Find the beginning of the actual HTML document
+  const doctypeMatch = html.match(/<!doctype\s+html>/i);
+  const htmlStart = html.search(/<html[\s>]/i);
 
-  /*
-   * Find the beginning of the HTML document.
-   */
-
-  const lower = html.toLowerCase();
-
-  const doctypeIndex =
-    lower.indexOf("<!doctype");
-
-  const htmlIndex =
-    lower.indexOf("<html");
-
-  if (doctypeIndex !== -1) {
-    html = html.slice(doctypeIndex);
-  } else if (htmlIndex !== -1) {
+  if (doctypeMatch?.index !== undefined) {
+    html = html.slice(doctypeMatch.index);
+  } else if (htmlStart !== -1) {
     html =
       "<!DOCTYPE html>\n" +
-      html.slice(htmlIndex);
+      html.slice(htmlStart);
   }
 
-  /*
-   * Find the end of the HTML document.
-   */
+  // Find the end of the actual HTML document
+  const closingHtmlIndex = html
+    .toLowerCase()
+    .lastIndexOf("</html>");
 
-  const closingIndex =
-    html
-      .toLowerCase()
-      .lastIndexOf("</html>");
-
-  if (closingIndex !== -1) {
+  if (closingHtmlIndex !== -1) {
     html = html.slice(
       0,
-      closingIndex + "</html>".length
+      closingHtmlIndex + "</html>".length
     );
   }
 
   return html.trim();
 }
 
-/* =========================================================
-   HTML VALIDATOR
-   ========================================================= */
-
 function isValidHtml(html: string): boolean {
-  if (!html) {
-    return false;
-  }
-
   const value = html.trim();
 
   if (!value) {
     return false;
   }
 
-  if (
-    !/^<!doctype\s+html>/i.test(value)
-  ) {
+  // Accept either an explicit doctype or a complete HTML document.
+  const hasHtml =
+    /<html[\s>]/i.test(value) &&
+    /<\/html>/i.test(value);
+
+  if (!hasHtml) {
     return false;
   }
 
-  if (
-    !/<html[\s>]/i.test(value)
-  ) {
+  // Head/body are required for Website Builder output.
+  const hasHead =
+    /<head[\s>]/i.test(value) &&
+    /<\/head>/i.test(value);
+
+  const hasBody =
+    /<body[\s>]/i.test(value) &&
+    /<\/body>/i.test(value);
+
+  if (!hasHead || !hasBody) {
     return false;
   }
 
-  if (
-    !/<\/html>/i.test(value)
-  ) {
+  // Never allow the generated site to embed another page.
+  if (/<iframe\b/i.test(value)) {
     return false;
   }
 
-  if (
-    !/<head[\s>]/i.test(value)
-  ) {
+  if (/<object\b/i.test(value)) {
     return false;
   }
 
-  if (
-    !/<\/head>/i.test(value)
-  ) {
-    return false;
-  }
-
-  if (
-    !/<body[\s>]/i.test(value)
-  ) {
-    return false;
-  }
-
-  if (
-    !/<\/body>/i.test(value)
-  ) {
-    return false;
-  }
-
-  /*
-   * The ZUQEN editor already uses an iframe
-   * for preview, so generated HTML must not
-   * create another iframe.
-   */
-
-  if (
-    /<iframe\b/i.test(value)
-  ) {
-    return false;
-  }
-
-  if (
-    /<object\b/i.test(value)
-  ) {
-    return false;
-  }
-
-  if (
-    /<embed\b/i.test(value)
-  ) {
+  if (/<embed\b/i.test(value)) {
     return false;
   }
 
   return true;
 }
+
+
+
+
 
 /* =========================================================
    GENERATE SYSTEM PROMPT
@@ -348,8 +293,19 @@ async function generateWebsite(
           },
         });
 
-      const text =
-        response.text?.trim() || "";
+     const text =
+  response.text || "";
+
+const cleaned =
+  cleanHtml(text);
+
+if (!cleaned) {
+  throw new Error(
+    "Gemini returned an empty response."
+  );
+}
+
+return cleaned;
 
       console.log(
         `ZUQEN Gemini response length: ${text.length}`
@@ -467,8 +423,19 @@ Remember:
           },
         });
 
-      const text =
-        response.text?.trim() || "";
+     const text =
+  response.text || "";
+
+const cleaned =
+  cleanHtml(text);
+
+if (!cleaned) {
+  throw new Error(
+    "Gemini returned an empty response."
+  );
+}
+
+return cleaned;
 
       console.log(
         `ZUQEN Gemini edit response length: ${text.length}`
