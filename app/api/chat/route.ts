@@ -21,9 +21,7 @@ type InputMessage = {
   content: string;
 };
 
-function isImageAttachment(
-  attachment: Attachment
-) {
+function isImageAttachment(attachment: Attachment) {
   const type =
     typeof attachment.type === "string"
       ? attachment.type.toLowerCase()
@@ -40,9 +38,7 @@ function isImageAttachment(
   );
 }
 
-async function getB2SignedUrl(
-  key: string
-) {
+async function getB2SignedUrl(key: string) {
   const applicationKeyId =
     process.env.B2_APPLICATION_KEY_ID?.trim();
 
@@ -66,10 +62,9 @@ async function getB2SignedUrl(
     );
   }
 
-  const regionMatch =
-    endpoint.match(
-      /s3\.([a-z0-9-]+)\.backblazeb2\.com/i
-    );
+  const regionMatch = endpoint.match(
+    /s3\.([a-z0-9-]+)\.backblazeb2\.com/i
+  );
 
   const region =
     regionMatch?.[1] || "us-east-005";
@@ -83,17 +78,11 @@ async function getB2SignedUrl(
     },
   });
 
-  const command =
-    new GetObjectCommand({
-      Bucket: bucketName,
-      Key: key,
-    });
+  const command = new GetObjectCommand({
+    Bucket: bucketName,
+    Key: key,
+  });
 
-  /*
-   * The URL is temporary.
-   * 10 minutes is enough for ZUQEN to read
-   * the image while keeping the object private.
-   */
   return await getSignedUrl(
     s3,
     command,
@@ -108,7 +97,9 @@ async function imageToDataUrl(
 ) {
   if (!attachment.key) {
     throw new Error(
-      `No storage key was found for "${attachment.name || "image"}".`
+      `No storage key was found for "${
+        attachment.name || "image"
+      }".`
     );
   }
 
@@ -180,6 +171,46 @@ async function imageToDataUrl(
   return `data:${contentType};base64,${base64}`;
 }
 
+/**
+ * Reads Groq's real rate-limit information
+ * from the API response headers.
+ */
+function getGroqQuotaHeaders(
+  groqResponse: Response
+) {
+  const quotaHeaders: Record<
+    string,
+    string
+  > = {};
+
+  const headersToRead = [
+    "x-ratelimit-limit-requests",
+    "x-ratelimit-remaining-requests",
+    "x-ratelimit-reset-requests",
+    "x-ratelimit-limit-tokens",
+    "x-ratelimit-remaining-tokens",
+    "x-ratelimit-reset-tokens",
+    "retry-after",
+  ];
+
+  for (
+    const headerName of headersToRead
+  ) {
+    const value =
+      groqResponse.headers.get(
+        headerName
+      );
+
+    if (value) {
+      quotaHeaders[
+        `X-Zuquen-Groq-${headerName}`
+      ] = value;
+    }
+  }
+
+  return quotaHeaders;
+}
+
 export async function POST(
   req: Request
 ) {
@@ -201,10 +232,13 @@ export async function POST(
             typeof m?.content === "string" &&
             m.content.trim().length > 0
         )
-        .map((m: any) => ({
-          role: m.role,
-          content: m.content.trim(),
-        }));
+        .map(
+          (m: any) => ({
+            role: m.role,
+            content:
+              m.content.trim(),
+          })
+        );
 
     const attachments: Attachment[] =
       Array.isArray(body?.attachments)
@@ -224,7 +258,9 @@ export async function POST(
           error:
             "No messages or attachments provided.",
         },
-        { status: 400 }
+        {
+          status: 400,
+        }
       );
     }
 
@@ -237,7 +273,9 @@ export async function POST(
           error:
             "GROQ_API_KEY is missing.",
         },
-        { status: 500 }
+        {
+          status: 500,
+        }
       );
     }
 
@@ -257,6 +295,7 @@ export async function POST(
 You are ZUQEN, a helpful, intelligent, friendly and natural AI assistant.
 
 RESPONSE LENGTH RULES:
+
 - Always match the length of your answer to the user's question.
 - For simple or short questions, give a short and direct answer.
 - Do not give long explanations unless the user asks for detail.
@@ -268,12 +307,14 @@ RESPONSE LENGTH RULES:
 - Never add unnecessary introductions, conclusions, repetition, or filler.
 
 LANGUAGE:
+
 - If the user speaks Hindi, respond in Hindi.
 - If the user speaks Hinglish, respond in natural Hinglish.
 - If the user speaks English, respond in English.
 - Match the user's tone naturally.
 
 IMAGE UNDERSTANDING:
+
 - When an image is attached, analyze the actual visual content of the image.
 - Do not say that you cannot see the image when a valid image has been provided.
 - If the user asks how a picture looks, give a natural opinion based on what is actually visible.
@@ -283,6 +324,7 @@ IMAGE UNDERSTANDING:
 - If the user asks about text in an image, read it when possible.
 
 IMPORTANT:
+
 Be concise by default, but never omit important information needed to correctly answer the question.
 `;
 
@@ -331,7 +373,8 @@ Be concise by default, but never omit important information needed to correctly 
         ...previousMessages.map(
           (message) => ({
             role: message.role,
-            content: message.content,
+            content:
+              message.content,
           })
         ),
 
@@ -344,7 +387,6 @@ Be concise by default, but never omit important information needed to correctly 
                 userText ||
                 "Please analyze the attached image.",
             },
-
             ...imageParts,
           ],
         },
@@ -359,7 +401,8 @@ Be concise by default, but never omit important information needed to correctly 
         ...messages.map(
           (message) => ({
             role: message.role,
-            content: message.content,
+            content:
+              message.content,
           })
         ),
       ];
@@ -413,6 +456,16 @@ Be concise by default, but never omit important information needed to correctly 
         }
       );
 
+    /**
+     * Even if Groq returns an error,
+     * preserve its rate-limit information
+     * for debugging / future quota handling.
+     */
+    const groqQuotaHeaders =
+      getGroqQuotaHeaders(
+        groqResponse
+      );
+
     if (!groqResponse.ok) {
       const errorText =
         await groqResponse.text();
@@ -420,6 +473,11 @@ Be concise by default, but never omit important information needed to correctly 
       console.error(
         "GROQ ERROR:",
         errorText
+      );
+
+      console.error(
+        "GROQ QUOTA:",
+        groqQuotaHeaders
       );
 
       let message =
@@ -441,10 +499,16 @@ Be concise by default, but never omit important information needed to correctly 
         {
           error:
             `Groq request failed: ${message}`,
+
+          groqQuota:
+            groqQuotaHeaders,
         },
         {
           status:
             groqResponse.status,
+
+          headers:
+            groqQuotaHeaders,
         }
       );
     }
@@ -455,9 +519,18 @@ Be concise by default, but never omit important information needed to correctly 
           error:
             "Groq returned no response body.",
         },
-        { status: 500 }
+        {
+          status: 500,
+          headers:
+            groqQuotaHeaders,
+        }
       );
     }
+
+    console.log(
+      "GROQ QUOTA:",
+      groqQuotaHeaders
+    );
 
     const encoder =
       new TextEncoder();
@@ -529,7 +602,9 @@ Be concise by default, but never omit important information needed to correctly 
 
                 try {
                   const parsed =
-                    JSON.parse(data);
+                    JSON.parse(
+                      data
+                    );
 
                   const text =
                     parsed
@@ -587,24 +662,45 @@ Be concise by default, but never omit important information needed to correctly 
         },
       });
 
+    const responseHeaders =
+      new Headers({
+        "Content-Type":
+          "text/event-stream; charset=utf-8",
+
+        "Cache-Control":
+          "no-cache, no-transform",
+
+        Connection:
+          "keep-alive",
+
+        "X-Accel-Buffering":
+          "no",
+      });
+
+    /**
+     * Forward Groq's REAL quota
+     * to the ZUQEN frontend.
+     */
+    for (
+      const [
+        headerName,
+        headerValue,
+      ] of Object.entries(
+        groqQuotaHeaders
+      )
+    ) {
+      responseHeaders.set(
+        headerName,
+        headerValue
+      );
+    }
+
     return new Response(
       stream,
       {
         status: 200,
-
-        headers: {
-          "Content-Type":
-            "text/event-stream; charset=utf-8",
-
-          "Cache-Control":
-            "no-cache, no-transform",
-
-          Connection:
-            "keep-alive",
-
-          "X-Accel-Buffering":
-            "no",
-        },
+        headers:
+          responseHeaders,
       }
     );
   } catch (
@@ -622,7 +718,9 @@ Be concise by default, but never omit important information needed to correctly 
             ? error.message
             : "ZUQEN request failed.",
       },
-      { status: 500 }
+      {
+        status: 500,
+      }
     );
   }
 }
