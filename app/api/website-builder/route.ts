@@ -8,7 +8,6 @@ const GENERATE_COST = 100;
 const EDIT_COST = 50;
 
 const GEMINI_MODELS = [
-  "gemini-2.5-flash",
   "gemini-3.6-flash",
 ];
 
