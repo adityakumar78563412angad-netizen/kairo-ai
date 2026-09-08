@@ -4,8 +4,8 @@ import {
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { NextResponse } from "next/server";
-
 import { checkFeatureAccess } from "@/lib/feature-access";
+import { recordProviderUsage } from "@/lib/provider-usage";
 
 export const runtime = "nodejs";
 
@@ -23,7 +23,19 @@ type InputMessage = {
   content: string;
 };
 
-function isImageAttachment(attachment: Attachment) {
+type GroqUsage = {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+  prompt_time?: number;
+  completion_time?: number;
+  queue_time?: number;
+  total_time?: number;
+};
+
+function isImageAttachment(
+  attachment: Attachment
+) {
   const type =
     typeof attachment.type === "string"
       ? attachment.type.toLowerCase()
@@ -213,6 +225,22 @@ function getGroqQuotaHeaders(
   return quotaHeaders;
 }
 
+function toSafeNumber(
+  value: unknown
+) {
+  if (
+    typeof value !== "number" ||
+    !Number.isFinite(value)
+  ) {
+    return 0;
+  }
+
+  return Math.max(
+    0,
+    Math.floor(value)
+  );
+}
+
 export async function POST(
   req: Request
 ) {
@@ -233,7 +261,8 @@ export async function POST(
           feature: "chat",
         },
         {
-          status: featureAccess.status,
+          status:
+            featureAccess.status,
         }
       );
     }
@@ -268,8 +297,10 @@ export async function POST(
       rawMessages
         .filter(
           (m: any) =>
-            (m?.role === "user" ||
-              m?.role === "assistant") &&
+            (
+              m?.role === "user" ||
+              m?.role === "assistant"
+            ) &&
             typeof m?.content ===
               "string" &&
             m.content.trim().length >
@@ -456,7 +487,6 @@ Be concise by default, but never omit important information needed to correctly 
                 userText ||
                 "Please analyze the attached image.",
             },
-
             ...imageParts,
           ],
         },
@@ -528,6 +558,13 @@ Be concise by default, but never omit important information needed to correctly 
               2048,
 
             stream: true,
+
+            // IMPORTANT:
+            // Ask Groq to include final usage
+            // information in the streaming response.
+            stream_options: {
+              include_usage: true,
+            },
           }),
         }
       );
@@ -591,6 +628,7 @@ Be concise by default, but never omit important information needed to correctly 
         {
           status:
             groqResponse.status,
+
           headers:
             groqQuotaHeaders,
         }
@@ -610,6 +648,7 @@ Be concise by default, but never omit important information needed to correctly 
         },
         {
           status: 500,
+
           headers:
             groqQuotaHeaders,
         }
@@ -640,6 +679,17 @@ Be concise by default, but never omit important information needed to correctly 
             groqResponse.body!.getReader();
 
           let buffer = "";
+
+          let groqUsage:
+            GroqUsage | null =
+            null;
+
+          let groqRequestId:
+            string | null =
+            null;
+
+          let streamCompleted =
+            false;
 
           try {
             while (true) {
@@ -703,6 +753,33 @@ Be concise by default, but never omit important information needed to correctly 
                       data
                     );
 
+                  // -----------------------------------------
+                  // Capture Groq completion/request ID
+                  // -----------------------------------------
+
+                  if (
+                    typeof parsed?.id ===
+                    "string"
+                  ) {
+                    groqRequestId =
+                      parsed.id;
+                  }
+
+                  // -----------------------------------------
+                  // Capture actual usage
+                  // -----------------------------------------
+
+                  if (
+                    parsed?.usage
+                  ) {
+                    groqUsage =
+                      parsed.usage;
+                  }
+
+                  // -----------------------------------------
+                  // Send generated text to frontend
+                  // -----------------------------------------
+
                   const text =
                     parsed
                       ?.choices?.[0]
@@ -735,6 +812,105 @@ Be concise by default, but never omit important information needed to correctly 
               }
             }
 
+            // =================================================
+            // 13. RECORD ACTUAL GROQ USAGE
+            // =================================================
+
+            const inputTokens =
+              toSafeNumber(
+                groqUsage?.prompt_tokens
+              );
+
+            const outputTokens =
+              toSafeNumber(
+                groqUsage?.completion_tokens
+              );
+
+            const totalTokens =
+              toSafeNumber(
+                groqUsage?.total_tokens
+              );
+
+            console.log(
+              "ZUQEN GROQ USAGE:",
+              {
+                requestId:
+                  groqRequestId,
+                inputTokens,
+                outputTokens,
+                totalTokens,
+              }
+            );
+
+            const usageRecord =
+              await recordProviderUsage(
+                {
+                  userId:
+                    featureAccess.userId,
+
+                  featureKey:
+                    "chat",
+
+                  provider:
+                    "groq",
+
+                  model,
+
+                  requestId:
+                    groqRequestId,
+
+                  status:
+                    "success",
+
+                  inputUnits:
+                    inputTokens,
+
+                  outputUnits:
+                    outputTokens,
+
+                  totalUnits:
+                    totalTokens,
+
+                  unitType:
+                    "tokens",
+
+                  metadata: {
+                    hasImages,
+
+                    imageCount:
+                      imageAttachments.length,
+
+                    groqUsage:
+                      groqUsage ??
+                      null,
+
+                    groqQuota:
+                      groqQuotaHeaders,
+
+                    usageAvailable:
+                      Boolean(
+                        groqUsage
+                      ),
+                  },
+                }
+              );
+
+            if (
+              !usageRecord.success
+            ) {
+              console.error(
+                "ZUQEN PROVIDER USAGE RECORD FAILED:",
+                usageRecord.error
+              );
+            }
+
+            streamCompleted =
+              true;
+
+            // =================================================
+            // 14. FINISH STREAM
+            // =================================================
+
             controller.enqueue(
               encoder.encode(
                 "data: [DONE]\n\n"
@@ -750,6 +926,73 @@ Be concise by default, but never omit important information needed to correctly 
               error
             );
 
+            // ===============================================
+            // Record failed provider request
+            // ===============================================
+
+            const failedRecord =
+              await recordProviderUsage(
+                {
+                  userId:
+                    featureAccess.userId,
+
+                  featureKey:
+                    "chat",
+
+                  provider:
+                    "groq",
+
+                  model,
+
+                  requestId:
+                    groqRequestId,
+
+                  status:
+                    "failed",
+
+                  inputUnits:
+                    0,
+
+                  outputUnits:
+                    0,
+
+                  totalUnits:
+                    0,
+
+                  unitType:
+                    "tokens",
+
+                  metadata: {
+                    hasImages,
+
+                    imageCount:
+                      imageAttachments.length,
+
+                    streamCompleted,
+
+                    error:
+                      error instanceof
+                      Error
+                        ? error.message
+                        : String(
+                            error
+                          ),
+
+                    groqQuota:
+                      groqQuotaHeaders,
+                  },
+                }
+              );
+
+            if (
+              !failedRecord.success
+            ) {
+              console.error(
+                "ZUQEN FAILED USAGE RECORD FAILED:",
+                failedRecord.error
+              );
+            }
+
             controller.error(
               error
             );
@@ -760,7 +1003,7 @@ Be concise by default, but never omit important information needed to correctly 
       });
 
     // =======================================================
-    // 13. RESPONSE HEADERS
+    // 15. RESPONSE HEADERS
     // =======================================================
 
     const responseHeaders =
@@ -805,7 +1048,7 @@ Be concise by default, but never omit important information needed to correctly 
     }
 
     // =======================================================
-    // 14. RETURN STREAM
+    // 16. RETURN STREAM
     // =======================================================
 
     return new Response(
