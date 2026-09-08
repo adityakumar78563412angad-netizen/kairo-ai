@@ -1,23 +1,30 @@
 import { NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
+import { createClient } from "@supabase/supabase-js";
 
 import { createServerSupabaseClient } from "@/lib/supabase-server";
+import { checkFeatureAccess } from "@/lib/feature-access";
+import { recordProviderUsage } from "@/lib/provider-usage";
 
 export const maxDuration = 300;
 
 const GEMINI_MODEL = "gemini-3.6-flash";
 
-/* =========================================================
-   GEMINI
-   ========================================================= */
+type WebsiteOperation = "generate" | "edit";
+
+type GeminiUsage = {
+  promptTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  thoughtsTokens: number;
+  cachedTokens: number;
+};
 
 function getGemini() {
   const apiKey = process.env.GEMINI_API_KEY;
 
   if (!apiKey) {
-    throw new Error(
-      "GEMINI_API_KEY is not configured."
-    );
+    throw new Error("GEMINI_API_KEY is missing.");
   }
 
   return new GoogleGenAI({
@@ -25,11 +32,31 @@ function getGemini() {
   });
 }
 
-/* =========================================================
-   ERROR HELPERS
-   ========================================================= */
+function getAdminSupabase() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-function getErrorMessage(error: unknown): string {
+  if (!url) {
+    throw new Error(
+      "NEXT_PUBLIC_SUPABASE_URL is missing."
+    );
+  }
+
+  if (!serviceRoleKey) {
+    throw new Error(
+      "SUPABASE_SERVICE_ROLE_KEY is missing."
+    );
+  }
+
+  return createClient(url, serviceRoleKey, {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
+  });
+}
+
+function getErrorMessage(error: unknown) {
   if (error instanceof Error) {
     return error.message;
   }
@@ -41,89 +68,84 @@ function getErrorMessage(error: unknown): string {
   try {
     return JSON.stringify(error);
   } catch {
-    return "Unknown error.";
+    return "Unknown error";
   }
 }
 
-function getErrorStatus(
-  error: unknown
-): number | null {
-  const message =
-    getErrorMessage(error);
+function getErrorStatus(error: unknown) {
+  const message = getErrorMessage(error).toLowerCase();
 
-  const match = message.match(
-    /\b(400|401|403|404|429|500|502|503|504)\b/
-  );
-
-  if (match) {
-    return Number(match[1]);
+  if (
+    message.includes("api key") ||
+    message.includes("authentication") ||
+    message.includes("unauthorized") ||
+    message.includes("permission")
+  ) {
+    return 401;
   }
 
   if (
-    typeof error === "object" &&
-    error !== null &&
-    "status" in error
+    message.includes("quota") ||
+    message.includes("rate limit") ||
+    message.includes("resource exhausted")
   ) {
-    const status =
-      (error as {
-        status?: unknown;
-      }).status;
-
-    if (
-      typeof status === "number"
-    ) {
-      return status;
-    }
+    return 429;
   }
 
-  return null;
+  if (
+    message.includes("timeout") ||
+    message.includes("timed out")
+  ) {
+    return 504;
+  }
+
+  return 500;
 }
-
-/* =========================================================
-   GEMINI USAGE
-   ========================================================= */
-
-type GeminiUsage = {
-  promptTokens: number;
-  outputTokens: number;
-  totalTokens: number;
-  thoughtsTokens: number;
-  cachedTokens: number;
-};
 
 function readGeminiUsage(
   response: any
 ): GeminiUsage {
-  const usage =
-    response?.usageMetadata;
+  const usage = response?.usageMetadata;
 
-  const promptTokens =
-    Number(
-      usage?.promptTokenCount ?? 0
-    );
+  const promptTokens = Math.max(
+    0,
+    Math.floor(
+      Number(usage?.promptTokenCount ?? 0)
+    )
+  );
 
-  const outputTokens =
-    Number(
-      usage?.candidatesTokenCount ?? 0
-    );
+  const outputTokens = Math.max(
+    0,
+    Math.floor(
+      Number(usage?.candidatesTokenCount ?? 0)
+    )
+  );
 
-  const thoughtsTokens =
-    Number(
-      usage?.thoughtsTokenCount ?? 0
-    );
+  const thoughtsTokens = Math.max(
+    0,
+    Math.floor(
+      Number(usage?.thoughtsTokenCount ?? 0)
+    )
+  );
 
-  const cachedTokens =
-    Number(
-      usage?.cachedContentTokenCount ?? 0
-    );
+  const cachedTokens = Math.max(
+    0,
+    Math.floor(
+      Number(usage?.cachedContentTokenCount ?? 0)
+    )
+  );
 
-  const totalTokens =
-    Number(
-      usage?.totalTokenCount ??
-        promptTokens +
-          outputTokens +
-          thoughtsTokens
-    );
+  const totalTokens = Math.max(
+    0,
+    Math.floor(
+      Number(
+        usage?.totalTokenCount ??
+          promptTokens +
+            outputTokens +
+            thoughtsTokens
+      )
+    )
+  );
 
   return {
     promptTokens,
@@ -134,215 +156,48 @@ function readGeminiUsage(
   };
 }
 
-/* =========================================================
-   HTML CLEANER
-   ========================================================= */
-
-function cleanHtml(
-  text: string
-): string {
-  let html = text.trim();
-
-  if (!html) {
-    return "";
-  }
-
-  // Remove markdown code fences.
-  html = html.replace(
-    /^```html\s*/i,
-    ""
-  );
-
-  html = html.replace(
-    /^```\s*/i,
-    ""
-  );
-
-  html = html.replace(
-    /\s*```$/i,
-    ""
-  );
-
-  // Remove accidental text before HTML.
-  const doctypeIndex =
-    html.search(
-      /<!doctype\s+html>/i
-    );
-
-  const htmlIndex =
-    html.search(
-      /<html[\s>]/i
-    );
-
-  if (doctypeIndex !== -1) {
-    html =
-      html.slice(
-        doctypeIndex
-      );
-  } else if (
-    htmlIndex !== -1
-  ) {
-    html =
-      `<!DOCTYPE html>\n${html.slice(
-        htmlIndex
-      )}`;
-  }
-
-  // Remove anything after </html>.
-  const closingHtmlIndex =
-    html
-      .toLowerCase()
-      .lastIndexOf(
-        "</html>"
-      );
-
-  if (
-    closingHtmlIndex !== -1
-  ) {
-    html =
-      html.slice(
-        0,
-        closingHtmlIndex +
-          "</html>".length
-      );
-  }
-
-  return html.trim();
+function cleanHtml(html: string) {
+  return html
+    .replace(/^```html\s*/i, "")
+    .replace(/^```\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
 }
 
-/* =========================================================
-   HTML VALIDATOR
-   ========================================================= */
-
-function isValidHtml(
-  html: string
-): boolean {
-  const value =
-    html.trim();
-
-  if (!value) {
+function isValidHtml(html: string) {
+  if (!html || html.length < 20) {
     return false;
   }
 
-  const hasHtmlOpen =
-    /<html[\s>]/i.test(
-      value
-    );
+  const lower = html.toLowerCase();
 
-  const hasHtmlClose =
-    /<\/html>/i.test(
-      value
-    );
-
-  if (
-    !hasHtmlOpen ||
-    !hasHtmlClose
-  ) {
-    return false;
-  }
-
-  const hasHeadOpen =
-    /<head[\s>]/i.test(
-      value
-    );
-
-  const hasHeadClose =
-    /<\/head>/i.test(
-      value
-    );
-
-  if (
-    !hasHeadOpen ||
-    !hasHeadClose
-  ) {
-    return false;
-  }
-
-  const hasBodyOpen =
-    /<body[\s>]/i.test(
-      value
-    );
-
-  const hasBodyClose =
-    /<\/body>/i.test(
-      value
-    );
-
-  if (
-    !hasBodyOpen ||
-    !hasBodyClose
-  ) {
-    return false;
-  }
-
-  if (
-    /<iframe\b/i.test(
-      value
-    )
-  ) {
-    return false;
-  }
-
-  if (
-    /<object\b/i.test(
-      value
-    )
-  ) {
-    return false;
-  }
-
-  if (
-    /<embed\b/i.test(
-      value
-    )
-  ) {
-    return false;
-  }
-
-  return true;
+  return (
+    lower.includes("<html") &&
+    lower.includes("</html>") &&
+    lower.includes("<body") &&
+    lower.includes("</body>")
+  );
 }
-
-/* =========================================================
-   GENERATE SYSTEM PROMPT
-   ========================================================= */
 
 const GENERATE_SYSTEM_INSTRUCTION = `
 You are ZUQEN AI Website Builder.
 
-Generate a complete, beautiful and production-quality website.
+Generate a complete, modern and production-quality HTML website.
 
-STRICT OUTPUT RULES:
+Rules:
 
-1. Return ONLY the HTML document.
-2. Start with <!DOCTYPE html>.
-3. Include <html>.
-4. Include <head>.
-5. Include <body>.
-6. End with </html>.
-7. Put CSS inside <style>.
-8. Put JavaScript inside <script>.
-9. Do not use Markdown.
-10. Do not use code fences.
-11. Do not explain anything.
-12. Do not write anything before <!DOCTYPE html>.
-13. Do not write anything after </html>.
-14. Do not use iframe.
-15. Do not use object.
-16. Do not use embed.
-17. Do not use npm packages.
-18. Prefer vanilla HTML, CSS and JavaScript.
-19. Make the website fully responsive.
-20. Make buttons and interactions functional.
-21. Make the design modern, polished and professional.
-22. Use semantic HTML.
-23. Make the website self-contained.
-
-The final response MUST be a complete HTML document.
+1. Return ONLY HTML.
+2. Do not use markdown code fences.
+3. Include <!DOCTYPE html>.
+4. Include <html>, <head> and <body>.
+5. Use a <style> block or inline CSS.
+6. Make the website responsive.
+7. Make the design modern and professional.
+8. Use JavaScript only when necessary.
+9. Do not write explanations outside the HTML.
+10. Do not leave TODO or incomplete placeholders.
+11. Generate the complete website requested by the user.
 `;
-
-/* =========================================================
-   EDIT SYSTEM PROMPT
-   ========================================================= */
 
 const EDIT_SYSTEM_INSTRUCTION = `
 You are ZUQEN AI Website Editor.
@@ -351,250 +206,223 @@ You will receive an existing HTML website and an edit instruction.
 
 Modify the existing website according to the instruction.
 
-STRICT OUTPUT RULES:
+Rules:
 
-1. Return ONLY the complete updated HTML document.
-2. Start with <!DOCTYPE html>.
-3. Include <html>.
-4. Include <head>.
-5. Include <body>.
-6. End with </html>.
-7. Preserve existing useful content.
-8. Preserve existing functionality unless instructed otherwise.
-9. Keep the website responsive.
-10. Keep CSS inside <style>.
-11. Keep JavaScript inside <script>.
-12. Do not use Markdown.
-13. Do not use code fences.
-14. Do not explain anything.
-15. Do not use iframe.
-16. Do not use object.
-17. Do not use embed.
-18. Do not return an HTML fragment.
-
-The final response MUST be a complete HTML document.
+1. Return ONLY the complete updated HTML.
+2. Do not use markdown code fences.
+3. Preserve existing functionality unless requested otherwise.
+4. Preserve existing design where possible.
+5. Make only the requested changes.
+6. Keep the result responsive.
+7. Ensure the result is valid HTML.
+8. Include <!DOCTYPE html>.
+9. Include <html>, <head> and <body>.
 `;
 
-/* =========================================================
-   GENERATE WEBSITE
-   ========================================================= */
-
-async function generateWebsite(
-  prompt: string
-): Promise<{
-  html: string;
-  usage: GeminiUsage;
-}> {
+async function generateWebsite(prompt: string) {
   const ai = getGemini();
 
-  try {
-    console.log(
-      `ZUQEN Website Builder: using ${GEMINI_MODEL}`
-    );
+  const response = await ai.models.generateContent({
+    model: GEMINI_MODEL,
 
-    const response =
-      await ai.models.generateContent({
-        model: GEMINI_MODEL,
-
-        contents: `
+    contents: `
 WEBSITE REQUEST:
 
 ${prompt}
-
-Generate the complete website now.
-
-Return ONLY the complete HTML document.
 `,
 
-        config: {
-          systemInstruction:
-            GENERATE_SYSTEM_INSTRUCTION,
+    config: {
+      systemInstruction: GENERATE_SYSTEM_INSTRUCTION,
+      maxOutputTokens: 16000,
+    },
+  });
 
-          maxOutputTokens: 16000,
-        },
-      });
+  const html = cleanHtml(response.text ?? "");
+  const usage = readGeminiUsage(response);
 
-    const text =
-      response.text || "";
-
-    console.log(
-      `ZUQEN Gemini response length: ${text.length}`
-    );
-
-    if (!text.trim()) {
-      throw new Error(
-        "Gemini returned an empty response."
-      );
-    }
-
-    const cleaned =
-      cleanHtml(text);
-
-    console.log(
-      `ZUQEN cleaned HTML length: ${cleaned.length}`
-    );
-
-    const usage =
-      readGeminiUsage(
-        response
-      );
-
-    console.log(
-      "ZUQEN GEMINI USAGE:",
-      usage
-    );
-
-    return {
-      html: cleaned,
-      usage,
-    };
-  } catch (error) {
-    console.error(
-      "Gemini generation error:",
-      getErrorMessage(error)
-    );
-
-    const status =
-      getErrorStatus(error);
-
-    if (status === 429) {
-      throw new Error(
-        "Gemini API rate limit or quota reached. Please try again shortly."
-      );
-    }
-
-    if (
-      status === 503 ||
-      status === 504
-    ) {
-      throw new Error(
-        "Gemini service is temporarily unavailable. Please try again."
-      );
-    }
-
-    throw new Error(
-      `Gemini generation failed: ${getErrorMessage(
-        error
-      )}`
-    );
-  }
+  return {
+    html,
+    usage,
+  };
 }
-
-/* =========================================================
-   EDIT WEBSITE
-   ========================================================= */
 
 async function editWebsite(
   html: string,
   instruction: string
-): Promise<{
-  html: string;
-  usage: GeminiUsage;
-}> {
+) {
   const ai = getGemini();
 
-  try {
-    console.log(
-      `ZUQEN Website Editor: using ${GEMINI_MODEL}`
-    );
+  const response = await ai.models.generateContent({
+    model: GEMINI_MODEL,
 
-    const response =
-      await ai.models.generateContent({
-        model: GEMINI_MODEL,
-
-        contents: `
-EDIT INSTRUCTION:
-
-${instruction}
-
-CURRENT WEBSITE:
+    contents: `
+EXISTING WEBSITE:
 
 ${html}
 
-Modify the website according to the instruction.
+EDIT INSTRUCTION:
 
-Return ONLY the complete updated HTML document.
+${instruction}
 `,
 
-        config: {
-          systemInstruction:
-            EDIT_SYSTEM_INSTRUCTION,
+    config: {
+      systemInstruction: EDIT_SYSTEM_INSTRUCTION,
+      maxOutputTokens: 16000,
+    },
+  });
 
-          maxOutputTokens: 16000,
+  const updatedHtml = cleanHtml(
+    response.text ?? ""
+  );
+
+  const usage = readGeminiUsage(response);
+
+  return {
+    html: updatedHtml,
+    usage,
+  };
+}
+
+/**
+ * Save Gemini provider usage and feature credit usage.
+ *
+ * This does NOT use the old generic credit_wallets table.
+ */
+async function saveWebsiteUsage({
+  userId,
+  operation,
+  usage,
+  status,
+  outputValid,
+}: {
+  userId: string;
+  operation: WebsiteOperation;
+  usage: GeminiUsage;
+  status: "success" | "failed";
+  outputValid: boolean;
+}) {
+  let providerUsageId: string | null = null;
+
+  /**
+   * ---------------------------------------------
+   * 1. provider_usage
+   * ---------------------------------------------
+   */
+  try {
+    const providerResult = await recordProviderUsage({
+      userId,
+      featureKey: "website_builder",
+      provider: "gemini",
+      model: GEMINI_MODEL,
+      requestId: null,
+
+      status,
+
+      inputUnits: usage.promptTokens,
+      outputUnits: usage.outputTokens,
+      totalUnits: usage.totalTokens,
+
+      unitType: "tokens",
+
+      metadata: {
+        operation,
+        outputValid,
+        promptTokens: usage.promptTokens,
+        outputTokens: usage.outputTokens,
+        totalTokens: usage.totalTokens,
+        thoughtsTokens: usage.thoughtsTokens,
+        cachedTokens: usage.cachedTokens,
+        usageAvailable: usage.totalTokens > 0,
+      },
+    });
+
+    providerUsageId = providerResult.id;
+  } catch (error) {
+    console.error(
+      "PROVIDER USAGE SAVE ERROR:",
+      error
+    );
+  }
+
+  /**
+   * ---------------------------------------------
+   * 2. feature_credit_transactions
+   * ---------------------------------------------
+   *
+   * Successful Gemini usage:
+   * actual tokens are recorded as usage.
+   *
+   * Failed request:
+   * zero usage is recorded.
+   */
+  try {
+    const admin = getAdminSupabase();
+
+    const amount =
+      status === "success"
+        ? -Math.max(
+            0,
+            Math.floor(usage.totalTokens)
+          )
+        : 0;
+
+    const transactionType =
+      status === "success"
+        ? "usage"
+        : "adjustment";
+
+    const { error } = await admin
+      .from("feature_credit_transactions")
+      .insert({
+        user_id: userId,
+
+        feature_key: "website_builder",
+
+        amount,
+
+        transaction_type: transactionType,
+
+        provider: "gemini",
+
+        provider_request_id: null,
+
+        description:
+          status === "success"
+            ? `Gemini ${operation} usage`
+            : `Gemini ${operation} failed request`,
+
+        metadata: {
+          provider: "gemini",
+          model: GEMINI_MODEL,
+          operation,
+          status,
+          outputValid,
+
+          inputTokens: usage.promptTokens,
+          outputTokens: usage.outputTokens,
+          totalTokens: usage.totalTokens,
+          thoughtsTokens: usage.thoughtsTokens,
+          cachedTokens: usage.cachedTokens,
+
+          providerUsageId,
         },
       });
 
-    const text =
-      response.text || "";
-
-    console.log(
-      `ZUQEN Gemini edit response length: ${text.length}`
-    );
-
-    if (!text.trim()) {
-      throw new Error(
-        "Gemini returned an empty response."
+    if (error) {
+      console.error(
+        "FEATURE CREDIT TRANSACTION ERROR:",
+        error
       );
     }
-
-    const cleaned =
-      cleanHtml(text);
-
-    console.log(
-      `ZUQEN cleaned edit HTML length: ${cleaned.length}`
-    );
-
-    const usage =
-      readGeminiUsage(
-        response
-      );
-
-    console.log(
-      "ZUQEN GEMINI EDIT USAGE:",
-      usage
-    );
-
-    return {
-      html: cleaned,
-      usage,
-    };
   } catch (error) {
     console.error(
-      "Gemini edit error:",
-      getErrorMessage(error)
-    );
-
-    const status =
-      getErrorStatus(error);
-
-    if (status === 429) {
-      throw new Error(
-        "Gemini API rate limit or quota reached. Please try again shortly."
-      );
-    }
-
-    if (
-      status === 503 ||
-      status === 504
-    ) {
-      throw new Error(
-        "Gemini service is temporarily unavailable. Please try again."
-      );
-    }
-
-    throw new Error(
-      `Gemini edit failed: ${getErrorMessage(
-        error
-      )}`
+      "FEATURE CREDIT LEDGER ERROR:",
+      error
     );
   }
 }
 
-/* =========================================================
-   AUTHENTICATION
-   ========================================================= */
-
-async function getAuthenticatedSupabase() {
+async function getUser() {
   const supabase =
     await createServerSupabaseClient();
 
@@ -603,428 +431,409 @@ async function getAuthenticatedSupabase() {
     error,
   } = await supabase.auth.getUser();
 
-  if (
-    error ||
-    !user
-  ) {
-    throw new Error(
-      "Authentication required."
-    );
+  if (error || !user) {
+    return null;
   }
 
-  return {
-    supabase,
-    user,
-  };
+  return user;
 }
 
-/* =========================================================
-   POST API
-   ========================================================= */
-
-export async function POST(
-  request: Request
-) {
+export async function POST(request: Request) {
   try {
-    const body =
-      await request.json();
+    const body = await request.json();
 
-    const action =
-      body?.action;
+    const action = body?.action;
 
-    /* -----------------------------------------------------
-       ACTION VALIDATION
-       ----------------------------------------------------- */
-
+    /**
+     * ---------------------------------------------
+     * Validate action
+     * ---------------------------------------------
+     */
     if (
       action !== "generate" &&
       action !== "edit"
     ) {
       return NextResponse.json(
         {
+          success: false,
           error:
-            "Invalid action.",
-
-          code:
-            "invalid_action",
+            "Invalid action. Use generate or edit.",
         },
-        {
-          status: 400,
-        }
+        { status: 400 }
       );
     }
 
-    /* -----------------------------------------------------
-       AUTH
-       ----------------------------------------------------- */
+    /**
+     * ---------------------------------------------
+     * Authentication
+     * ---------------------------------------------
+     */
+    const user = await getUser();
 
-    const {
-      user,
-    } =
-      await getAuthenticatedSupabase();
+    if (!user) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Authentication required.",
+          code: "UNAUTHENTICATED",
+        },
+        { status: 401 }
+      );
+    }
 
-    /* =====================================================
-       GENERATE
-       ===================================================== */
+    /**
+     * ---------------------------------------------
+     * Website Builder feature access
+     * ---------------------------------------------
+     */
+    const access =
+      await checkFeatureAccess(
+        "website_builder"
+      );
 
-    if (
-      action === "generate"
-    ) {
+   if (!access.allowed) {
+  return NextResponse.json(
+    {
+      success: false,
+      error: access.message,
+      code: "FEATURE_ACCESS_DENIED",
+      feature: "website_builder",
+    },
+    { status: 403 }
+  );
+}
+    /**
+     * =============================================
+     * GENERATE WEBSITE
+     * =============================================
+     */
+    if (action === "generate") {
       const prompt =
-        typeof body.prompt ===
-        "string"
+        typeof body.prompt === "string"
           ? body.prompt.trim()
           : "";
 
       if (!prompt) {
         return NextResponse.json(
           {
+            success: false,
             error:
               "Website prompt is required.",
-
-            code:
-              "missing_prompt",
           },
-          {
-            status: 400,
-          }
+          { status: 400 }
         );
       }
 
-      if (
-        prompt.length > 10000
-      ) {
+      if (prompt.length > 10000) {
         return NextResponse.json(
           {
+            success: false,
             error:
-              "Prompt is too long.",
-
-            code:
-              "prompt_too_long",
+              "Website prompt is too long. Maximum 10,000 characters.",
           },
-          {
-            status: 400,
-          }
+          { status: 400 }
         );
       }
 
-      console.log(
-        "ZUQEN Website Builder: generating website..."
+      let result;
+
+      try {
+        result =
+          await generateWebsite(prompt);
+      } catch (error) {
+        await saveWebsiteUsage({
+          userId: user.id,
+          operation: "generate",
+
+          usage: {
+            promptTokens: 0,
+            outputTokens: 0,
+            totalTokens: 0,
+            thoughtsTokens: 0,
+            cachedTokens: 0,
+          },
+
+          status: "failed",
+          outputValid: false,
+        });
+
+        throw error;
+      }
+
+      const valid = isValidHtml(
+        result.html
       );
 
-      const result =
-        await generateWebsite(
-          prompt
-        );
+      /**
+       * Gemini request succeeded.
+       * Save actual provider usage.
+       */
+      await saveWebsiteUsage({
+        userId: user.id,
+        operation: "generate",
+        usage: result.usage,
+        status: "success",
+        outputValid: valid,
+      });
 
-      /* ---------------------------------------------------
-         VALIDATE GENERATED HTML
-         --------------------------------------------------- */
-
-      if (
-        !isValidHtml(
-          result.html
-        )
-      ) {
-        console.error(
-          "Invalid Gemini HTML preview:",
-          result.html.slice(
-            0,
-            3000
-          )
-        );
-
+      if (!valid) {
         return NextResponse.json(
           {
+            success: false,
             error:
-              "Gemini did not return valid HTML.",
-
-            code:
-              "invalid_html",
-
-            geminiUsage:
-              result.usage,
+              "Gemini returned invalid website HTML.",
+            provider: "gemini",
+            feature: "website-builder",
+            usage: result.usage,
           },
           {
             status: 502,
+
+            headers: {
+              "X-Zuquen-Gemini-Model":
+                GEMINI_MODEL,
+
+              "X-Zuquen-Gemini-Input-Tokens":
+                String(
+                  result.usage.promptTokens
+                ),
+
+              "X-Zuquen-Gemini-Output-Tokens":
+                String(
+                  result.usage.outputTokens
+                ),
+
+              "X-Zuquen-Gemini-Total-Tokens":
+                String(
+                  result.usage.totalTokens
+                ),
+            },
           }
         );
       }
-
-      console.log(
-        "ZUQEN WEBSITE GENERATED",
-        {
-          userId:
-            user.id,
-
-          geminiModel:
-            GEMINI_MODEL,
-
-          geminiUsage:
-            result.usage,
-        }
-      );
 
       return NextResponse.json(
         {
           success: true,
-
-          html:
-            result.html,
-
-          provider:
-            "gemini",
-
-          feature:
-            "website-builder",
-
-          usage:
-            result.usage,
+          html: result.html,
+          provider: "gemini",
+          feature: "website-builder",
+          usage: result.usage,
         },
         {
           status: 200,
 
           headers: {
-            "Cache-Control":
-              "no-store, max-age=0",
-
             "X-Zuquen-Gemini-Model":
               GEMINI_MODEL,
 
             "X-Zuquen-Gemini-Input-Tokens":
               String(
-                result.usage
-                  .promptTokens
+                result.usage.promptTokens
               ),
 
             "X-Zuquen-Gemini-Output-Tokens":
               String(
-                result.usage
-                  .outputTokens
+                result.usage.outputTokens
               ),
 
             "X-Zuquen-Gemini-Total-Tokens":
               String(
-                result.usage
-                  .totalTokens
+                result.usage.totalTokens
               ),
           },
         }
       );
     }
 
-    /* =====================================================
-       EDIT
-       ===================================================== */
-
-    const instruction =
-      typeof body.instruction ===
-      "string"
-        ? body.instruction.trim()
-        : typeof body.prompt ===
-          "string"
-        ? body.prompt.trim()
-        : "";
+    /**
+     * =============================================
+     * EDIT WEBSITE
+     * =============================================
+     */
 
     const html =
-      typeof body.html ===
-      "string"
+      typeof body.html === "string"
         ? body.html.trim()
         : "";
 
-    if (!instruction) {
-      return NextResponse.json(
-        {
-          error:
-            "Edit instruction is required.",
-
-          code:
-            "missing_instruction",
-        },
-        {
-          status: 400,
-        }
-      );
-    }
+    const instruction =
+      typeof body.prompt === "string"
+        ? body.prompt.trim()
+        : typeof body.instruction === "string"
+          ? body.instruction.trim()
+          : "";
 
     if (!html) {
       return NextResponse.json(
         {
+          success: false,
           error:
             "Existing HTML is required.",
-
-          code:
-            "missing_html",
         },
-        {
-          status: 400,
-        }
+        { status: 400 }
       );
     }
 
-    if (
-      instruction.length > 5000
-    ) {
+    if (!instruction) {
       return NextResponse.json(
         {
+          success: false,
           error:
-            "Edit instruction is too long.",
-
-          code:
-            "instruction_too_long",
+            "Edit instruction is required.",
         },
-        {
-          status: 400,
-        }
+        { status: 400 }
       );
     }
 
-    console.log(
-      "ZUQEN Website Editor: editing website..."
+    if (instruction.length > 5000) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "Edit instruction is too long. Maximum 5,000 characters.",
+        },
+        { status: 400 }
+      );
+    }
+
+    if (html.length > 500000) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "HTML is too large. Maximum 500,000 characters.",
+        },
+        { status: 400 }
+      );
+    }
+
+    let result;
+
+    try {
+      result =
+        await editWebsite(
+          html,
+          instruction
+        );
+    } catch (error) {
+      await saveWebsiteUsage({
+        userId: user.id,
+        operation: "edit",
+
+        usage: {
+          promptTokens: 0,
+          outputTokens: 0,
+          totalTokens: 0,
+          thoughtsTokens: 0,
+          cachedTokens: 0,
+        },
+
+        status: "failed",
+        outputValid: false,
+      });
+
+      throw error;
+    }
+
+    const valid = isValidHtml(
+      result.html
     );
 
-    const result =
-      await editWebsite(
-        html,
-        instruction
-      );
+    /**
+     * Save actual Gemini usage.
+     */
+    await saveWebsiteUsage({
+      userId: user.id,
+      operation: "edit",
+      usage: result.usage,
+      status: "success",
+      outputValid: valid,
+    });
 
-    /* ---------------------------------------------------
-       VALIDATE EDITED HTML
-       --------------------------------------------------- */
-
-    if (
-      !isValidHtml(
-        result.html
-      )
-    ) {
-      console.error(
-        "Invalid Gemini edit HTML preview:",
-        result.html.slice(
-          0,
-          3000
-        )
-      );
-
+    if (!valid) {
       return NextResponse.json(
         {
+          success: false,
           error:
-            "Gemini did not return valid HTML.",
-
-          code:
-            "invalid_html",
-
-          geminiUsage:
-            result.usage,
+            "Gemini returned invalid edited HTML.",
+          provider: "gemini",
+          feature: "website-builder",
+          usage: result.usage,
         },
         {
           status: 502,
+
+          headers: {
+            "X-Zuquen-Gemini-Model":
+              GEMINI_MODEL,
+
+            "X-Zuquen-Gemini-Input-Tokens":
+              String(
+                result.usage.promptTokens
+              ),
+
+            "X-Zuquen-Gemini-Output-Tokens":
+              String(
+                result.usage.outputTokens
+              ),
+
+            "X-Zuquen-Gemini-Total-Tokens":
+              String(
+                result.usage.totalTokens
+              ),
+          },
         }
       );
     }
-
-    console.log(
-      "ZUQEN WEBSITE EDITED",
-      {
-        userId:
-          user.id,
-
-        geminiModel:
-          GEMINI_MODEL,
-
-        geminiUsage:
-          result.usage,
-      }
-    );
 
     return NextResponse.json(
       {
         success: true,
-
-        html:
-          result.html,
-
-        provider:
-          "gemini",
-
-        feature:
-          "website-builder",
-
-        usage:
-          result.usage,
+        html: result.html,
+        provider: "gemini",
+        feature: "website-builder",
+        usage: result.usage,
       },
       {
         status: 200,
 
         headers: {
-          "Cache-Control":
-            "no-store, max-age=0",
-
           "X-Zuquen-Gemini-Model":
             GEMINI_MODEL,
 
           "X-Zuquen-Gemini-Input-Tokens":
             String(
-              result.usage
-                .promptTokens
+              result.usage.promptTokens
             ),
 
           "X-Zuquen-Gemini-Output-Tokens":
             String(
-              result.usage
-                .outputTokens
+              result.usage.outputTokens
             ),
 
           "X-Zuquen-Gemini-Total-Tokens":
             String(
-              result.usage
-                .totalTokens
+              result.usage.totalTokens
             ),
         },
       }
     );
-  } catch (
-    error
-  ) {
+  } catch (error) {
     console.error(
-      "ZUQEN Website Builder API error:",
+      "WEBSITE BUILDER API ERROR:",
       error
     );
 
-    const message =
-      getErrorMessage(
-        error
-      );
-
-    if (
-      message.includes(
-        "Authentication required"
-      )
-    ) {
-      return NextResponse.json(
-        {
-          error:
-            "Authentication required.",
-
-          code:
-            "authentication_required",
-        },
-        {
-          status: 401,
-        }
-      );
-    }
-
     return NextResponse.json(
       {
-        error:
-          message,
-
-        code:
-          "website_builder_error",
+        success: false,
+        error: getErrorMessage(error),
+        provider: "gemini",
+        feature: "website-builder",
       },
       {
-        status: 500,
+        status: getErrorStatus(error),
       }
     );
   }
