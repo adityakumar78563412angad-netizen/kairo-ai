@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useEffect, useRef, useState } from "react";
@@ -8,80 +7,316 @@ type Voice = {
   name: string;
   description: string;
   previewUrl: string | null;
+  gender: string | null;
+  age: string | null;
+  accent: string | null;
+  language: string | null;
+  locale: string | null;
+  category: string | null;
+  voiceType: string | null;
 };
 
 export default function GenerateVoicePage() {
   const [text, setText] = useState("");
   const [voices, setVoices] = useState<Voice[]>([]);
-  const [selectedVoice, setSelectedVoice] = useState("");
-  const [loadingVoices, setLoadingVoices] = useState(true);
-  const [generating, setGenerating] = useState(false);
-  const [error, setError] = useState("");
-  const [audioUrl, setAudioUrl] = useState("");
-  const [playingPreview, setPlayingPreview] = useState<string | null>(null);
 
-  const previewAudioRef = useRef<HTMLAudioElement | null>(null);
+  const [selectedVoice, setSelectedVoice] =
+    useState("");
+
+  const [loadingVoices, setLoadingVoices] =
+    useState(true);
+
+  const [loadingMore, setLoadingMore] =
+    useState(false);
+
+  const [generating, setGenerating] =
+    useState(false);
+
+  const [error, setError] =
+    useState("");
+
+  const [audioUrl, setAudioUrl] =
+    useState("");
+
+  const [playingPreview, setPlayingPreview] =
+    useState<string | null>(null);
+
+  const [search, setSearch] =
+    useState("");
+
+  const [gender, setGender] =
+    useState("all");
+
+  const [age, setAge] =
+    useState("all");
+
+  const [language, setLanguage] =
+    useState("all");
+
+  const [accent, setAccent] =
+    useState("all");
+
+  const [category, setCategory] =
+    useState("all");
+
+  const [voiceType, setVoiceType] =
+    useState("all");
+
+  const [sort, setSort] =
+    useState("name");
+
+  const [sortDirection, setSortDirection] =
+    useState("asc");
+
+  const [hasMore, setHasMore] =
+    useState(false);
+
+  const [nextPageToken, setNextPageToken] =
+    useState<string | null>(null);
+
+  const [totalCount, setTotalCount] =
+    useState(0);
+
+  const previewAudioRef =
+    useRef<HTMLAudioElement | null>(null);
+
+  const searchTimerRef =
+    useRef<NodeJS.Timeout | null>(null);
 
   const maxCharacters = 5000;
 
   useEffect(() => {
-    loadVoices();
+    loadVoices(false);
 
     return () => {
+      previewAudioRef.current?.pause();
+
       if (audioUrl) {
         URL.revokeObjectURL(audioUrl);
+      }
+
+      if (searchTimerRef.current) {
+        clearTimeout(searchTimerRef.current);
       }
     };
   }, []);
 
-  async function loadVoices() {
+  async function loadVoices(
+    loadMore = false
+  ) {
     try {
-      setLoadingVoices(true);
-      setError("");
+      if (loadMore) {
+        setLoadingMore(true);
+      } else {
+        setLoadingVoices(true);
+        setError("");
+      }
 
-      const response = await fetch("/api/voices");
+      const params = new URLSearchParams();
+
+      params.set("page_size", "50");
+
+      if (search.trim()) {
+        params.set(
+          "search",
+          search.trim()
+        );
+      }
+
+      if (gender !== "all") {
+        params.set("gender", gender);
+      }
+
+      if (age !== "all") {
+        params.set("age", age);
+      }
+
+      if (language !== "all") {
+        params.set(
+          "language",
+          language
+        );
+      }
+
+      if (accent !== "all") {
+        params.set(
+          "accent",
+          accent
+        );
+      }
+
+      if (category !== "all") {
+        params.set(
+          "category",
+          category
+        );
+      }
+
+      if (voiceType !== "all") {
+        params.set(
+          "voice_type",
+          voiceType
+        );
+      }
+
+      params.set("sort", sort);
+      params.set(
+        "sort_direction",
+        sortDirection
+      );
+
+      if (
+        loadMore &&
+        nextPageToken
+      ) {
+        params.set(
+          "next_page_token",
+          nextPageToken
+        );
+      }
+
+      const response = await fetch(
+        `/api/voices?${params.toString()}`,
+        {
+          cache: "no-store",
+        }
+      );
 
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data?.error || "Failed to load voices.");
+        throw new Error(
+          data?.error ||
+            "Failed to load voices."
+        );
       }
 
-      const loadedVoices: Voice[] = data.voices || [];
+      const loadedVoices =
+        data.voices || [];
 
-      setVoices(loadedVoices);
+      if (loadMore) {
+        setVoices((current) => [
+          ...current,
+          ...loadedVoices,
+        ]);
+      } else {
+        setVoices(loadedVoices);
 
-      if (loadedVoices.length > 0) {
-        setSelectedVoice(loadedVoices[0].id);
+        if (
+          loadedVoices.length > 0 &&
+          !selectedVoice
+        ) {
+          setSelectedVoice(
+            loadedVoices[0].id
+          );
+        }
       }
+
+      setHasMore(
+        data.hasMore ?? false
+      );
+
+      setNextPageToken(
+        data.nextPageToken ?? null
+      );
+
+      setTotalCount(
+        data.totalCount ??
+          loadedVoices.length
+      );
     } catch (err) {
       console.error(err);
 
       setError(
         err instanceof Error
           ? err.message
-          : "Failed to load ElevenLabs voices."
+          : "Failed to load voices."
       );
     } finally {
       setLoadingVoices(false);
+      setLoadingMore(false);
     }
   }
 
-  function handlePreview(voice: Voice) {
+  function applyFilters() {
+    setNextPageToken(null);
+    setHasMore(false);
+    loadVoices(false);
+  }
+
+  function handleSearchChange(
+    value: string
+  ) {
+    setSearch(value);
+
+    if (searchTimerRef.current) {
+      clearTimeout(searchTimerRef.current);
+    }
+
+    searchTimerRef.current =
+      setTimeout(() => {
+        setNextPageToken(null);
+        loadVoices(false);
+      }, 500);
+  }
+
+  function handleFilterChange(
+    setter: (
+      value: string
+    ) => void,
+    value: string
+  ) {
+    setter(value);
+
+    setNextPageToken(null);
+
+    setTimeout(() => {
+      loadVoices(false);
+    }, 0);
+  }
+
+  function resetFilters() {
+    setSearch("");
+    setGender("all");
+    setAge("all");
+    setLanguage("all");
+    setAccent("all");
+    setCategory("all");
+    setVoiceType("all");
+    setSort("name");
+    setSortDirection("asc");
+    setNextPageToken(null);
+    setHasMore(false);
+
+    setTimeout(() => {
+      loadVoices(false);
+    }, 0);
+  }
+
+  function handlePreview(
+    voice: Voice
+  ) {
     if (!voice.previewUrl) {
       return;
     }
 
-    if (playingPreview === voice.id) {
+    if (
+      playingPreview === voice.id
+    ) {
       previewAudioRef.current?.pause();
+
       previewAudioRef.current = null;
+
       setPlayingPreview(null);
+
       return;
     }
 
     previewAudioRef.current?.pause();
 
-    const audio = new Audio(voice.previewUrl);
+    const audio = new Audio(
+      voice.previewUrl
+    );
 
     previewAudioRef.current = audio;
 
@@ -93,22 +328,31 @@ export default function GenerateVoicePage() {
     audio.onerror = () => {
       setPlayingPreview(null);
       previewAudioRef.current = null;
-      setError("Unable to play this voice preview.");
+
+      setError(
+        "Unable to play this voice preview."
+      );
     };
 
     audio.play();
 
-    setPlayingPreview(voice.id);
+    setPlayingPreview(
+      voice.id
+    );
   }
 
   async function generateVoice() {
     if (!text.trim()) {
-      setError("Please enter some text first.");
+      setError(
+        "Please enter some text first."
+      );
       return;
     }
 
     if (!selectedVoice) {
-      setError("Please select a voice.");
+      setError(
+        "Please select a voice."
+      );
       return;
     }
 
@@ -117,40 +361,55 @@ export default function GenerateVoicePage() {
       setError("");
 
       if (audioUrl) {
-        URL.revokeObjectURL(audioUrl);
+        URL.revokeObjectURL(
+          audioUrl
+        );
+
         setAudioUrl("");
       }
 
-      const response = await fetch("/api/generate-voice", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          text: text.trim(),
-          voiceId: selectedVoice,
-        }),
-      });
+      const response =
+        await fetch(
+          "/api/generate-voice",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+            body: JSON.stringify({
+              text: text.trim(),
+              voiceId:
+                selectedVoice,
+            }),
+          }
+        );
 
       if (!response.ok) {
-        let message = "Failed to generate voice.";
+        let message =
+          "Failed to generate voice.";
 
         try {
-          const data = await response.json();
+          const data =
+            await response.json();
 
           if (data?.error) {
             message = data.error;
           }
         } catch {
-          // Ignore JSON parsing errors.
+          // Ignore
         }
 
         throw new Error(message);
       }
 
-      const blob = await response.blob();
+      const blob =
+        await response.blob();
 
-      const url = URL.createObjectURL(blob);
+      const url =
+        URL.createObjectURL(
+          blob
+        );
 
       setAudioUrl(url);
     } catch (err) {
@@ -159,7 +418,7 @@ export default function GenerateVoicePage() {
       setError(
         err instanceof Error
           ? err.message
-          : "Something went wrong while generating the voice."
+          : "Something went wrong."
       );
     } finally {
       setGenerating(false);
@@ -171,27 +430,41 @@ export default function GenerateVoicePage() {
       return;
     }
 
-    const link = document.createElement("a");
+    const link =
+      document.createElement(
+        "a"
+      );
 
     link.href = audioUrl;
-    link.download = "zuqen-ai-voice.mp3";
+    link.download =
+      "zuqen-ai-voice.mp3";
 
-    document.body.appendChild(link);
+    document.body.appendChild(
+      link
+    );
+
     link.click();
-    document.body.removeChild(link);
+
+    document.body.removeChild(
+      link
+    );
   }
 
-  const selectedVoiceData = voices.find(
-    (voice) => voice.id === selectedVoice
-  );
+  const selectedVoiceData =
+    voices.find(
+      (voice) =>
+        voice.id ===
+        selectedVoice
+    );
 
   return (
     <main className="voice-page">
-      <div className="voice-background-glow glow-one" />
-      <div className="voice-background-glow glow-two" />
+      <div className="background-glow glow-one" />
+      <div className="background-glow glow-two" />
 
       <div className="voice-container">
-        {/* Header */}
+        {/* HEADER */}
+
         <header className="voice-header">
           <div>
             <div className="voice-badge">
@@ -200,33 +473,42 @@ export default function GenerateVoicePage() {
             </div>
 
             <h1>
-              AI Voice
-              <span> Generator</span>
+              AI Voice{" "}
+              <span>Generator</span>
             </h1>
 
             <p>
-              Turn your text into natural, expressive AI speech with
-              high-quality voices.
+              Create natural, expressive
+              AI voices with ZUQEN.
             </p>
           </div>
 
           <div className="header-mic">
-            <span>🎙️</span>
+            🎙️
           </div>
         </header>
 
-        {/* Main Grid */}
+        {/* MAIN */}
+
         <div className="voice-grid">
-          {/* Left */}
+          {/* EDITOR */}
+
           <section className="editor-panel glass-panel">
             <div className="panel-top">
               <div>
-                <h2>Write your script</h2>
-                <p>Enter the text you want ZUQEN AI to speak.</p>
+                <h2>
+                  Write your script
+                </h2>
+
+                <p>
+                  Enter the text you
+                  want ZUQEN to speak.
+                </p>
               </div>
 
               <div className="character-count">
-                {text.length.toLocaleString()} /{" "}
+                {text.length.toLocaleString()}
+                {" / "}
                 {maxCharacters.toLocaleString()}
               </div>
             </div>
@@ -234,27 +516,30 @@ export default function GenerateVoicePage() {
             <div className="text-editor">
               <textarea
                 value={text}
-                onChange={(event) => {
-                  if (event.target.value.length <= maxCharacters) {
-                    setText(event.target.value);
-                  }
-                }}
+                maxLength={
+                  maxCharacters
+                }
+                onChange={(event) =>
+                  setText(
+                    event.target.value
+                  )
+                }
                 placeholder="Type or paste your text here..."
-                spellCheck={false}
               />
 
               <div className="editor-footer">
                 <span>
-                  {text.length === 0
-                    ? "Start writing your script"
-                    : "Ready to generate"}
+                  {text.length
+                    ? "Ready to generate"
+                    : "Start writing your script"}
                 </span>
 
-                <span>AI Voice</span>
+                <span>
+                  AI Voice
+                </span>
               </div>
             </div>
 
-            {/* Selected voice */}
             {selectedVoiceData && (
               <div className="selected-voice">
                 <div className="selected-avatar">
@@ -262,45 +547,55 @@ export default function GenerateVoicePage() {
                 </div>
 
                 <div className="selected-info">
-                  <span>Selected voice</span>
-                  <strong>{selectedVoiceData.name}</strong>
+                  <span>
+                    Selected voice
+                  </span>
+
+                  <strong>
+                    {
+                      selectedVoiceData.name
+                    }
+                  </strong>
                 </div>
 
                 <button
                   type="button"
                   className="change-voice"
-                  onClick={() => {
+                  onClick={() =>
                     document
-                      .getElementById("voice-library")
+                      .getElementById(
+                        "voice-library"
+                      )
                       ?.scrollIntoView({
-                        behavior: "smooth",
+                        behavior:
+                          "smooth",
                         block: "center",
-                      });
-                  }}
+                      })
+                  }
                 >
                   Change
                 </button>
               </div>
             )}
 
-            {/* Error */}
             {error && (
               <div className="error-box">
                 <span>!</span>
+
                 <p>{error}</p>
               </div>
             )}
 
-            {/* Generate */}
             <button
               type="button"
               className="generate-button"
-              onClick={generateVoice}
+              onClick={
+                generateVoice
+              }
               disabled={
                 generating ||
                 !text.trim() ||
-                !selectedVoice ||
-                loadingVoices
+                !selectedVoice
               }
             >
               {generating ? (
@@ -310,33 +605,363 @@ export default function GenerateVoicePage() {
                 </>
               ) : (
                 <>
-                  <span className="sparkle">✦</span>
+                  <span>✦</span>
                   Generate Voice
-                  <span className="arrow">→</span>
+                  <span>→</span>
                 </>
               )}
             </button>
 
             <p className="secure-note">
-              🔒 Your ElevenLabs API key stays securely on the server.
+              🔒 Your ElevenLabs API
+              key stays securely on
+              the server.
             </p>
           </section>
 
-          {/* Right */}
+          {/* VOICE LIBRARY */}
+
           <section
             className="voices-panel glass-panel"
             id="voice-library"
           >
             <div className="panel-top">
               <div>
-                <h2>Choose a voice</h2>
-                <p>Select the voice that fits your content.</p>
+                <h2>
+                  Voice Library
+                </h2>
+
+                <p>
+                  Search and filter
+                  available voices.
+                </p>
               </div>
 
               <div className="voice-count">
-                {loadingVoices ? "..." : voices.length}
+                {totalCount || voices.length}
               </div>
             </div>
+
+            {/* SEARCH */}
+
+            <div className="search-box">
+              <span>⌕</span>
+
+              <input
+                value={search}
+                onChange={(event) =>
+                  handleSearchChange(
+                    event.target.value
+                  )
+                }
+                placeholder="Search voices..."
+              />
+
+              {search && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearch("");
+                    setTimeout(
+                      () =>
+                        loadVoices(
+                          false
+                        ),
+                      0
+                    );
+                  }}
+                >
+                  ×
+                </button>
+              )}
+            </div>
+
+            {/* FILTERS */}
+
+            <div className="filters">
+              <select
+                value={gender}
+                onChange={(event) =>
+                  handleFilterChange(
+                    setGender,
+                    event.target.value
+                  )
+                }
+              >
+                <option value="all">
+                  Gender: All
+                </option>
+
+                <option value="female">
+                  Female
+                </option>
+
+                <option value="male">
+                  Male
+                </option>
+
+                <option value="neutral">
+                  Neutral
+                </option>
+              </select>
+
+              <select
+                value={age}
+                onChange={(event) =>
+                  handleFilterChange(
+                    setAge,
+                    event.target.value
+                  )
+                }
+              >
+                <option value="all">
+                  Age: All
+                </option>
+
+                <option value="young">
+                  Young
+                </option>
+
+                <option value="middle-aged">
+                  Middle Aged
+                </option>
+
+                <option value="old">
+                  Old
+                </option>
+              </select>
+
+              <select
+                value={language}
+                onChange={(event) =>
+                  handleFilterChange(
+                    setLanguage,
+                    event.target.value
+                  )
+                }
+              >
+                <option value="all">
+                  Language: All
+                </option>
+
+                <option value="en">
+                  English
+                </option>
+
+                <option value="hi">
+                  Hindi
+                </option>
+
+                <option value="es">
+                  Spanish
+                </option>
+
+                <option value="fr">
+                  French
+                </option>
+
+                <option value="de">
+                  German
+                </option>
+
+                <option value="it">
+                  Italian
+                </option>
+
+                <option value="pt">
+                  Portuguese
+                </option>
+
+                <option value="ja">
+                  Japanese
+                </option>
+
+                <option value="ko">
+                  Korean
+                </option>
+
+                <option value="zh">
+                  Chinese
+                </option>
+
+                <option value="ar">
+                  Arabic
+                </option>
+              </select>
+
+              <select
+                value={accent}
+                onChange={(event) =>
+                  handleFilterChange(
+                    setAccent,
+                    event.target.value
+                  )
+                }
+              >
+                <option value="all">
+                  Accent: All
+                </option>
+
+                <option value="American">
+                  American
+                </option>
+
+                <option value="British">
+                  British
+                </option>
+
+                <option value="Australian">
+                  Australian
+                </option>
+
+                <option value="Indian">
+                  Indian
+                </option>
+
+                <option value="Canadian">
+                  Canadian
+                </option>
+              </select>
+
+              <select
+                value={category}
+                onChange={(event) =>
+                  handleFilterChange(
+                    setCategory,
+                    event.target.value
+                  )
+                }
+              >
+                <option value="all">
+                  Category: All
+                </option>
+
+                <option value="premade">
+                  Premade
+                </option>
+
+                <option value="professional">
+                  Professional
+                </option>
+
+                <option value="cloned">
+                  Cloned
+                </option>
+
+                <option value="generated">
+                  Generated
+                </option>
+              </select>
+
+              <select
+                value={voiceType}
+                onChange={(event) =>
+                  handleFilterChange(
+                    setVoiceType,
+                    event.target.value
+                  )
+                }
+              >
+                <option value="all">
+                  Type: All
+                </option>
+
+                <option value="default">
+                  Default
+                </option>
+
+                <option value="personal">
+                  Personal
+                </option>
+
+                <option value="community">
+                  Community
+                </option>
+
+                <option value="workspace">
+                  Workspace
+                </option>
+
+                <option value="saved">
+                  Saved
+                </option>
+              </select>
+            </div>
+
+            {/* SORT */}
+
+            <div className="library-tools">
+              <button
+                type="button"
+                className="reset-button"
+                onClick={
+                  resetFilters
+                }
+              >
+                Reset filters
+              </button>
+
+              <div className="sort-box">
+                <span>
+                  Sort:
+                </span>
+
+                <select
+                  value={sort}
+                  onChange={(event) => {
+                    setSort(
+                      event.target.value
+                    );
+
+                    setTimeout(
+                      () =>
+                        loadVoices(
+                          false
+                        ),
+                      0
+                    );
+                  }}
+                >
+                  <option value="name">
+                    Name
+                  </option>
+
+                  <option value="created_at_unix">
+                    Newest
+                  </option>
+                </select>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next =
+                      sortDirection ===
+                      "asc"
+                        ? "desc"
+                        : "asc";
+
+                    setSortDirection(
+                      next
+                    );
+
+                    setTimeout(
+                      () =>
+                        loadVoices(
+                          false
+                        ),
+                      0
+                    );
+                  }}
+                >
+                  {sortDirection ===
+                  "asc"
+                    ? "↑"
+                    : "↓"}
+                </button>
+              </div>
+            </div>
+
+            {/* VOICE LIST */}
 
             <div className="voice-list">
               {loadingVoices ? (
@@ -346,95 +971,179 @@ export default function GenerateVoicePage() {
                   <div className="voice-skeleton" />
                   <div className="voice-skeleton" />
                 </>
-              ) : voices.length === 0 ? (
+              ) : voices.length ===
+                0 ? (
                 <div className="empty-voices">
-                  <div>🎙️</div>
-                  <strong>No voices found</strong>
+                  <div>
+                    🔎
+                  </div>
+
+                  <strong>
+                    No voices found
+                  </strong>
+
                   <p>
-                    We couldn't load your ElevenLabs voices.
+                    Try changing your
+                    search or filters.
                   </p>
 
                   <button
                     type="button"
-                    onClick={loadVoices}
+                    onClick={
+                      resetFilters
+                    }
                   >
-                    Try again
+                    Clear filters
                   </button>
                 </div>
               ) : (
-                voices.map((voice) => {
-                  const isSelected =
-                    selectedVoice === voice.id;
+                voices.map(
+                  (voice) => {
+                    const isSelected =
+                      selectedVoice ===
+                      voice.id;
 
-                  const isPlaying =
-                    playingPreview === voice.id;
+                    const isPlaying =
+                      playingPreview ===
+                      voice.id;
 
-                  return (
-                    <div
-                      key={voice.id}
-                      className={`voice-card ${
-                        isSelected ? "active" : ""
-                      }`}
-                      onClick={() =>
-                        setSelectedVoice(voice.id)
-                      }
-                    >
-                      <div className="voice-avatar">
-                        {voice.name
-                          ?.charAt(0)
-                          ?.toUpperCase() || "V"}
-                      </div>
-
-                      <div className="voice-details">
-                        <strong>{voice.name}</strong>
-
-                        <span>
-                          {voice.description ||
-                            "ElevenLabs AI voice"}
-                        </span>
-                      </div>
-
-                      <button
-                        type="button"
-                        className={`preview-button ${
-                          isPlaying ? "playing" : ""
+                    return (
+                      <div
+                        key={
+                          voice.id
+                        }
+                        className={`voice-card ${
+                          isSelected
+                            ? "active"
+                            : ""
                         }`}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          handlePreview(voice);
-                        }}
-                        disabled={!voice.previewUrl}
-                        title={
-                          voice.previewUrl
-                            ? "Preview voice"
-                            : "Preview unavailable"
+                        onClick={() =>
+                          setSelectedVoice(
+                            voice.id
+                          )
                         }
                       >
-                        {isPlaying ? "Ⅱ" : "▶"}
-                      </button>
+                        <div className="voice-avatar">
+                          {voice.name
+                            .charAt(
+                              0
+                            )
+                            .toUpperCase()}
+                        </div>
 
-                      <div className="voice-check">
-                        {isSelected ? "✓" : ""}
+                        <div className="voice-details">
+                          <strong>
+                            {
+                              voice.name
+                            }
+                          </strong>
+
+                          <span>
+                            {[
+                              voice.gender,
+                              voice.age,
+                              voice.accent,
+                            ]
+                              .filter(
+                                Boolean
+                              )
+                              .join(
+                                " • "
+                              ) ||
+                              "AI Voice"}
+                          </span>
+                        </div>
+
+                        <button
+                          type="button"
+                          className={`preview-button ${
+                            isPlaying
+                              ? "playing"
+                              : ""
+                          }`}
+                          onClick={(
+                            event
+                          ) => {
+                            event.stopPropagation();
+
+                            handlePreview(
+                              voice
+                            );
+                          }}
+                          disabled={
+                            !voice.previewUrl
+                          }
+                        >
+                          {isPlaying
+                            ? "Ⅱ"
+                            : "▶"}
+                        </button>
+
+                        <div className="voice-check">
+                          {isSelected
+                            ? "✓"
+                            : ""}
+                        </div>
                       </div>
-                    </div>
-                  );
-                })
+                    );
+                  }
+                )
               )}
             </div>
 
+            {/* LOAD MORE */}
+
+            {hasMore &&
+              !loadingVoices && (
+                <button
+                  type="button"
+                  className="load-more"
+                  onClick={() =>
+                    loadVoices(
+                      true
+                    )
+                  }
+                  disabled={
+                    loadingMore
+                  }
+                >
+                  {loadingMore ? (
+                    <>
+                      <span className="small-spinner" />
+                      Loading more...
+                    </>
+                  ) : (
+                    <>
+                      Load more voices
+                      <span>
+                        ↓
+                      </span>
+                    </>
+                  )}
+                </button>
+              )}
+
             <div className="voice-tip">
               <span>💡</span>
+
               <div>
-                <strong>Preview before generating</strong>
+                <strong>
+                  Preview before
+                  generating
+                </strong>
+
                 <p>
-                  Tap the play button to hear how a voice sounds.
+                  Listen to a voice
+                  before using it in
+                  your generation.
                 </p>
               </div>
             </div>
           </section>
         </div>
 
-        {/* Generated Audio */}
+        {/* RESULT */}
+
         {audioUrl && (
           <section className="result-panel glass-panel">
             <div className="result-icon">
@@ -442,8 +1151,13 @@ export default function GenerateVoicePage() {
             </div>
 
             <div className="result-info">
-              <span>VOICE GENERATED</span>
-              <strong>Your AI voice is ready</strong>
+              <span>
+                VOICE GENERATED
+              </span>
+
+              <strong>
+                Your AI voice is ready
+              </strong>
 
               <audio
                 className="audio-player"
@@ -455,19 +1169,21 @@ export default function GenerateVoicePage() {
             <button
               type="button"
               className="download-button"
-              onClick={downloadAudio}
+              onClick={
+                downloadAudio
+              }
             >
-              <span>↓</span>
-              Download MP3
+              ↓ Download MP3
             </button>
           </section>
         )}
 
-        {/* Footer */}
         <footer className="voice-footer">
-          <span>Powered by</span>
-          <strong> ZUQEN AI</strong>
-          <span> × ElevenLabs</span>
+          Powered by{" "}
+          <strong>
+            ZUQEN AI
+          </strong>{" "}
+          × ElevenLabs
         </footer>
       </div>
 
@@ -493,17 +1209,17 @@ export default function GenerateVoicePage() {
               transparent 30%
             ),
             #07070b;
-          color: #fff;
+          color: white;
         }
 
-        .voice-background-glow {
+        .background-glow {
           position: absolute;
           width: 500px;
           height: 500px;
           border-radius: 50%;
           filter: blur(130px);
+          opacity: 0.12;
           pointer-events: none;
-          opacity: 0.14;
         }
 
         .glow-one {
@@ -519,8 +1235,8 @@ export default function GenerateVoicePage() {
         }
 
         .voice-container {
-          width: min(1180px, 100%);
-          margin: 0 auto;
+          width: min(1200px, 100%);
+          margin: auto;
           position: relative;
           z-index: 2;
         }
@@ -538,9 +1254,9 @@ export default function GenerateVoicePage() {
           align-items: center;
           gap: 8px;
           padding: 7px 12px;
-          border: 1px solid rgba(255, 255, 255, 0.1);
+          border: 1px solid rgba(255,255,255,.1);
           border-radius: 999px;
-          background: rgba(255, 255, 255, 0.04);
+          background: rgba(255,255,255,.04);
           color: #aaa;
           font-size: 11px;
           font-weight: 700;
@@ -557,7 +1273,7 @@ export default function GenerateVoicePage() {
 
         .voice-header h1 {
           margin: 15px 0 8px;
-          font-size: clamp(36px, 5vw, 58px);
+          font-size: clamp(36px,5vw,58px);
           line-height: 1;
           letter-spacing: -2.5px;
           font-weight: 800;
@@ -578,45 +1294,32 @@ export default function GenerateVoicePage() {
           margin: 0;
           color: #8f8f99;
           font-size: 15px;
-          line-height: 1.6;
         }
 
         .header-mic {
           width: 74px;
           height: 74px;
-          flex-shrink: 0;
           display: grid;
           place-items: center;
           border-radius: 22px;
-          border: 1px solid rgba(255, 255, 255, 0.1);
-          background: linear-gradient(
-            145deg,
-            rgba(139, 92, 246, 0.18),
-            rgba(59, 130, 246, 0.08)
-          );
-          box-shadow:
-            inset 0 1px rgba(255, 255, 255, 0.08),
-            0 20px 60px rgba(0, 0, 0, 0.3);
-        }
-
-        .header-mic span {
+          border: 1px solid rgba(255,255,255,.1);
+          background: rgba(139,92,246,.12);
           font-size: 31px;
         }
 
         .voice-grid {
           display: grid;
-          grid-template-columns: minmax(0, 1.2fr) minmax(350px, 0.8fr);
+          grid-template-columns: minmax(0,1.05fr) minmax(400px,.95fr);
           gap: 20px;
-          align-items: stretch;
         }
 
         .glass-panel {
-          border: 1px solid rgba(255, 255, 255, 0.09);
-          background: rgba(14, 14, 20, 0.78);
+          border: 1px solid rgba(255,255,255,.09);
+          background: rgba(14,14,20,.78);
           border-radius: 24px;
           box-shadow:
-            inset 0 1px rgba(255, 255, 255, 0.04),
-            0 25px 80px rgba(0, 0, 0, 0.25);
+            inset 0 1px rgba(255,255,255,.04),
+            0 25px 80px rgba(0,0,0,.25);
           backdrop-filter: blur(20px);
         }
 
@@ -627,7 +1330,6 @@ export default function GenerateVoicePage() {
 
         .panel-top {
           display: flex;
-          align-items: flex-start;
           justify-content: space-between;
           gap: 15px;
           margin-bottom: 18px;
@@ -636,36 +1338,26 @@ export default function GenerateVoicePage() {
         .panel-top h2 {
           margin: 0 0 5px;
           font-size: 17px;
-          font-weight: 700;
         }
 
         .panel-top p {
           margin: 0;
           color: #777781;
           font-size: 12px;
-          line-height: 1.5;
         }
 
         .character-count,
         .voice-count {
           color: #71717a;
           font-size: 11px;
-          font-weight: 600;
           white-space: nowrap;
         }
 
         .text-editor {
-          min-height: 310px;
           overflow: hidden;
-          border: 1px solid rgba(255, 255, 255, 0.08);
+          border: 1px solid rgba(255,255,255,.08);
           border-radius: 18px;
-          background: rgba(5, 5, 9, 0.65);
-          transition: border-color 0.2s ease;
-        }
-
-        .text-editor:focus-within {
-          border-color: rgba(139, 92, 246, 0.45);
-          box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.06);
+          background: rgba(5,5,9,.65);
         }
 
         .text-editor textarea {
@@ -673,11 +1365,11 @@ export default function GenerateVoicePage() {
           width: 100%;
           height: 270px;
           resize: none;
+          outline: none;
           border: 0;
-          outline: 0;
           padding: 20px;
           background: transparent;
-          color: #f5f5f5;
+          color: white;
           font: inherit;
           font-size: 15px;
           line-height: 1.7;
@@ -691,7 +1383,7 @@ export default function GenerateVoicePage() {
           display: flex;
           justify-content: space-between;
           padding: 10px 15px;
-          border-top: 1px solid rgba(255, 255, 255, 0.06);
+          border-top: 1px solid rgba(255,255,255,.06);
           color: #55555e;
           font-size: 10px;
         }
@@ -702,9 +1394,9 @@ export default function GenerateVoicePage() {
           gap: 12px;
           margin-top: 14px;
           padding: 12px;
-          border: 1px solid rgba(139, 92, 246, 0.18);
+          border: 1px solid rgba(139,92,246,.18);
           border-radius: 15px;
-          background: rgba(139, 92, 246, 0.06);
+          background: rgba(139,92,246,.06);
         }
 
         .selected-avatar {
@@ -713,31 +1405,23 @@ export default function GenerateVoicePage() {
           display: grid;
           place-items: center;
           border-radius: 11px;
-          background: rgba(255, 255, 255, 0.06);
-          font-size: 18px;
+          background: rgba(255,255,255,.06);
         }
 
         .selected-info {
           flex: 1;
-          min-width: 0;
         }
 
         .selected-info span {
           display: block;
-          margin-bottom: 2px;
           color: #666671;
           font-size: 9px;
           text-transform: uppercase;
-          letter-spacing: 0.8px;
         }
 
         .selected-info strong {
-          display: block;
-          overflow: hidden;
           color: #ddd;
           font-size: 13px;
-          text-overflow: ellipsis;
-          white-space: nowrap;
         }
 
         .change-voice {
@@ -755,21 +1439,10 @@ export default function GenerateVoicePage() {
           gap: 10px;
           margin-top: 14px;
           padding: 11px 13px;
-          border: 1px solid rgba(239, 68, 68, 0.2);
+          border: 1px solid rgba(239,68,68,.2);
           border-radius: 12px;
-          background: rgba(239, 68, 68, 0.06);
+          background: rgba(239,68,68,.06);
           color: #fca5a5;
-        }
-
-        .error-box span {
-          width: 20px;
-          height: 20px;
-          display: grid;
-          place-items: center;
-          border-radius: 50%;
-          background: rgba(239, 68, 68, 0.18);
-          font-size: 11px;
-          font-weight: 800;
         }
 
         .error-box p {
@@ -797,43 +1470,26 @@ export default function GenerateVoicePage() {
           cursor: pointer;
           font-size: 13px;
           font-weight: 800;
-          box-shadow:
-            0 12px 35px rgba(99, 102, 241, 0.2),
-            inset 0 1px rgba(255, 255, 255, 0.2);
-          transition:
-            transform 0.2s ease,
-            opacity 0.2s ease,
-            box-shadow 0.2s ease;
-        }
-
-        .generate-button:hover:not(:disabled) {
-          transform: translateY(-2px);
-          box-shadow:
-            0 18px 40px rgba(99, 102, 241, 0.3),
-            inset 0 1px rgba(255, 255, 255, 0.25);
         }
 
         .generate-button:disabled {
-          opacity: 0.45;
+          opacity: .45;
           cursor: not-allowed;
         }
 
-        .sparkle {
-          font-size: 17px;
-        }
-
-        .arrow {
-          margin-left: 5px;
-          font-size: 17px;
-        }
-
-        .spinner {
+        .spinner,
+        .small-spinner {
           width: 16px;
           height: 16px;
-          border: 2px solid rgba(255, 255, 255, 0.3);
+          border: 2px solid rgba(255,255,255,.3);
           border-top-color: white;
           border-radius: 50%;
-          animation: spin 0.8s linear infinite;
+          animation: spin .8s linear infinite;
+        }
+
+        .small-spinner {
+          width: 13px;
+          height: 13px;
         }
 
         .secure-note {
@@ -843,10 +1499,119 @@ export default function GenerateVoicePage() {
           font-size: 9px;
         }
 
+        /* SEARCH */
+
+        .search-box {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          height: 44px;
+          padding: 0 13px;
+          border: 1px solid rgba(255,255,255,.08);
+          border-radius: 13px;
+          background: rgba(5,5,9,.6);
+        }
+
+        .search-box > span {
+          color: #777;
+          font-size: 22px;
+        }
+
+        .search-box input {
+          flex: 1;
+          min-width: 0;
+          outline: none;
+          border: 0;
+          background: transparent;
+          color: white;
+          font-size: 12px;
+        }
+
+        .search-box input::placeholder {
+          color: #55555e;
+        }
+
+        .search-box button {
+          border: 0;
+          background: transparent;
+          color: #777;
+          cursor: pointer;
+          font-size: 18px;
+        }
+
+        /* FILTERS */
+
+        .filters {
+          display: grid;
+          grid-template-columns: repeat(2,1fr);
+          gap: 8px;
+          margin-top: 10px;
+        }
+
+        .filters select,
+        .sort-box select {
+          width: 100%;
+          min-width: 0;
+          height: 36px;
+          padding: 0 9px;
+          outline: none;
+          border: 1px solid rgba(255,255,255,.07);
+          border-radius: 10px;
+          background: #111118;
+          color: #aaa;
+          cursor: pointer;
+          font-size: 10px;
+        }
+
+        .library-tools {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 10px;
+          margin: 13px 0;
+        }
+
+        .reset-button {
+          border: 0;
+          background: transparent;
+          color: #777;
+          cursor: pointer;
+          font-size: 10px;
+        }
+
+        .reset-button:hover {
+          color: #a78bfa;
+        }
+
+        .sort-box {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          color: #666;
+          font-size: 10px;
+        }
+
+        .sort-box select {
+          width: 90px;
+          height: 30px;
+        }
+
+        .sort-box button {
+          width: 30px;
+          height: 30px;
+          border: 1px solid rgba(255,255,255,.07);
+          border-radius: 8px;
+          background: #111118;
+          color: #aaa;
+          cursor: pointer;
+        }
+
+        /* VOICES */
+
         .voice-list {
           display: flex;
           flex-direction: column;
-          gap: 9px;
+          gap: 8px;
           max-height: 440px;
           overflow-y: auto;
           padding-right: 3px;
@@ -857,35 +1622,31 @@ export default function GenerateVoicePage() {
         }
 
         .voice-list::-webkit-scrollbar-thumb {
+          background: rgba(255,255,255,.1);
           border-radius: 10px;
-          background: rgba(255, 255, 255, 0.1);
         }
 
         .voice-card {
-          min-height: 66px;
+          min-height: 64px;
           display: flex;
           align-items: center;
-          gap: 11px;
-          padding: 10px;
-          border: 1px solid rgba(255, 255, 255, 0.06);
-          border-radius: 15px;
-          background: rgba(255, 255, 255, 0.025);
+          gap: 10px;
+          padding: 9px;
+          border: 1px solid rgba(255,255,255,.06);
+          border-radius: 14px;
+          background: rgba(255,255,255,.025);
           cursor: pointer;
-          transition:
-            border-color 0.2s ease,
-            background 0.2s ease,
-            transform 0.2s ease;
+          transition: .2s;
         }
 
         .voice-card:hover {
-          transform: translateY(-1px);
-          border-color: rgba(255, 255, 255, 0.12);
-          background: rgba(255, 255, 255, 0.045);
+          background: rgba(255,255,255,.045);
+          border-color: rgba(255,255,255,.12);
         }
 
         .voice-card.active {
-          border-color: rgba(139, 92, 246, 0.45);
-          background: rgba(139, 92, 246, 0.08);
+          border-color: rgba(139,92,246,.45);
+          background: rgba(139,92,246,.08);
         }
 
         .voice-avatar {
@@ -894,11 +1655,11 @@ export default function GenerateVoicePage() {
           flex-shrink: 0;
           display: grid;
           place-items: center;
-          border-radius: 12px;
+          border-radius: 11px;
           background: linear-gradient(
             145deg,
-            rgba(139, 92, 246, 0.24),
-            rgba(59, 130, 246, 0.15)
+            rgba(139,92,246,.24),
+            rgba(59,130,246,.15)
           );
           color: #c4b5fd;
           font-size: 14px;
@@ -924,8 +1685,7 @@ export default function GenerateVoicePage() {
           margin-top: 3px;
           overflow: hidden;
           color: #666671;
-          font-size: 10px;
-          line-height: 1.4;
+          font-size: 9px;
           text-overflow: ellipsis;
           white-space: nowrap;
         }
@@ -934,31 +1694,25 @@ export default function GenerateVoicePage() {
           width: 31px;
           height: 31px;
           flex-shrink: 0;
-          display: grid;
-          place-items: center;
-          border: 1px solid rgba(255, 255, 255, 0.09);
+          border: 1px solid rgba(255,255,255,.09);
           border-radius: 10px;
-          background: rgba(255, 255, 255, 0.04);
+          background: rgba(255,255,255,.04);
           color: #aaa;
           cursor: pointer;
-          font-size: 10px;
-          transition: all 0.2s ease;
         }
 
         .preview-button:hover:not(:disabled) {
-          border-color: rgba(139, 92, 246, 0.4);
-          background: rgba(139, 92, 246, 0.12);
+          background: rgba(139,92,246,.12);
           color: #c4b5fd;
         }
 
         .preview-button.playing {
-          border-color: rgba(139, 92, 246, 0.4);
-          background: rgba(139, 92, 246, 0.15);
+          background: rgba(139,92,246,.15);
           color: #c4b5fd;
         }
 
         .preview-button:disabled {
-          opacity: 0.25;
+          opacity: .25;
           cursor: not-allowed;
         }
 
@@ -970,56 +1724,53 @@ export default function GenerateVoicePage() {
           text-align: center;
         }
 
-        .voice-tip {
+        /* LOAD MORE */
+
+        .load-more {
+          width: 100%;
+          height: 42px;
           display: flex;
-          gap: 10px;
-          margin-top: 15px;
-          padding: 12px;
-          border-radius: 14px;
-          background: rgba(255, 255, 255, 0.025);
+          align-items: center;
+          justify-content: center;
+          gap: 9px;
+          margin-top: 12px;
+          border: 1px solid rgba(139,92,246,.2);
+          border-radius: 12px;
+          background: rgba(139,92,246,.06);
+          color: #a78bfa;
+          cursor: pointer;
+          font-size: 11px;
+          font-weight: 700;
         }
 
-        .voice-tip > span {
-          font-size: 16px;
-        }
-
-        .voice-tip strong {
-          display: block;
-          margin-bottom: 2px;
-          color: #9999a3;
-          font-size: 10px;
-        }
-
-        .voice-tip p {
-          margin: 0;
-          color: #5e5e68;
-          font-size: 9px;
-          line-height: 1.5;
+        .load-more:disabled {
+          opacity: .5;
+          cursor: not-allowed;
         }
 
         .voice-skeleton {
-          height: 66px;
-          border-radius: 15px;
+          height: 64px;
+          border-radius: 14px;
           background: linear-gradient(
             90deg,
-            rgba(255, 255, 255, 0.025),
-            rgba(255, 255, 255, 0.06),
-            rgba(255, 255, 255, 0.025)
+            rgba(255,255,255,.025),
+            rgba(255,255,255,.06),
+            rgba(255,255,255,.025)
           );
           background-size: 200% 100%;
           animation: skeleton 1.4s infinite;
         }
 
         .empty-voices {
-          padding: 50px 20px;
+          padding: 45px 20px;
           text-align: center;
-          border: 1px dashed rgba(255, 255, 255, 0.1);
-          border-radius: 16px;
+          border: 1px dashed rgba(255,255,255,.1);
+          border-radius: 15px;
         }
 
         .empty-voices > div {
-          margin-bottom: 12px;
           font-size: 28px;
+          margin-bottom: 10px;
         }
 
         .empty-voices strong {
@@ -1029,20 +1780,41 @@ export default function GenerateVoicePage() {
         }
 
         .empty-voices p {
-          margin: 7px 0 15px;
           color: #666;
           font-size: 10px;
         }
 
         .empty-voices button {
           padding: 8px 14px;
-          border: 1px solid rgba(255, 255, 255, 0.1);
+          border: 1px solid rgba(255,255,255,.1);
           border-radius: 9px;
-          background: rgba(255, 255, 255, 0.04);
+          background: rgba(255,255,255,.04);
           color: #aaa;
           cursor: pointer;
           font-size: 10px;
         }
+
+        .voice-tip {
+          display: flex;
+          gap: 10px;
+          margin-top: 14px;
+          padding: 11px;
+          border-radius: 13px;
+          background: rgba(255,255,255,.025);
+        }
+
+        .voice-tip strong {
+          color: #9999a3;
+          font-size: 10px;
+        }
+
+        .voice-tip p {
+          margin: 3px 0 0;
+          color: #5e5e68;
+          font-size: 9px;
+        }
+
+        /* RESULT */
 
         .result-panel {
           display: flex;
@@ -1057,62 +1829,45 @@ export default function GenerateVoicePage() {
           height: 48px;
           display: grid;
           place-items: center;
-          flex-shrink: 0;
           border-radius: 14px;
-          background: rgba(139, 92, 246, 0.12);
+          background: rgba(139,92,246,.12);
           font-size: 21px;
         }
 
         .result-info {
           flex: 1;
-          min-width: 0;
         }
 
-        .result-info > span {
+        .result-info span {
           display: block;
-          margin-bottom: 3px;
           color: #8b5cf6;
           font-size: 8px;
           font-weight: 800;
           letter-spacing: 1px;
         }
 
-        .result-info > strong {
+        .result-info strong {
           display: block;
-          margin-bottom: 9px;
+          margin: 3px 0 9px;
           color: #ddd;
           font-size: 13px;
         }
 
         .audio-player {
           width: 100%;
-          max-width: 580px;
+          max-width: 600px;
           height: 35px;
         }
 
         .download-button {
-          display: flex;
-          align-items: center;
-          gap: 8px;
           padding: 11px 14px;
-          flex-shrink: 0;
-          border: 1px solid rgba(255, 255, 255, 0.09);
+          border: 1px solid rgba(255,255,255,.09);
           border-radius: 11px;
-          background: rgba(255, 255, 255, 0.04);
+          background: rgba(255,255,255,.04);
           color: #ddd;
           cursor: pointer;
           font-size: 10px;
           font-weight: 700;
-          transition: all 0.2s ease;
-        }
-
-        .download-button:hover {
-          border-color: rgba(139, 92, 246, 0.35);
-          background: rgba(139, 92, 246, 0.1);
-        }
-
-        .download-button span {
-          font-size: 16px;
         }
 
         .voice-footer {
@@ -1142,50 +1897,24 @@ export default function GenerateVoicePage() {
           }
         }
 
-        @media (max-width: 850px) {
-          .voice-page {
-            padding: 30px 16px;
-          }
-
+        @media (max-width: 900px) {
           .voice-grid {
             grid-template-columns: 1fr;
-          }
-
-          .voices-panel {
-            order: 2;
-          }
-
-          .voice-list {
-            max-height: 420px;
           }
         }
 
         @media (max-width: 600px) {
           .voice-page {
-            padding: 22px 12px 28px;
-          }
-
-          .voice-header {
-            margin-bottom: 25px;
+            padding: 25px 12px;
           }
 
           .voice-header h1 {
             font-size: 38px;
-            letter-spacing: -1.8px;
-          }
-
-          .voice-header p {
-            max-width: 310px;
-            font-size: 12px;
           }
 
           .header-mic {
             width: 55px;
             height: 55px;
-            border-radius: 16px;
-          }
-
-          .header-mic span {
             font-size: 23px;
           }
 
@@ -1195,25 +1924,11 @@ export default function GenerateVoicePage() {
             border-radius: 19px;
           }
 
-          .text-editor {
-            min-height: 270px;
-          }
-
-          .text-editor textarea {
-            height: 230px;
-            padding: 16px;
-          }
-
-          .selected-voice {
-            margin-top: 11px;
-          }
-
-          .voice-card {
-            min-height: 62px;
+          .filters {
+            grid-template-columns: 1fr 1fr;
           }
 
           .result-panel {
-            align-items: flex-start;
             flex-wrap: wrap;
           }
 
@@ -1223,15 +1938,9 @@ export default function GenerateVoicePage() {
 
           .download-button {
             width: 100%;
-            justify-content: center;
-          }
-
-          .audio-player {
-            width: 100%;
           }
         }
       `}</style>
     </main>
   );
 }
-

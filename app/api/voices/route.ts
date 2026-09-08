@@ -1,4 +1,3 @@
-
 import { NextRequest, NextResponse } from "next/server";
 
 type ElevenLabsVoice = {
@@ -30,41 +29,79 @@ export async function GET(request: NextRequest) {
     const apiKey = process.env.ELEVENLABS_API_KEY;
 
     if (!apiKey) {
-      console.error("ELEVENLABS_API_KEY is missing.");
-
       return NextResponse.json(
         {
           error: "ElevenLabs API key is not configured.",
         },
-        {
-          status: 500,
-        }
+        { status: 500 }
       );
     }
 
     const { searchParams } = new URL(request.url);
 
-    const search = searchParams.get("search") || "";
-    const pageSizeParam = Number(
-      searchParams.get("page_size") || "100"
+    const search = searchParams.get("search")?.trim();
+    const gender = searchParams.get("gender");
+    const age = searchParams.get("age");
+    const language = searchParams.get("language");
+    const accent = searchParams.get("accent");
+    const category = searchParams.get("category");
+    const voiceType = searchParams.get("voice_type");
+    const sort = searchParams.get("sort");
+    const sortDirection = searchParams.get("sort_direction");
+    const nextPageToken = searchParams.get("next_page_token");
+
+    const pageSizeValue = Number(
+      searchParams.get("page_size") || "50"
     );
 
-    // ElevenLabs allows a maximum of 100 voices per request.
     const pageSize = Math.min(
-      Math.max(pageSizeParam, 1),
+      Math.max(pageSizeValue, 1),
       100
     );
 
     const params = new URLSearchParams();
 
     params.set("page_size", String(pageSize));
-
-    // Ask ElevenLabs for the total count because
-    // the UI can use it to show how many voices are available.
     params.set("include_total_count", "true");
 
-    if (search.trim()) {
-      params.set("search", search.trim());
+    if (search) {
+      params.set("search", search);
+    }
+
+    if (gender && gender !== "all") {
+      params.set("gender", gender);
+    }
+
+    if (age && age !== "all") {
+      params.set("age", age);
+    }
+
+    if (language && language !== "all") {
+      params.set("language", language);
+    }
+
+    if (accent && accent !== "all") {
+      params.set("accent", accent);
+    }
+
+    if (category && category !== "all") {
+      params.set("category", category);
+    }
+
+    if (voiceType && voiceType !== "all") {
+      params.set("voice_type", voiceType);
+    }
+
+    if (sort) {
+      params.set("sort", sort);
+    }
+
+    if (sortDirection) {
+      params.set("sort_direction", sortDirection);
+    }
+
+    if (nextPageToken) {
+      params.set("next_page_token", nextPageToken);
     }
 
     const response = await fetch(
@@ -85,7 +122,7 @@ export async function GET(request: NextRequest) {
 
     if (!response.ok) {
       console.error(
-        "ElevenLabs voices API error:",
+        "ElevenLabs voices error:",
         response.status,
         data
       );
@@ -94,86 +131,83 @@ export async function GET(request: NextRequest) {
         {
           error:
             "Failed to load voices from ElevenLabs.",
-          details:
-            typeof data === "object"
-              ? data
-              : undefined,
         },
-        {
-          status: response.status,
-        }
+        { status: response.status }
       );
     }
 
-    const voices = (data.voices || []).map(
-      (voice) => {
-        const labels = voice.labels || {};
+    const voices = (data.voices || []).map((voice) => {
+      const labels = voice.labels || {};
 
-        const firstVerifiedLanguage =
-          voice.verified_languages?.[0];
+      const firstLanguage =
+        voice.verified_languages?.[0];
 
-        return {
-          id: voice.voice_id,
-          name: voice.name || "Unnamed Voice",
+      return {
+        id: voice.voice_id,
 
-          description:
-            voice.description ||
-            labels.description ||
-            `${labels.gender || ""}${
-              labels.accent
-                ? ` • ${labels.accent}`
-                : ""
-            }`.trim() ||
-            "ElevenLabs AI voice",
+        name:
+          voice.name ||
+          "Unnamed Voice",
 
-          previewUrl:
-            voice.preview_url ||
-            firstVerifiedLanguage?.preview_url ||
-            null,
+        description:
+          voice.description ||
+          labels.description ||
+          "ElevenLabs AI voice",
 
-          gender:
-            labels.gender || null,
+        previewUrl:
+          voice.preview_url ||
+          firstLanguage?.preview_url ||
+          null,
 
-          age:
-            labels.age || null,
+        gender:
+          labels.gender ||
+          null,
 
-          accent:
-            labels.accent ||
-            firstVerifiedLanguage?.accent ||
-            null,
+        age:
+          labels.age ||
+          null,
 
-          language:
-            firstVerifiedLanguage?.language ||
-            null,
+        accent:
+          labels.accent ||
+          firstLanguage?.accent ||
+          null,
 
-          locale:
-            firstVerifiedLanguage?.locale ||
-            null,
+        language:
+          firstLanguage?.language ||
+          labels.language ||
+          null,
 
-          category:
-            voice.category || null,
+        locale:
+          firstLanguage?.locale ||
+          null,
 
-          voiceType:
-            voice.voice_type || null,
-        };
-      }
-    );
+        category:
+          voice.category ||
+          null,
+
+        voiceType:
+          voice.voice_type ||
+          null,
+      };
+    });
 
     return NextResponse.json(
       {
         voices,
 
-        hasMore: data.has_more ?? false,
+        hasMore:
+          data.has_more ?? false,
 
         totalCount:
-          data.total_count ?? voices.length,
+          data.total_count ??
+          voices.length,
 
         nextPageToken:
-          data.next_page_token ?? null,
+          data.next_page_token ??
+          null,
       },
       {
         status: 200,
-
         headers: {
           "Cache-Control":
             "no-store, max-age=0",
@@ -189,12 +223,9 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(
       {
         error:
-          "Something went wrong while loading ElevenLabs voices.",
+          "Something went wrong while loading voices.",
       },
-      {
-        status: 500,
-      }
+      { status: 500 }
     );
   }
 }
-
