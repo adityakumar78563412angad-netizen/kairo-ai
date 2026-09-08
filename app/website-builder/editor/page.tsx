@@ -3,6 +3,7 @@
 import {
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { useRouter } from "next/navigation";
@@ -23,30 +24,47 @@ const PROJECT_KEY =
 const DRIVE_PROJECTS_KEY =
   "ZUQEN-website-builder-drive-projects";
 
-export default function WebsiteEditorPage() {
+const AI_EDIT_CREDITS = 50;
+
+export default function WebsiteBuilderEditorPage() {
   const router = useRouter();
 
   const [project, setProject] =
     useState<WebsiteProject | null>(null);
 
   const [html, setHtml] = useState("");
-  const [websiteName, setWebsiteName] =
-    useState("My Website");
-
-  const [device, setDevice] =
-    useState<Device>("desktop");
+  const [codeValue, setCodeValue] =
+    useState("");
 
   const [viewMode, setViewMode] =
     useState<ViewMode>("preview");
 
-  const [aiInstruction, setAiInstruction] =
-    useState("");
+  const [device, setDevice] =
+    useState<Device>("desktop");
 
   const [loading, setLoading] =
+    useState(true);
+
+  const [aiLoading, setAiLoading] =
     useState(false);
 
   const [error, setError] =
     useState("");
+
+  const [aiInstruction, setAiInstruction] =
+    useState("");
+
+  const [showAiPanel, setShowAiPanel] =
+    useState(true);
+
+  const [showCodePanel, setShowCodePanel] =
+    useState(false);
+
+  const [fullscreen, setFullscreen] =
+    useState(false);
+
+  const [previewKey, setPreviewKey] =
+    useState(0);
 
   const [history, setHistory] =
     useState<string[]>([]);
@@ -54,44 +72,37 @@ export default function WebsiteEditorPage() {
   const [historyIndex, setHistoryIndex] =
     useState(-1);
 
-  const [showSaveMenu, setShowSaveMenu] =
+  const [saved, setSaved] =
     useState(false);
 
-  const [showCodeEditor, setShowCodeEditor] =
-    useState(false);
+  const [creditBalance, setCreditBalance] =
+    useState<number | null>(null);
 
-  const [copied, setCopied] =
-    useState(false);
-
-  const [fullscreen, setFullscreen] =
-    useState(false);
-
-  const [savedMessage, setSavedMessage] =
-    useState("");
-
-  const [previewKey, setPreviewKey] =
-    useState(0);
+  const iframeRef =
+    useRef<HTMLIFrameElement>(null);
 
   useEffect(() => {
     try {
-      const stored =
+      const raw =
         sessionStorage.getItem(
           PROJECT_KEY
         );
 
-      if (!stored) {
+      if (!raw) {
         router.replace(
           "/website-builder"
         );
         return;
       }
 
-      const parsed: WebsiteProject =
-        JSON.parse(stored);
+      const parsed =
+        JSON.parse(raw) as WebsiteProject;
 
       if (
         !parsed ||
-        typeof parsed.html !== "string"
+        typeof parsed.html !==
+          "string" ||
+        !parsed.html.trim()
       ) {
         router.replace(
           "/website-builder"
@@ -101,283 +112,454 @@ export default function WebsiteEditorPage() {
 
       setProject(parsed);
       setHtml(parsed.html);
-      setWebsiteName(
-        parsed.name || "My Website"
-      );
+      setCodeValue(parsed.html);
       setHistory([parsed.html]);
       setHistoryIndex(0);
+
+      loadCredits();
     } catch (err) {
       console.error(
-        "Failed to load website project:",
+        "Editor project load error:",
         err
       );
 
       router.replace(
         "/website-builder"
       );
+    } finally {
+      setLoading(false);
     }
   }, [router]);
 
-  const canUndo =
-    historyIndex > 0;
-
-  const canRedo =
-    historyIndex >= 0 &&
-    historyIndex < history.length - 1;
-
-  const previewWidth = useMemo(() => {
-    if (device === "mobile") {
-      return "390px";
-    }
-
-    if (device === "tablet") {
-      return "768px";
-    }
-
-    return "100%";
-  }, [device]);
-
-  function addToHistory(
-    newHtml: string
-  ) {
-    if (!newHtml) return;
-
-    setHistory((current) => {
-      const previous =
-        current.slice(
-          0,
-          historyIndex + 1
-        );
-
-      const updated = [
-        ...previous,
-        newHtml,
-      ];
-
-      return updated.slice(-30);
-    });
-
-    setHistoryIndex((current) => {
-      const currentLength =
-        history.length;
-
-      if (current < 0) {
-        return 0;
-      }
-
-      return Math.min(
-        current + 1,
-        29
-      );
-    });
-  }
-
-  function applyHtml(
-    newHtml: string,
-    saveHistory = true
-  ) {
-    if (!newHtml) return;
-
-    setHtml(newHtml);
-    setPreviewKey(
-      (current) => current + 1
-    );
-
-    if (saveHistory) {
-      addToHistory(newHtml);
-    }
-  }
-
-  async function editWebsite() {
-    const instruction =
-      aiInstruction.trim();
-
-    if (!instruction) {
-      setError(
-        "ZUQEN ko batao ki website mein kya change karna hai."
-      );
-      return;
-    }
-
-    if (!html) {
-      setError(
-        "Website load nahi hui hai."
-      );
-      return;
-    }
-
-    setError("");
-    setLoading(true);
-
+  async function loadCredits() {
     try {
-      const response =
-        await fetch(
-          "/api/website-builder",
-          {
-            method: "POST",
-            headers: {
-              "Content-Type":
-                "application/json",
-            },
-            body: JSON.stringify({
-              action: "edit",
-              html,
-              instruction,
-            }),
-          }
-        );
+      const response = await fetch(
+        "/api/credits",
+        {
+          method: "GET",
+          cache: "no-store",
+        }
+      );
+
+      if (!response.ok) {
+        return;
+      }
 
       const data =
         await response.json();
 
       if (
+        typeof data.balance ===
+        "number"
+      ) {
+        setCreditBalance(
+          data.balance
+        );
+      }
+    } catch (err) {
+      console.error(
+        "Editor credits error:",
+        err
+      );
+    }
+  }
+
+  function updateProjectHtml(
+    nextHtml: string,
+    addHistory = true
+  ) {
+    setHtml(nextHtml);
+    setCodeValue(nextHtml);
+    setPreviewKey(
+      (value) => value + 1
+    );
+
+    if (addHistory) {
+      setHistory((previous) => {
+        const current =
+          previous[historyIndex];
+
+        if (current === nextHtml) {
+          return previous;
+        }
+
+        const trimmed =
+          previous.slice(
+            0,
+            historyIndex + 1
+          );
+
+        return [
+          ...trimmed,
+          nextHtml,
+        ];
+      });
+
+      setHistoryIndex(
+        (previousIndex) =>
+          previousIndex + 1
+      );
+    }
+
+    setProject((previous) =>
+      previous
+        ? {
+            ...previous,
+            html: nextHtml,
+          }
+        : previous
+    );
+
+    try {
+      const raw =
+        sessionStorage.getItem(
+          PROJECT_KEY
+        );
+
+      if (raw) {
+        const stored =
+          JSON.parse(raw);
+
+        sessionStorage.setItem(
+          PROJECT_KEY,
+          JSON.stringify({
+            ...stored,
+            html: nextHtml,
+          })
+        );
+      }
+    } catch (err) {
+      console.error(
+        "Project session update error:",
+        err
+      );
+    }
+  }
+
+  function undo() {
+    if (historyIndex <= 0) {
+      return;
+    }
+
+    const nextIndex =
+      historyIndex - 1;
+
+    const nextHtml =
+      history[nextIndex];
+
+    setHistoryIndex(nextIndex);
+    setHtml(nextHtml);
+    setCodeValue(nextHtml);
+    setPreviewKey(
+      (value) => value + 1
+    );
+  }
+
+  function redo() {
+    if (
+      historyIndex >=
+      history.length - 1
+    ) {
+      return;
+    }
+
+    const nextIndex =
+      historyIndex + 1;
+
+    const nextHtml =
+      history[nextIndex];
+
+    setHistoryIndex(nextIndex);
+    setHtml(nextHtml);
+    setCodeValue(nextHtml);
+    setPreviewKey(
+      (value) => value + 1
+    );
+  }
+
+  function applyCodeChanges() {
+    if (!codeValue.trim()) {
+      setError(
+        "Website code empty nahi ho sakta."
+      );
+      return;
+    }
+
+    setError("");
+
+    if (codeValue === html) {
+      return;
+    }
+
+    const nextHistory =
+      history
+        .slice(0, historyIndex + 1)
+        .concat(codeValue);
+
+    setHistory(nextHistory);
+    setHistoryIndex(
+      nextHistory.length - 1
+    );
+
+    setHtml(codeValue);
+    setPreviewKey(
+      (value) => value + 1
+    );
+
+    setProject((previous) =>
+      previous
+        ? {
+            ...previous,
+            html: codeValue,
+          }
+        : previous
+    );
+
+    saveCurrentProject(
+      codeValue
+    );
+  }
+
+  function resetCode() {
+    setCodeValue(html);
+    setError("");
+  }
+
+  async function handleAiEdit(
+    instruction?: string
+  ) {
+    const finalInstruction =
+      (
+        instruction ??
+        aiInstruction
+      ).trim();
+
+    if (!finalInstruction) {
+      setError(
+        "AI ko batane ke liye instruction likho."
+      );
+      return;
+    }
+
+    if (finalInstruction.length > 5000) {
+      setError(
+        "AI instruction 5,000 characters se chhota rakho."
+      );
+      return;
+    }
+
+    if (
+      creditBalance !== null &&
+      creditBalance < AI_EDIT_CREDITS
+    ) {
+      setError(
+        `AI Edit ke liye ${AI_EDIT_CREDITS} credits chahiye. Tumhare paas ${creditBalance} credits hain.`
+      );
+      return;
+    }
+
+    setError("");
+    setAiLoading(true);
+
+    try {
+      const response = await fetch(
+        "/api/website-builder",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type":
+              "application/json",
+          },
+          body: JSON.stringify({
+            action: "edit",
+            prompt:
+              finalInstruction,
+            html,
+          }),
+        }
+      );
+
+      let data: {
+        success?: boolean;
+        html?: string;
+        error?: string;
+        code?: string;
+        balance?: number;
+      } = {};
+
+      try {
+        data = await response.json();
+      } catch {
+        throw new Error(
+          "Server ne valid response nahi diya."
+        );
+      }
+
+      if (
         !response.ok ||
         !data.success
       ) {
+        if (
+          data.code ===
+          "insufficient_credits"
+        ) {
+          if (
+            typeof data.balance ===
+            "number"
+          ) {
+            setCreditBalance(
+              data.balance
+            );
+          }
+
+          throw new Error(
+            "AI Edit ke liye enough credits nahi hain."
+          );
+        }
+
         throw new Error(
           data.error ||
-            "Website update nahi ho payi."
+            "AI website edit nahi kar payi."
         );
       }
 
       if (
         !data.html ||
-        typeof data.html !== "string"
+        typeof data.html !==
+          "string"
       ) {
         throw new Error(
-          "AI ne valid updated website return nahi ki."
+          "AI ne valid HTML return nahi kiya."
         );
       }
 
-      applyHtml(
+      updateProjectHtml(
         data.html,
         true
       );
 
-      setAiInstruction("");
-      setSavedMessage(
-        "AI changes applied"
-      );
+      if (
+        typeof data.balance ===
+        "number"
+      ) {
+        setCreditBalance(
+          data.balance
+        );
+      } else {
+        const header =
+          response.headers.get(
+            "X-Zuqen-Credits-Remaining"
+          );
 
-      window.setTimeout(() => {
-        setSavedMessage("");
-      }, 2200);
+        if (header) {
+          const remaining =
+            Number(header);
+
+          if (
+            Number.isFinite(
+              remaining
+            )
+          ) {
+            setCreditBalance(
+              remaining
+            );
+          }
+        } else {
+          await loadCredits();
+        }
+      }
+
+      setAiInstruction("");
     } catch (err) {
       console.error(
-        "Website AI edit error:",
+        "AI website edit error:",
         err
       );
 
       setError(
         err instanceof Error
           ? err.message
-          : "Website update karte waqt error aa gaya."
+          : "AI edit karte waqt kuch galat ho gaya."
       );
     } finally {
-      setLoading(false);
+      setAiLoading(false);
     }
   }
 
-  function handleCodeChange(
-    value: string
+  function saveCurrentProject(
+    htmlToSave = html
   ) {
-    setHtml(value);
-    setPreviewKey(
-      (current) => current + 1
-    );
-  }
-
-  function applyCodeChanges() {
-    if (!html.trim()) {
-      setError(
-        "Website code empty hai."
-      );
+    if (!project) {
       return;
     }
 
-    addToHistory(html);
-    setSavedMessage(
-      "Code changes applied"
-    );
-
-    window.setTimeout(() => {
-      setSavedMessage("");
-    }, 1800);
-  }
-
-  function undo() {
-    if (!canUndo) return;
-
-    const newIndex =
-      historyIndex - 1;
-
-    const previous =
-      history[newIndex];
-
-    setHistoryIndex(
-      newIndex
-    );
-
-    setHtml(previous);
-    setPreviewKey(
-      (current) => current + 1
-    );
-  }
-
-  function redo() {
-    if (!canRedo) return;
-
-    const newIndex =
-      historyIndex + 1;
-
-    const next =
-      history[newIndex];
-
-    setHistoryIndex(
-      newIndex
-    );
-
-    setHtml(next);
-    setPreviewKey(
-      (current) => current + 1
-    );
-  }
-
-  function refreshPreview() {
-    setPreviewKey(
-      (current) => current + 1
-    );
-  }
-
-  async function copyCode() {
-    if (!html) return;
-
     try {
-      await navigator.clipboard.writeText(
-        html
+      const raw =
+        localStorage.getItem(
+          DRIVE_PROJECTS_KEY
+        );
+
+      const existing =
+        raw ? JSON.parse(raw) : [];
+
+      const projects =
+        Array.isArray(existing)
+          ? existing
+          : [];
+
+      const updatedProject = {
+        ...project,
+        html: htmlToSave,
+        updatedAt:
+          new Date().toISOString(),
+      };
+
+      const index =
+        projects.findIndex(
+          (item: WebsiteProject) =>
+            item.name === project.name &&
+            item.createdAt ===
+              project.createdAt
+        );
+
+      if (index >= 0) {
+        projects[index] =
+          updatedProject;
+      } else {
+        projects.unshift(
+          updatedProject
+        );
+      }
+
+      localStorage.setItem(
+        DRIVE_PROJECTS_KEY,
+        JSON.stringify(
+          projects
+        )
       );
 
-      setCopied(true);
+      setSaved(true);
 
       window.setTimeout(() => {
-        setCopied(false);
+        setSaved(false);
       }, 1800);
-    } catch {
+    } catch (err) {
+      console.error(
+        "Save project error:",
+        err
+      );
+
       setError(
-        "Code copy nahi ho paya."
+        "Project save nahi ho paya."
       );
     }
   }
 
   function downloadWebsite() {
-    if (!html) return;
-
-    const blob = new Blob(
-      [html],
-      {
-        type: "text/html;charset=utf-8",
-      }
-    );
+    const blob =
+      new Blob([html], {
+        type: "text/html",
+      });
 
     const url =
       URL.createObjectURL(blob);
@@ -386,146 +568,78 @@ export default function WebsiteEditorPage() {
       document.createElement("a");
 
     anchor.href = url;
-
     anchor.download =
-      `${websiteName
-        .trim()
-        .replace(/\s+/g, "-")
-        .toLowerCase() ||
-        "ZUQEN-website"}.html`;
+      `${safeFileName(
+        project?.name ||
+          "ZUQEN-website"
+      )}.html`;
 
     document.body.appendChild(
       anchor
     );
 
     anchor.click();
+
     anchor.remove();
 
     URL.revokeObjectURL(url);
   }
 
-  function saveToMyDrive() {
-    if (!html) {
-      setError(
-        "Save karne ke liye website available nahi hai."
-      );
-      return;
-    }
-
-    /*
-      Abhi browser ke local My Drive area
-      mein project save ho raha hai.
-
-      Real Google Drive integration ke liye
-      baad mein Google OAuth + Drive API
-      connect ki ja sakti hai.
-    */
-
+  async function copyCode() {
     try {
-      const existing =
-        localStorage.getItem(
-          DRIVE_PROJECTS_KEY
-        );
-
-      const projects =
-        existing
-          ? JSON.parse(existing)
-          : [];
-
-      const newProject = {
-        id:
-          typeof crypto !==
-          "undefined" &&
-          crypto.randomUUID
-            ? crypto.randomUUID()
-            : `${Date.now()}`,
-        name:
-          websiteName.trim() ||
-          "My Website",
-        prompt:
-          project?.prompt || "",
-        html,
-        createdAt:
-          new Date().toISOString(),
-      };
-
-      const updated = [
-        newProject,
-        ...projects,
-      ].slice(0, 50);
-
-      localStorage.setItem(
-        DRIVE_PROJECTS_KEY,
-        JSON.stringify(updated)
+      await navigator.clipboard.writeText(
+        html
       );
 
-      setShowSaveMenu(false);
-
-      setSavedMessage(
-        "Saved to My Drive"
-      );
+      setSaved(true);
 
       window.setTimeout(() => {
-        setSavedMessage("");
-      }, 2500);
-    } catch (err) {
-      console.error(
-        "Drive save error:",
-        err
-      );
-
+        setSaved(false);
+      }, 1500);
+    } catch {
       setError(
-        "Website save nahi ho payi."
+        "Code copy nahi ho paya."
       );
     }
   }
 
-  function saveToZUQENAI() {
-    setShowSaveMenu(false);
-
-    setSavedMessage(
-      "Save to ZUQEN AI — Coming soon"
-    );
-
-    window.setTimeout(() => {
-      setSavedMessage("");
-    }, 2500);
-  }
-
-  function closeSaveMenu() {
-    setShowSaveMenu(false);
+  function safeFileName(
+    value: string
+  ) {
+    return value
+      .replace(
+        /[^a-z0-9-_ ]/gi,
+        ""
+      )
+      .trim()
+      .replace(/\s+/g, "-")
+      .slice(0, 80);
   }
 
   function goBack() {
-    sessionStorage.setItem(
-      PROJECT_KEY,
-      JSON.stringify({
-        prompt:
-          project?.prompt || "",
-        html,
-        name:
-          websiteName ||
-          "My Website",
-        createdAt:
-          project?.createdAt ||
-          new Date().toISOString(),
-      })
-    );
+    try {
+      if (project) {
+        sessionStorage.setItem(
+          PROJECT_KEY,
+          JSON.stringify({
+            ...project,
+            html,
+          })
+        );
+      }
+    } catch (err) {
+      console.error(
+        "Back save error:",
+        err
+      );
+    }
 
     router.push(
       "/website-builder"
     );
   }
 
-  function openFullscreen() {
-    setFullscreen(true);
-  }
-
-  function closeFullscreen() {
-    setFullscreen(false);
-  }
-
-  function useSuggestion(
+  function setSuggestion(
     suggestion: string
   ) {
     setAiInstruction(
@@ -533,8 +647,95 @@ export default function WebsiteEditorPage() {
     );
   }
 
+  const deviceWidth =
+    useMemo(() => {
+      if (device === "mobile") {
+        return 390;
+      }
+
+      if (device === "tablet") {
+        return 768;
+      }
+
+      return 1440;
+    }, [device]);
+
+  const previewContainerStyle =
+    useMemo(
+      () => ({
+        width:
+          deviceWidth === 1440
+            ? "100%"
+            : `${deviceWidth}px`,
+        maxWidth:
+          "100%",
+      }),
+      [deviceWidth]
+    );
+
+  if (loading) {
+    return (
+      <main className="editor-loading">
+        <style jsx>{`
+          .editor-loading {
+            min-height: 100vh;
+            background: #050505;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family:
+              Inter,
+              system-ui,
+              sans-serif;
+          }
+
+          .loading-box {
+            text-align: center;
+          }
+
+          .spinner {
+            width: 30px;
+            height: 30px;
+            margin: 0 auto 15px;
+            border: 3px solid
+              rgba(255, 255, 255, 0.1);
+            border-top-color: #8066ff;
+            border-radius: 50%;
+            animation:
+              spin 0.7s linear infinite;
+          }
+
+          @keyframes spin {
+            to {
+              transform: rotate(360deg);
+            }
+          }
+
+          .loading-text {
+            color: #777;
+            font-size: 12px;
+          }
+        `}</style>
+
+        <div className="loading-box">
+          <div className="spinner" />
+          <div className="loading-text">
+            Loading website editor...
+          </div>
+        </div>
+      </main>
+    );
+  }
+
   return (
-    <main className="editor-page">
+    <main
+      className={`website-editor ${
+        fullscreen
+          ? "is-fullscreen"
+          : ""
+      }`}
+    >
       <style jsx global>{`
         * {
           box-sizing: border-box;
@@ -559,7 +760,6 @@ export default function WebsiteEditorPage() {
         }
 
         button,
-        input,
         textarea {
           font: inherit;
         }
@@ -568,452 +768,165 @@ export default function WebsiteEditorPage() {
           cursor: pointer;
         }
 
-        .editor-page {
+        .website-editor {
           min-height: 100vh;
           height: 100vh;
           overflow: hidden;
-          background: #070707;
+          display: flex;
+          flex-direction: column;
+          background: #050505;
           color: white;
         }
 
-        .editor-shell {
-          width: 100%;
-          height: 100%;
-          display: flex;
-          flex-direction: column;
+        .website-editor.is-fullscreen
+          .editor-sidebar,
+        .website-editor.is-fullscreen
+          .editor-topbar {
+          display: none;
         }
 
-        .editor-header {
+        .editor-topbar {
           height: 64px;
-          min-height: 64px;
-          padding: 0 16px;
+          flex: 0 0 64px;
           display: flex;
           align-items: center;
           justify-content: space-between;
           gap: 15px;
+          padding: 0 18px;
           border-bottom: 1px solid
-            rgba(255, 255, 255, 0.08);
-          background:
-            linear-gradient(
-              180deg,
-              rgba(16, 16, 17, 0.98),
-              rgba(8, 8, 9, 0.98)
-            );
-          position: relative;
-          z-index: 50;
+            rgba(255, 255, 255, 0.07);
+          background: #08080a;
+          z-index: 20;
         }
 
-        .header-left {
+        .topbar-left {
+          min-width: 0;
           display: flex;
           align-items: center;
           gap: 12px;
-          min-width: 0;
         }
 
-        .back-button {
-          width: 36px;
-          height: 36px;
-          border-radius: 9px;
-          border: 1px solid
-            rgba(255, 255, 255, 0.09);
-          background: rgba(
-            255,
-            255,
-            255,
-            0.035
-          );
-          color: #aaa;
+        .brand-mini {
+          width: 34px;
+          height: 34px;
+          flex: 0 0 34px;
+          border-radius: 10px;
           display: flex;
           align-items: center;
           justify-content: center;
-          transition: 0.2s ease;
-          flex-shrink: 0;
-        }
-
-        .back-button:hover {
-          color: white;
-          background: rgba(
-            255,
-            255,
-            255,
-            0.08
-          );
-        }
-
-        .brand {
-          display: flex;
-          align-items: center;
-          gap: 9px;
-          min-width: 0;
-        }
-
-        .brand-logo {
-          width: 30px;
-          height: 30px;
-          border-radius: 9px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
+          font-weight: 900;
+          font-size: 14px;
           background:
             linear-gradient(
               135deg,
               #8066ff,
               #4f46e5
             );
-          font-size: 13px;
-          font-weight: 900;
           box-shadow:
             0 0 25px
-              rgba(
-                124,
-                92,
-                255,
-                0.25
-              );
-          flex-shrink: 0;
+              rgba(124, 92, 255, 0.25);
         }
 
-        .brand-info {
+        .project-title-wrap {
           min-width: 0;
         }
 
-        .brand-name {
+        .project-title {
           font-size: 12px;
           font-weight: 800;
           white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
         }
 
-        .brand-label {
+        .project-subtitle {
           color: #555;
           font-size: 9px;
-          margin-top: 1px;
+          margin-top: 2px;
         }
 
-        .name-editor {
-          height: 35px;
-          min-width: 130px;
-          max-width: 260px;
-          padding: 0 10px;
-          border-radius: 8px;
+        .topbar-center {
+          display: flex;
+          align-items: center;
+          gap: 3px;
+          padding: 3px;
           border: 1px solid
-            transparent;
-          outline: none;
+            rgba(255, 255, 255, 0.07);
+          border-radius: 9px;
+          background: rgba(
+            255,
+            255,
+            255,
+            0.025
+          );
+        }
+
+        .mode-button {
+          height: 30px;
+          padding: 0 11px;
+          border: 0;
+          border-radius: 7px;
           background: transparent;
-          color: #aaa;
-          font-size: 12px;
+          color: #666;
+          font-size: 10px;
           font-weight: 700;
         }
 
-        .name-editor:hover {
+        .mode-button.active {
+          background: rgba(
+            255,
+            255,
+            255,
+            0.08
+          );
+          color: white;
+        }
+
+        .topbar-actions {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+        }
+
+        .credit-pill {
+          height: 32px;
+          padding: 0 10px;
+          display: flex;
+          align-items: center;
+          gap: 5px;
+          border-radius: 8px;
+          border: 1px solid
+            rgba(124, 92, 255, 0.2);
+          background: rgba(
+            124,
+            92,
+            255,
+            0.06
+          );
+          color: #afa3ff;
+          font-size: 9px;
+          font-weight: 800;
+        }
+
+        .toolbar-button {
+          height: 32px;
+          padding: 0 10px;
+          border: 1px solid
+            rgba(255, 255, 255, 0.07);
+          border-radius: 8px;
           background: rgba(
             255,
             255,
             255,
             0.03
           );
-          border-color: rgba(
-            255,
-            255,
-            255,
-            0.06
-          );
-        }
-
-        .name-editor:focus {
-          color: white;
-          background: rgba(
-            255,
-            255,
-            255,
-            0.045
-          );
-          border-color: rgba(
-            124,
-            92,
-            255,
-            0.35
-          );
-        }
-
-        .header-actions {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-        }
-
-        .header-button {
-          height: 36px;
-          padding: 0 12px;
-          border-radius: 9px;
-          border: 1px solid
-            rgba(255, 255, 255, 0.08);
-          background: rgba(
-            255,
-            255,
-            255,
-            0.035
-          );
-          color: #aaa;
-          font-size: 11px;
+          color: #999;
+          font-size: 10px;
           font-weight: 700;
           transition: 0.2s ease;
         }
 
-        .header-button:hover {
-          color: white;
-          background: rgba(
-            255,
-            255,
-            255,
-            0.08
-          );
-          border-color: rgba(
-            255,
-            255,
-            255,
-            0.14
-          );
-        }
-
-        .save-wrapper {
-          position: relative;
-        }
-
-        .save-button {
-          color: white;
-          border-color: rgba(
-            124,
-            92,
-            255,
-            0.35
-          );
-          background:
-            linear-gradient(
-              135deg,
-              rgba(
-                124,
-                92,
-                255,
-                0.25
-              ),
-              rgba(
-                79,
-                70,
-                229,
-                0.18
-              )
-            );
-        }
-
-        .save-button:hover {
-          border-color: rgba(
-            124,
-            92,
-            255,
-            0.6
-          );
-        }
-
-        .save-menu {
-          position: absolute;
-          right: 0;
-          top: calc(100% + 8px);
-          width: 245px;
-          padding: 7px;
-          border: 1px solid
-            rgba(255, 255, 255, 0.1);
-          border-radius: 13px;
-          background: #111113;
-          box-shadow:
-            0 25px 70px
-              rgba(0, 0, 0, 0.55);
-          z-index: 100;
-        }
-
-        .save-option {
-          width: 100%;
-          display: flex;
-          align-items: center;
-          gap: 11px;
-          text-align: left;
-          border: 0;
-          border-radius: 9px;
-          padding: 11px;
-          background: transparent;
-          color: white;
-          transition: 0.18s ease;
-        }
-
-        .save-option:hover {
-          background: rgba(
-            255,
-            255,
-            255,
-            0.06
-          );
-        }
-
-        .save-option-icon {
-          width: 32px;
-          height: 32px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          border-radius: 8px;
-          background: rgba(
-            255,
-            255,
-            255,
-            0.06
-          );
-          font-size: 15px;
-          flex-shrink: 0;
-        }
-
-        .save-option-title {
-          font-size: 11px;
-          font-weight: 800;
-        }
-
-        .save-option-text {
-          margin-top: 2px;
-          color: #666;
-          font-size: 9px;
-        }
-
-        .editor-workspace {
-          flex: 1;
-          min-height: 0;
-          display: grid;
-          grid-template-columns:
-            minmax(0, 1fr) 350px;
-        }
-
-        .preview-workspace {
-          min-width: 0;
-          min-height: 0;
-          display: flex;
-          flex-direction: column;
-          background: #0d0d0e;
-        }
-
-        .preview-toolbar {
-          height: 54px;
-          min-height: 54px;
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 10px;
-          padding: 0 12px;
-          border-bottom: 1px solid
-            rgba(255, 255, 255, 0.07);
-          background: rgba(
-            12,
-            12,
-            13,
-            0.96
-          );
-        }
-
-        .toolbar-group {
-          display: flex;
-          align-items: center;
-          gap: 5px;
-        }
-
-        .view-button {
-          height: 33px;
-          padding: 0 11px;
-          border: 1px solid
-            transparent;
-          border-radius: 8px;
-          background: transparent;
-          color: #666;
-          font-size: 11px;
-          font-weight: 700;
-        }
-
-        .view-button:hover {
-          color: #aaa;
-          background: rgba(
-            255,
-            255,
-            255,
-            0.04
-          );
-        }
-
-        .view-button.active {
-          color: white;
-          background: rgba(
-            255,
-            255,
-            255,
-            0.07
-          );
-          border-color: rgba(
-            255,
-            255,
-            255,
-            0.08
-          );
-        }
-
-        .toolbar-divider {
-          width: 1px;
-          height: 22px;
-          margin: 0 5px;
-          background: rgba(
-            255,
-            255,
-            255,
-            0.08
-          );
-        }
-
-        .device-button {
-          width: 34px;
-          height: 33px;
-          border: 1px solid
-            transparent;
-          border-radius: 8px;
-          background: transparent;
-          color: #666;
-          font-size: 14px;
-        }
-
-        .device-button:hover,
-        .device-button.active {
-          color: white;
-          background: rgba(
-            255,
-            255,
-            255,
-            0.07
-          );
-          border-color: rgba(
-            255,
-            255,
-            255,
-            0.08
-          );
-        }
-
-        .tool-icon {
-          width: 33px;
-          height: 33px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          border: 1px solid
-            transparent;
-          border-radius: 8px;
-          background: transparent;
-          color: #666;
-          font-size: 15px;
-        }
-
-        .tool-icon:hover:not(
+        .toolbar-button:hover:not(
             :disabled
           ) {
           color: white;
@@ -1023,110 +936,375 @@ export default function WebsiteEditorPage() {
             255,
             0.07
           );
+        }
+
+        .toolbar-button:disabled {
+          opacity: 0.3;
+          cursor: not-allowed;
+        }
+
+        .toolbar-button.primary {
+          color: white;
+          border-color: transparent;
+          background:
+            linear-gradient(
+              135deg,
+              #8066ff,
+              #5b4be7
+            );
+        }
+
+        .editor-body {
+          flex: 1;
+          min-height: 0;
+          display: flex;
+          overflow: hidden;
+        }
+
+        .editor-sidebar {
+          width: 310px;
+          flex: 0 0 310px;
+          min-height: 0;
+          border-right: 1px solid
+            rgba(255, 255, 255, 0.07);
+          background: #08080a;
+          display: flex;
+          flex-direction: column;
+          overflow-y: auto;
+        }
+
+        .sidebar-section {
+          padding: 17px;
+          border-bottom: 1px solid
+            rgba(255, 255, 255, 0.055);
+        }
+
+        .sidebar-heading {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          margin-bottom: 11px;
+          color: #aaa;
+          font-size: 10px;
+          font-weight: 800;
+        }
+
+        .sidebar-label {
+          color: #555;
+          font-size: 8px;
+          text-transform: uppercase;
+          letter-spacing: 0.12em;
+          font-weight: 800;
+        }
+
+        .ai-credit-note {
+          color: #555;
+          font-size: 8px;
+          font-weight: 600;
+        }
+
+        .ai-input {
+          width: 100%;
+          min-height: 112px;
+          resize: vertical;
+          border: 1px solid
+            rgba(255, 255, 255, 0.07);
+          outline: none;
+          border-radius: 10px;
+          padding: 11px;
+          background: rgba(
+            255,
+            255,
+            255,
+            0.035
+          );
+          color: #eee;
+          font-size: 10px;
+          line-height: 1.6;
+        }
+
+        .ai-input:focus {
           border-color: rgba(
+            124,
+            92,
+            255,
+            0.35
+          );
+        }
+
+        .ai-input::placeholder {
+          color: #4d4d4d;
+        }
+
+        .ai-button {
+          width: 100%;
+          height: 38px;
+          margin-top: 8px;
+          border: 0;
+          border-radius: 9px;
+          color: white;
+          font-size: 10px;
+          font-weight: 800;
+          background:
+            linear-gradient(
+              135deg,
+              #8066ff,
+              #5b4be7
+            );
+          box-shadow:
+            0 8px 25px
+              rgba(91, 75, 231, 0.2);
+        }
+
+        .ai-button:disabled {
+          opacity: 0.45;
+          cursor: not-allowed;
+        }
+
+        .suggestions {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 6px;
+          margin-top: 10px;
+        }
+
+        .suggestion {
+          border: 1px solid
+            rgba(255, 255, 255, 0.06);
+          border-radius: 999px;
+          padding: 6px 8px;
+          background: rgba(
             255,
             255,
+            255,
+            0.025
+          );
+          color: #666;
+          font-size: 8px;
+        }
+
+        .suggestion:hover {
+          color: #bbb;
+          border-color: rgba(
+            124,
+            92,
+            255,
+            0.25
+          );
+        }
+
+        .device-grid {
+          display: grid;
+          grid-template-columns:
+            repeat(3, 1fr);
+          gap: 6px;
+        }
+
+        .device-button {
+          height: 52px;
+          border: 1px solid
+            rgba(255, 255, 255, 0.06);
+          border-radius: 9px;
+          background: rgba(
+            255,
+            255,
+            255,
+            0.025
+          );
+          color: #666;
+          font-size: 9px;
+          font-weight: 700;
+        }
+
+        .device-button.active {
+          color: #c5bdff;
+          border-color: rgba(
+            124,
+            92,
+            255,
+            0.3
+          );
+          background: rgba(
+            124,
+            92,
             255,
             0.08
           );
         }
 
-        .tool-icon:disabled {
+        .history-actions {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 6px;
+        }
+
+        .history-button {
+          height: 34px;
+          border: 1px solid
+            rgba(255, 255, 255, 0.06);
+          border-radius: 8px;
+          background: rgba(
+            255,
+            255,
+            255,
+            0.025
+          );
+          color: #777;
+          font-size: 9px;
+          font-weight: 700;
+        }
+
+        .history-button:disabled {
           opacity: 0.25;
           cursor: not-allowed;
         }
 
-        .preview-canvas {
+        .sidebar-footer {
+          margin-top: auto;
+          padding: 15px 17px;
+          color: #444;
+          font-size: 8px;
+          line-height: 1.6;
+        }
+
+        .editor-workspace {
+          flex: 1;
+          min-width: 0;
+          min-height: 0;
+          display: flex;
+          flex-direction: column;
+          background: #111114;
+        }
+
+        .workspace-toolbar {
+          height: 48px;
+          flex: 0 0 48px;
+          padding: 0 13px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          border-bottom: 1px solid
+            rgba(255, 255, 255, 0.06);
+          background: #0c0c0f;
+        }
+
+        .workspace-left,
+        .workspace-right {
+          display: flex;
+          align-items: center;
+          gap: 5px;
+        }
+
+        .workspace-button {
+          height: 29px;
+          padding: 0 9px;
+          border: 1px solid
+            rgba(255, 255, 255, 0.06);
+          border-radius: 7px;
+          background: rgba(
+            255,
+            255,
+            255,
+            0.025
+          );
+          color: #777;
+          font-size: 9px;
+          font-weight: 700;
+        }
+
+        .workspace-button:hover {
+          color: white;
+        }
+
+        .workspace-button.active {
+          color: #c0b7ff;
+          border-color: rgba(
+            124,
+            92,
+            255,
+            0.2
+          );
+          background: rgba(
+            124,
+            92,
+            255,
+            0.06
+          );
+        }
+
+        .preview-area {
           flex: 1;
           min-height: 0;
           overflow: auto;
           display: flex;
-          align-items: flex-start;
           justify-content: center;
+          align-items: flex-start;
           padding: 25px;
           background:
             radial-gradient(
               circle at center,
               rgba(
-                255,
-                255,
+                124,
+                92,
                 255,
                 0.035
               ),
-              transparent 50%
+              transparent 40%
             ),
-            #111113;
+            #101012;
         }
 
         .preview-frame {
-          width: var(
-            --preview-width
-          );
-          max-width: 100%;
-          height: 100%;
-          min-height: 500px;
-          border-radius: 12px;
+          min-height: 700px;
+          flex-shrink: 0;
           overflow: hidden;
           background: white;
-          border: 1px solid
-            rgba(255, 255, 255, 0.1);
+          border-radius: 8px;
           box-shadow:
-            0 25px 70px
-              rgba(0, 0, 0, 0.45);
+            0 30px 80px
+              rgba(0, 0, 0, 0.45),
+            0 0 0 1px
+              rgba(255, 255, 255, 0.08);
           transition:
             width 0.25s ease;
+        }
+
+        .preview-frame.full-width {
+          width: 100%;
         }
 
         .preview-frame iframe {
           display: block;
           width: 100%;
-          height: 100%;
-          min-height: 500px;
+          min-height: 700px;
+          height: calc(
+            100vh - 137px
+          );
           border: 0;
           background: white;
         }
 
-        .code-panel {
+        .code-area {
           flex: 1;
           min-height: 0;
           display: flex;
           flex-direction: column;
-          padding: 16px;
-          background: #080809;
-          overflow: hidden;
+          padding: 14px;
+          background: #0d0d10;
         }
 
-        .code-heading {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          margin-bottom: 10px;
-        }
-
-        .code-heading-title {
-          color: #aaa;
-          font-size: 11px;
-          font-weight: 800;
-        }
-
-        .code-heading-subtitle {
-          color: #555;
-          font-size: 9px;
-          margin-top: 3px;
-        }
-
-        .code-textarea {
+        .code-editor {
           flex: 1;
-          width: 100%;
           min-height: 0;
+          width: 100%;
           resize: none;
           outline: none;
-          border-radius: 11px;
           border: 1px solid
-            rgba(255, 255, 255, 0.08);
-          background: #050506;
-          color: #d4d4d8;
+            rgba(255, 255, 255, 0.07);
+          border-radius: 9px;
           padding: 15px;
+          background: #08080a;
+          color: #d7d7d9;
           font-family:
             "SFMono-Regular",
             Consolas,
@@ -1137,1280 +1315,572 @@ export default function WebsiteEditorPage() {
           tab-size: 2;
         }
 
-        .code-textarea:focus {
-          border-color: rgba(
-            124,
-            92,
-            255,
-            0.35
-          );
-        }
-
         .code-actions {
           display: flex;
+          align-items: center;
           justify-content: flex-end;
           gap: 7px;
           margin-top: 9px;
         }
 
-        .code-action {
-          height: 34px;
-          padding: 0 11px;
-          border-radius: 8px;
-          border: 1px solid
-            rgba(255, 255, 255, 0.08);
-          background: rgba(
-            255,
-            255,
-            255,
-            0.04
-          );
-          color: #aaa;
-          font-size: 10px;
-          font-weight: 700;
-        }
-
-        .code-action:hover {
-          color: white;
-          background: rgba(
-            255,
-            255,
-            255,
-            0.08
-          );
-        }
-
-        .ai-panel {
-          min-width: 0;
-          min-height: 0;
-          display: flex;
-          flex-direction: column;
-          border-left: 1px solid
-            rgba(255, 255, 255, 0.08);
-          background:
-            radial-gradient(
-              circle at 50% 0%,
-              rgba(
-                124,
-                92,
-                255,
-                0.08
-              ),
-              transparent 35%
-            ),
-            #0a0a0b;
-        }
-
-        .ai-header {
-          height: 54px;
-          min-height: 54px;
-          padding: 0 15px;
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          border-bottom: 1px solid
-            rgba(255, 255, 255, 0.07);
-        }
-
-        .ai-title-area {
-          display: flex;
-          align-items: center;
-          gap: 9px;
-        }
-
-        .ai-avatar {
-          width: 30px;
-          height: 30px;
-          border-radius: 9px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          background:
-            linear-gradient(
-              135deg,
-              #8066ff,
-              #4f46e5
-            );
-          font-size: 13px;
-          font-weight: 900;
-          box-shadow:
-            0 0 20px
-              rgba(
-                124,
-                92,
-                255,
-                0.25
-              );
-        }
-
-        .ai-title {
-          font-size: 12px;
-          font-weight: 800;
-        }
-
-        .ai-status {
-          display: flex;
-          align-items: center;
-          gap: 5px;
-          color: #666;
-          font-size: 9px;
-          margin-top: 2px;
-        }
-
-        .status-dot {
-          width: 5px;
-          height: 5px;
-          border-radius: 50%;
-          background: #63d391;
-          box-shadow:
-            0 0 8px
-              rgba(
-                99,
-                211,
-                145,
-                0.7
-              );
-        }
-
-        .ai-content {
-          flex: 1;
-          min-height: 0;
-          overflow-y: auto;
-          padding: 16px;
-        }
-
-        .ai-welcome {
-          padding: 15px;
-          border-radius: 12px;
-          border: 1px solid
-            rgba(
-              124,
-              92,
-              255,
-              0.13
-            );
-          background:
-            linear-gradient(
-              135deg,
-              rgba(
-                124,
-                92,
-                255,
-                0.08
-              ),
-              rgba(
-                255,
-                255,
-                255,
-                0.02
-              )
-            );
-          margin-bottom: 18px;
-        }
-
-        .ai-welcome-title {
-          font-size: 12px;
-          font-weight: 800;
-          margin-bottom: 6px;
-        }
-
-        .ai-welcome-text {
-          color: #777;
-          font-size: 10px;
-          line-height: 1.6;
-        }
-
-        .suggestion-label {
-          color: #555;
-          text-transform: uppercase;
-          letter-spacing: 0.9px;
-          font-size: 9px;
-          font-weight: 800;
-          margin-bottom: 8px;
-        }
-
-        .suggestions {
-          display: flex;
-          flex-direction: column;
-          gap: 6px;
-        }
-
-        .suggestion {
-          width: 100%;
-          padding: 9px 10px;
-          text-align: left;
-          border-radius: 9px;
-          border: 1px solid
-            rgba(255, 255, 255, 0.06);
-          background: rgba(
-            255,
-            255,
-            255,
-            0.025
-          );
-          color: #888;
-          font-size: 10px;
-          line-height: 1.4;
-          transition: 0.18s ease;
-        }
-
-        .suggestion:hover {
-          color: #bbb;
-          border-color: rgba(
-            124,
-            92,
-            255,
-            0.22
-          );
-          background: rgba(
-            124,
-            92,
-            255,
-            0.055
-          );
-        }
-
-        .ai-input-area {
-          padding: 12px;
-          border-top: 1px solid
-            rgba(255, 255, 255, 0.07);
-          background: #0b0b0c;
-        }
-
-        .ai-input-wrapper {
-          border: 1px solid
-            rgba(255, 255, 255, 0.09);
-          border-radius: 12px;
-          background: #111113;
-          overflow: hidden;
-          transition: 0.2s ease;
-        }
-
-        .ai-input-wrapper:focus-within {
-          border-color: rgba(
-            124,
-            92,
-            255,
-            0.45
-          );
-          box-shadow:
-            0 0 0 3px
-              rgba(
-                124,
-                92,
-                255,
-                0.07
-              );
-        }
-
-        .ai-textarea {
-          display: block;
-          width: 100%;
-          min-height: 78px;
-          resize: none;
-          border: 0;
-          outline: 0;
-          padding: 11px;
-          background: transparent;
-          color: white;
-          font-size: 11px;
-          line-height: 1.55;
-        }
-
-        .ai-textarea::placeholder {
-          color: #555;
-        }
-
-        .ai-input-bottom {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          padding: 6px 7px 7px 10px;
-        }
-
-        .ai-input-hint {
-          color: #444;
-          font-size: 8px;
-        }
-
-        .ai-send {
-          width: 32px;
-          height: 32px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          border: 0;
-          border-radius: 8px;
-          color: white;
-          background:
-            linear-gradient(
-              135deg,
-              #8066ff,
-              #5947df
-            );
-          font-size: 13px;
-          transition: 0.2s ease;
-        }
-
-        .ai-send:hover:not(
-            :disabled
-          ) {
-          transform: translateY(-1px);
-          box-shadow:
-            0 7px 18px
-              rgba(
-                91,
-                75,
-                231,
-                0.3
-              );
-        }
-
-        .ai-send:disabled {
-          opacity: 0.4;
-          cursor: not-allowed;
-        }
-
-        .ai-spinner {
-          width: 13px;
-          height: 13px;
-          border-radius: 50%;
-          border: 2px solid
-            rgba(
-              255,
-              255,
-              255,
-              0.25
-            );
-          border-top-color: white;
-          animation:
-            editor-spin
-            0.7s linear infinite;
-        }
-
-        .error-bar {
+        .error-box {
           position: fixed;
-          left: 50%;
+          left: 330px;
+          right: 20px;
           bottom: 20px;
-          transform: translateX(-50%);
-          max-width: min(
-            600px,
-            calc(100vw - 30px)
-          );
-          padding: 10px 14px;
-          border-radius: 10px;
+          z-index: 100;
+          padding: 11px 14px;
           border: 1px solid
-            rgba(255, 70, 70, 0.25);
-          background: #171011;
-          color: #ff9d9d;
-          font-size: 10px;
-          line-height: 1.4;
-          box-shadow:
-            0 20px 50px
-              rgba(0, 0, 0, 0.4);
-          z-index: 500;
-        }
-
-        .success-toast {
-          position: fixed;
-          left: 50%;
-          bottom: 20px;
-          transform: translateX(-50%);
-          padding: 9px 14px;
-          border-radius: 999px;
-          border: 1px solid
-            rgba(99, 211, 145, 0.2);
-          background: #0d1511;
-          color: #8ee0ad;
-          font-size: 10px;
-          font-weight: 700;
-          z-index: 501;
-          box-shadow:
-            0 15px 45px
-              rgba(0, 0, 0, 0.4);
-        }
-
-        .loading-overlay {
-          position: fixed;
-          inset: 0;
-          z-index: 900;
-          display: flex;
-          align-items: center;
-          justify-content: center;
+            rgba(255, 75, 75, 0.2);
+          border-radius: 9px;
           background: rgba(
-            0,
-            0,
-            0,
-            0.52
+            35,
+            10,
+            12,
+            0.96
           );
-          backdrop-filter: blur(5px);
-        }
-
-        .loading-card {
-          width: min(
-            360px,
-            calc(100vw - 30px)
-          );
-          padding: 25px;
-          border-radius: 17px;
-          border: 1px solid
-            rgba(255, 255, 255, 0.1);
-          background: #111113;
-          text-align: center;
+          color: #ff9b9b;
+          font-size: 10px;
           box-shadow:
-            0 30px 90px
-              rgba(0, 0, 0, 0.6);
+            0 15px 40px
+              rgba(0, 0, 0, 0.45);
         }
 
-        .loading-spinner {
-          width: 35px;
-          height: 35px;
-          margin: 0 auto 15px;
-          border-radius: 50%;
-          border: 3px solid
-            rgba(255, 255, 255, 0.1);
-          border-top-color: #8066ff;
-          animation:
-            editor-spin
-            0.8s linear infinite;
-        }
-
-        .loading-title {
-          font-size: 13px;
-          font-weight: 800;
-        }
-
-        .loading-text {
-          color: #666;
-          font-size: 10px;
-          line-height: 1.6;
-          margin-top: 6px;
-        }
-
-        .fullscreen {
-          position: fixed;
-          inset: 0;
-          z-index: 1000;
-          display: flex;
-          flex-direction: column;
-          background: #080808;
-        }
-
-        .fullscreen-header {
-          height: 54px;
-          min-height: 54px;
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          padding: 0 14px;
-          border-bottom: 1px solid
-            rgba(255, 255, 255, 0.08);
-          background: #0c0c0d;
-        }
-
-        .fullscreen-name {
-          font-size: 12px;
-          font-weight: 800;
-        }
-
-        .fullscreen-close {
-          height: 34px;
-          padding: 0 12px;
-          border-radius: 8px;
-          border: 1px solid
-            rgba(255, 255, 255, 0.1);
-          background: rgba(
-            255,
-            255,
-            255,
-            0.04
-          );
-          color: #aaa;
-          font-size: 10px;
+        .saved-indicator {
+          color: #86dca2;
+          font-size: 9px;
           font-weight: 700;
         }
 
-        .fullscreen-close:hover {
-          color: white;
-          background: rgba(
-            255,
-            255,
-            255,
-            0.08
-          );
-        }
+        @media (max-width: 900px) {
+          .editor-sidebar {
+            width: 260px;
+            flex-basis: 260px;
+          }
 
-        .fullscreen-frame {
-          flex: 1;
-          background: white;
-        }
+          .topbar-center {
+            display: none;
+          }
 
-        .fullscreen-frame iframe {
-          width: 100%;
-          height: 100%;
-          border: 0;
-        }
+          .credit-pill {
+            display: none;
+          }
 
-        @keyframes editor-spin {
-          to {
-            transform: rotate(360deg);
+          .error-box {
+            left: 275px;
           }
         }
 
-        @media (max-width: 950px) {
-          .editor-workspace {
-            grid-template-columns:
-              minmax(0, 1fr) 300px;
-          }
-
-          .name-editor {
-            max-width: 170px;
-          }
-
-          .ai-panel {
-            width: 300px;
-          }
-        }
-
-        @media (max-width: 760px) {
-          .editor-header {
+        @media (max-width: 700px) {
+          .editor-topbar {
             padding: 0 10px;
           }
 
-          .brand-info,
-          .brand-label {
+          .editor-sidebar {
             display: none;
           }
 
-          .name-editor {
-            min-width: 100px;
-            max-width: 130px;
+          .workspace-toolbar {
+            padding: 0 8px;
           }
 
-          .header-button {
-            padding: 0 9px;
-          }
-
-          .editor-workspace {
-            display: flex;
-            flex-direction: column;
-          }
-
-          .preview-workspace {
-            flex: 1;
-            min-height: 0;
-          }
-
-          .ai-panel {
-            width: 100%;
-            height: 290px;
-            min-height: 290px;
-            border-left: 0;
-            border-top: 1px solid
-              rgba(255, 255, 255, 0.08);
-          }
-
-          .ai-content {
-            padding: 10px 12px;
-          }
-
-          .ai-welcome {
-            display: none;
-          }
-
-          .suggestions {
-            flex-direction: row;
-            overflow-x: auto;
-          }
-
-          .suggestion {
-            min-width: 180px;
-          }
-
-          .preview-canvas {
-            padding: 12px;
+          .preview-area {
+            padding: 10px;
           }
 
           .preview-frame {
-            min-height: 400px;
+            min-height: 600px;
           }
 
           .preview-frame iframe {
-            min-height: 400px;
+            min-height: 600px;
+            height: calc(
+              100vh - 112px
+            );
           }
 
-          .toolbar-divider {
-            margin: 0 2px;
+          .error-box {
+            left: 10px;
+            right: 10px;
+            bottom: 10px;
           }
 
-          .view-button {
-            padding: 0 8px;
-          }
-        }
-
-        @media (max-width: 520px) {
-          .header-left {
-            gap: 6px;
-          }
-
-          .back-button {
-            width: 32px;
-            height: 32px;
-          }
-
-          .brand-logo {
-            width: 29px;
-            height: 29px;
-          }
-
-          .name-editor {
-            font-size: 10px;
-            max-width: 105px;
-          }
-
-          .header-actions
-            .header-button:first-child {
+          .project-subtitle {
             display: none;
           }
 
-          .preview-toolbar {
-            padding: 0 7px;
-          }
-
-          .device-button {
-            width: 30px;
-          }
-
-          .tool-icon {
-            width: 30px;
-          }
-
-          .preview-canvas {
-            padding: 8px;
-          }
-
-          .ai-panel {
-            height: 300px;
-            min-height: 300px;
+          .toolbar-button span.hide-mobile {
+            display: none;
           }
         }
       `}</style>
 
-      <div className="editor-shell">
-        <header className="editor-header">
-          <div className="header-left">
-            <button
-              type="button"
-              className="back-button"
-              onClick={goBack}
-              title="Back"
-            >
-              ←
-            </button>
+      <header className="editor-topbar">
+        <div className="topbar-left">
+          <button
+            type="button"
+            className="toolbar-button"
+            onClick={goBack}
+          >
+            ←
+          </button>
 
-            <div className="brand">
-              <div className="brand-logo">
-                K
-              </div>
+          <div className="brand-mini">
+            K
+          </div>
 
-              <div className="brand-info">
-                <div className="brand-name">
-                  ZUQEN AI
-                </div>
-
-                <div className="brand-label">
-                  Website Editor
-                </div>
-              </div>
+          <div className="project-title-wrap">
+            <div className="project-title">
+              {project?.name ||
+                "ZUQEN Website"}
             </div>
 
-            <input
-              className="name-editor"
-              value={websiteName}
+            <div className="project-subtitle">
+              Website Builder · AI Editor
+            </div>
+          </div>
+        </div>
+
+        <div className="topbar-center">
+          <button
+            type="button"
+            className={`mode-button ${
+              viewMode === "preview"
+                ? "active"
+                : ""
+            }`}
+            onClick={() => {
+              setViewMode("preview");
+              setShowCodePanel(false);
+            }}
+          >
+            Preview
+          </button>
+
+          <button
+            type="button"
+            className={`mode-button ${
+              viewMode === "code"
+                ? "active"
+                : ""
+            }`}
+            onClick={() => {
+              setViewMode("code");
+              setShowCodePanel(true);
+              setCodeValue(html);
+            }}
+          >
+            Code
+          </button>
+        </div>
+
+        <div className="topbar-actions">
+          <div className="credit-pill">
+            ✦{" "}
+            {creditBalance === null
+              ? "Credits"
+              : creditBalance.toLocaleString()}
+          </div>
+
+          {saved && (
+            <span className="saved-indicator">
+              Saved
+            </span>
+          )}
+
+          <button
+            type="button"
+            className="toolbar-button"
+            onClick={copyCode}
+          >
+            Copy
+          </button>
+
+          <button
+            type="button"
+            className="toolbar-button"
+            onClick={downloadWebsite}
+          >
+            Download
+          </button>
+
+          <button
+            type="button"
+            className="toolbar-button primary"
+            onClick={() =>
+              saveCurrentProject()
+            }
+          >
+            Save
+          </button>
+        </div>
+      </header>
+
+      <div className="editor-body">
+        <aside className="editor-sidebar">
+          <section className="sidebar-section">
+            <div className="sidebar-heading">
+              <span>
+                ✦ AI Website Editor
+              </span>
+
+              <span className="ai-credit-note">
+                ~{AI_EDIT_CREDITS} credits
+              </span>
+            </div>
+
+            <textarea
+              className="ai-input"
+              value={aiInstruction}
               onChange={(event) =>
-                setWebsiteName(
+                setAiInstruction(
                   event.target.value
                 )
               }
-              placeholder="Website name"
-              aria-label="Website name"
+              disabled={aiLoading}
+              placeholder="Example: Make the hero section more premium, add a glowing CTA button and improve the mobile layout..."
             />
-          </div>
 
-          <div className="header-actions">
             <button
               type="button"
-              className="header-button"
-              onClick={downloadWebsite}
-              disabled={!html}
+              className="ai-button"
+              onClick={() =>
+                handleAiEdit()
+              }
+              disabled={
+                aiLoading ||
+                !aiInstruction.trim() ||
+                (creditBalance !== null &&
+                  creditBalance <
+                    AI_EDIT_CREDITS)
+              }
             >
-              ↓ Export
+              {aiLoading
+                ? "AI is editing..."
+                : `✦ Edit with AI · ~${AI_EDIT_CREDITS} credits`}
             </button>
 
-            <div className="save-wrapper">
+            <div className="suggestions">
               <button
                 type="button"
-                className="header-button save-button"
+                className="suggestion"
                 onClick={() =>
-                  setShowSaveMenu(
-                    (current) =>
-                      !current
+                  setSuggestion(
+                    "Make the website more premium and modern without removing any existing sections."
                   )
                 }
-                disabled={!html}
               >
-                💾 Save
+                Make it premium
               </button>
 
-              {showSaveMenu && (
-                <div className="save-menu">
-                  <button
-                    type="button"
-                    className="save-option"
-                    onClick={
-                      saveToMyDrive
-                    }
-                  >
-                    <div className="save-option-icon">
-                      ☁
-                    </div>
+              <button
+                type="button"
+                className="suggestion"
+                onClick={() =>
+                  setSuggestion(
+                    "Improve the mobile responsive layout and make every section look perfect on small screens."
+                  )
+                }
+              >
+                Improve mobile
+              </button>
 
-                    <div>
-                      <div className="save-option-title">
-                        Save to My Drive
-                      </div>
+              <button
+                type="button"
+                className="suggestion"
+                onClick={() =>
+                  setSuggestion(
+                    "Improve typography, spacing, buttons and visual hierarchy while keeping the current overall design."
+                  )
+                }
+              >
+                Improve design
+              </button>
 
-                      <div className="save-option-text">
-                        Save this website to
-                        your projects.
-                      </div>
-                    </div>
-                  </button>
-
-                  <button
-                    type="button"
-                    className="save-option"
-                    onClick={
-                      saveToZUQENAI
-                    }
-                  >
-                    <div className="save-option-icon">
-                      ✦
-                    </div>
-
-                    <div>
-                      <div className="save-option-title">
-                        Save to ZUQEN AI
-                      </div>
-
-                      <div className="save-option-text">
-                        Keep it inside your
-                        ZUQEN workspace.
-                      </div>
-                    </div>
-                  </button>
-                </div>
-              )}
+              <button
+                type="button"
+                className="suggestion"
+                onClick={() =>
+                  setSuggestion(
+                    "Add smooth professional animations and hover effects without making the website slow."
+                  )
+                }
+              >
+                Add animations
+              </button>
             </div>
-          </div>
-        </header>
-
-        <div className="editor-workspace">
-          <section className="preview-workspace">
-            <div className="preview-toolbar">
-              <div className="toolbar-group">
-                <button
-                  type="button"
-                  className={`view-button ${
-                    viewMode ===
-                    "preview"
-                      ? "active"
-                      : ""
-                  }`}
-                  onClick={() =>
-                    setViewMode(
-                      "preview"
-                    )
-                  }
-                >
-                  ◉ Preview
-                </button>
-
-                <button
-                  type="button"
-                  className={`view-button ${
-                    viewMode === "code"
-                      ? "active"
-                      : ""
-                  }`}
-                  onClick={() =>
-                    setViewMode("code")
-                  }
-                >
-                  {"</>"} Code
-                </button>
-              </div>
-
-              <div className="toolbar-group">
-                {viewMode ===
-                  "preview" && (
-                  <>
-                    <button
-                      type="button"
-                      className={`device-button ${
-                        device ===
-                        "desktop"
-                          ? "active"
-                          : ""
-                      }`}
-                      onClick={() =>
-                        setDevice(
-                          "desktop"
-                        )
-                      }
-                      title="Desktop"
-                    >
-                      🖥
-                    </button>
-
-                    <button
-                      type="button"
-                      className={`device-button ${
-                        device ===
-                        "tablet"
-                          ? "active"
-                          : ""
-                      }`}
-                      onClick={() =>
-                        setDevice(
-                          "tablet"
-                        )
-                      }
-                      title="Tablet"
-                    >
-                      ▣
-                    </button>
-
-                    <button
-                      type="button"
-                      className={`device-button ${
-                        device ===
-                        "mobile"
-                          ? "active"
-                          : ""
-                      }`}
-                      onClick={() =>
-                        setDevice(
-                          "mobile"
-                        )
-                      }
-                      title="Mobile"
-                    >
-                      📱
-                    </button>
-
-                    <div className="toolbar-divider" />
-                  </>
-                )}
-
-                <button
-                  type="button"
-                  className="tool-icon"
-                  onClick={undo}
-                  disabled={!canUndo}
-                  title="Undo"
-                >
-                  ↶
-                </button>
-
-                <button
-                  type="button"
-                  className="tool-icon"
-                  onClick={redo}
-                  disabled={!canRedo}
-                  title="Redo"
-                >
-                  ↷
-                </button>
-
-                <button
-                  type="button"
-                  className="tool-icon"
-                  onClick={
-                    refreshPreview
-                  }
-                  disabled={!html}
-                  title="Refresh preview"
-                >
-                  ↻
-                </button>
-
-                <button
-                  type="button"
-                  className="tool-icon"
-                  onClick={
-                    copyCode
-                  }
-                  disabled={!html}
-                  title="Copy code"
-                >
-                  {copied
-                    ? "✓"
-                    : "⧉"}
-                </button>
-
-                <button
-                  type="button"
-                  className="tool-icon"
-                  onClick={
-                    openFullscreen
-                  }
-                  disabled={!html}
-                  title="Fullscreen"
-                >
-                  ⛶
-                </button>
-              </div>
-            </div>
-
-            {viewMode ===
-            "preview" ? (
-              <div className="preview-canvas">
-                {html ? (
-                  <div
-                    className="preview-frame"
-                    style={
-                      {
-                        "--preview-width":
-                          previewWidth,
-                      } as React.CSSProperties
-                    }
-                  >
-                    <iframe
-                      key={
-                        previewKey
-                      }
-                      title="ZUQEN AI Website Preview"
-                      srcDoc={html}
-                      sandbox="allow-scripts allow-forms allow-modals allow-popups"
-                    />
-                  </div>
-                ) : (
-                  <div
-                    style={{
-                      display:
-                        "flex",
-                      alignItems:
-                        "center",
-                      justifyContent:
-                        "center",
-                      width: "100%",
-                      color: "#555",
-                      fontSize: 12,
-                    }}
-                  >
-                    Loading website...
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="code-panel">
-                <div className="code-heading">
-                  <div>
-                    <div className="code-heading-title">
-                      Website Source
-                    </div>
-
-                    <div className="code-heading-subtitle">
-                      Edit HTML, CSS and
-                      JavaScript directly
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    className="code-action"
-                    onClick={
-                      copyCode
-                    }
-                  >
-                    {copied
-                      ? "✓ Copied"
-                      : "Copy"}
-                  </button>
-                </div>
-
-                <textarea
-                  className="code-textarea"
-                  value={html}
-                  onChange={(event) =>
-                    handleCodeChange(
-                      event.target.value
-                    )
-                  }
-                  spellCheck={false}
-                />
-
-                <div className="code-actions">
-                  <button
-                    type="button"
-                    className="code-action"
-                    onClick={() =>
-                      setHtml(
-                        history[
-                          historyIndex
-                        ] || html
-                      )
-                    }
-                  >
-                    Reset
-                  </button>
-
-                  <button
-                    type="button"
-                    className="code-action"
-                    onClick={
-                      applyCodeChanges
-                    }
-                  >
-                    Apply Changes
-                  </button>
-                </div>
-              </div>
-            )}
           </section>
 
-          <aside className="ai-panel">
-            <div className="ai-header">
-              <div className="ai-title-area">
-                <div className="ai-avatar">
-                  K
-                </div>
-
-                <div>
-                  <div className="ai-title">
-                    ZUQEN AI
-                  </div>
-
-                  <div className="ai-status">
-                    <span className="status-dot" />
-                    Ready to edit
-                  </div>
-                </div>
-              </div>
+          <section className="sidebar-section">
+            <div className="sidebar-heading">
+              <span>
+                Device Preview
+              </span>
             </div>
 
-            <div className="ai-content">
-              <div className="ai-welcome">
-                <div className="ai-welcome-title">
-                  What should I change?
-                </div>
+            <div className="device-grid">
+              <button
+                type="button"
+                className={`device-button ${
+                  device === "desktop"
+                    ? "active"
+                    : ""
+                }`}
+                onClick={() =>
+                  setDevice("desktop")
+                }
+              >
+                🖥
+                <br />
+                Desktop
+              </button>
 
-                <div className="ai-welcome-text">
-                  Tell ZUQEN naturally what
-                  you want to add, remove or
-                  redesign. I'll update the
-                  website while keeping the
-                  rest intact.
-                </div>
-              </div>
+              <button
+                type="button"
+                className={`device-button ${
+                  device === "tablet"
+                    ? "active"
+                    : ""
+                }`}
+                onClick={() =>
+                  setDevice("tablet")
+                }
+              >
+                ▣
+                <br />
+                Tablet
+              </button>
 
-              <div className="suggestion-label">
-                Try asking
-              </div>
+              <button
+                type="button"
+                className={`device-button ${
+                  device === "mobile"
+                    ? "active"
+                    : ""
+                }`}
+                onClick={() =>
+                  setDevice("mobile")
+                }
+              >
+                📱
+                <br />
+                Mobile
+              </button>
+            </div>
+          </section>
 
-              <div className="suggestions">
-                <button
-                  type="button"
-                  className="suggestion"
-                  onClick={() =>
-                    useSuggestion(
-                      "Add a beautiful pricing section with three premium pricing plans."
-                    )
-                  }
-                >
-                  Add a pricing section
-                </button>
-
-                <button
-                  type="button"
-                  className="suggestion"
-                  onClick={() =>
-                    useSuggestion(
-                      "Change the website color scheme to a premium purple and black gradient."
-                    )
-                  }
-                >
-                  Change the color scheme
-                </button>
-
-                <button
-                  type="button"
-                  className="suggestion"
-                  onClick={() =>
-                    useSuggestion(
-                      "Add a modern testimonials section with customer reviews."
-                    )
-                  }
-                >
-                  Add testimonials
-                </button>
-
-                <button
-                  type="button"
-                  className="suggestion"
-                  onClick={() =>
-                    useSuggestion(
-                      "Make the website feel more premium, modern and visually polished."
-                    )
-                  }
-                >
-                  Make it more premium
-                </button>
-
-                <button
-                  type="button"
-                  className="suggestion"
-                  onClick={() =>
-                    useSuggestion(
-                      "Improve the mobile responsive layout without changing the desktop design."
-                    )
-                  }
-                >
-                  Improve mobile layout
-                </button>
-              </div>
+          <section className="sidebar-section">
+            <div className="sidebar-heading">
+              <span>
+                History
+              </span>
             </div>
 
-            <div className="ai-input-area">
-              <div className="ai-input-wrapper">
-                <textarea
-                  className="ai-textarea"
-                  value={
-                    aiInstruction
-                  }
-                  onChange={(
-                    event
-                  ) =>
-                    setAiInstruction(
-                      event.target
-                        .value
-                    )
-                  }
-                  onKeyDown={(
-                    event
-                  ) => {
-                    if (
-                      event.key ===
-                        "Enter" &&
-                      !event.shiftKey
-                    ) {
-                      event.preventDefault();
+            <div className="history-actions">
+              <button
+                type="button"
+                className="history-button"
+                onClick={undo}
+                disabled={
+                  historyIndex <= 0
+                }
+              >
+                ↶ Undo
+              </button>
 
-                      if (
-                        !loading &&
-                        aiInstruction.trim()
-                      ) {
-                        editWebsite();
-                      }
-                    }
-                  }}
-                  placeholder="Ask ZUQEN to change something..."
-                  disabled={loading}
+              <button
+                type="button"
+                className="history-button"
+                onClick={redo}
+                disabled={
+                  historyIndex >=
+                  history.length - 1
+                }
+              >
+                ↷ Redo
+              </button>
+            </div>
+          </section>
+
+          <section className="sidebar-section">
+            <div className="sidebar-heading">
+              <span>
+                Project
+              </span>
+            </div>
+
+            <button
+              type="button"
+              className="workspace-button"
+              style={{
+                width: "100%",
+              }}
+              onClick={() =>
+                saveCurrentProject()
+              }
+            >
+              ◈ Save to My Drive
+            </button>
+
+            <button
+              type="button"
+              className="workspace-button"
+              style={{
+                width: "100%",
+                marginTop: 6,
+              }}
+              onClick={() =>
+                setError(
+                  "Cloud Drive integration coming soon."
+                )
+              }
+            >
+              ☁ Save to ZUQEN AI
+            </button>
+          </section>
+
+          <div className="sidebar-footer">
+            ZUQEN AI Website Builder
+            <br />
+            AI edits use your ZUQEN credit
+            balance.
+          </div>
+        </aside>
+
+        <section className="editor-workspace">
+          <div className="workspace-toolbar">
+            <div className="workspace-left">
+              <button
+                type="button"
+                className={`workspace-button ${
+                  viewMode ===
+                  "preview"
+                    ? "active"
+                    : ""
+                }`}
+                onClick={() => {
+                  setViewMode(
+                    "preview"
+                  );
+                  setShowCodePanel(
+                    false
+                  );
+                }}
+              >
+                Preview
+              </button>
+
+              <button
+                type="button"
+                className={`workspace-button ${
+                  viewMode === "code"
+                    ? "active"
+                    : ""
+                }`}
+                onClick={() => {
+                  setViewMode("code");
+                  setShowCodePanel(
+                    true
+                  );
+                  setCodeValue(html);
+                }}
+              >
+                &lt;/&gt; Code
+              </button>
+            </div>
+
+            <div className="workspace-right">
+              <button
+                type="button"
+                className="workspace-button"
+                onClick={() =>
+                  setFullscreen(
+                    (value) => !value
+                  )
+                }
+              >
+                {fullscreen
+                  ? "Exit Fullscreen"
+                  : "Fullscreen"}
+              </button>
+
+              <button
+                type="button"
+                className="workspace-button"
+                onClick={() =>
+                  setPreviewKey(
+                    (value) =>
+                      value + 1
+                  )
+                }
+              >
+                ↻ Refresh
+              </button>
+            </div>
+          </div>
+
+          {viewMode === "preview" &&
+          !showCodePanel ? (
+            <div className="preview-area">
+              <div
+                className={`preview-frame ${
+                  device === "desktop"
+                    ? "full-width"
+                    : ""
+                }`}
+                style={
+                  previewContainerStyle
+                }
+              >
+                <iframe
+                  key={previewKey}
+                  ref={iframeRef}
+                  title="ZUQEN Website Preview"
+                  srcDoc={html}
+                  sandbox="allow-scripts allow-forms allow-modals allow-popups"
                 />
-
-                <div className="ai-input-bottom">
-                  <div className="ai-input-hint">
-                    Enter to send · Shift +
-                    Enter for new line
-                  </div>
-
-                  <button
-                    type="button"
-                    className="ai-send"
-                    onClick={
-                      editWebsite
-                    }
-                    disabled={
-                      loading ||
-                      !aiInstruction.trim() ||
-                      !html
-                    }
-                    title="Send to ZUQEN AI"
-                  >
-                    {loading ? (
-                      <span className="ai-spinner" />
-                    ) : (
-                      "↑"
-                    )}
-                  </button>
-                </div>
               </div>
             </div>
-          </aside>
-        </div>
+          ) : (
+            <div className="code-area">
+              <textarea
+                className="code-editor"
+                value={codeValue}
+                onChange={(event) =>
+                  setCodeValue(
+                    event.target.value
+                  )
+                }
+                spellCheck={false}
+              />
+
+              <div className="code-actions">
+                <button
+                  type="button"
+                  className="workspace-button"
+                  onClick={resetCode}
+                >
+                  Reset
+                </button>
+
+                <button
+                  type="button"
+                  className="workspace-button primary"
+                  onClick={
+                    applyCodeChanges
+                  }
+                >
+                  Apply Changes
+                </button>
+              </div>
+            </div>
+          )}
+        </section>
       </div>
 
       {error && (
-        <div className="error-bar">
+        <div className="error-box">
           {error}
-        </div>
-      )}
-
-      {savedMessage && (
-        <div className="success-toast">
-          ✓ {savedMessage}
-        </div>
-      )}
-
-      {fullscreen &&
-        html && (
-          <div className="fullscreen">
-            <div className="fullscreen-header">
-              <div className="fullscreen-name">
-                {websiteName ||
-                  "My Website"}
-              </div>
-
-              <button
-                type="button"
-                className="fullscreen-close"
-                onClick={
-                  closeFullscreen
-                }
-              >
-                ✕ Close Fullscreen
-              </button>
-            </div>
-
-            <div className="fullscreen-frame">
-              <iframe
-                title="Fullscreen Website Preview"
-                srcDoc={html}
-                sandbox="allow-scripts allow-forms allow-modals allow-popups"
-              />
-            </div>
-          </div>
-        )}
-
-      {loading && (
-        <div className="loading-overlay">
-          <div className="loading-card">
-            <div className="loading-spinner" />
-
-            <div className="loading-title">
-              ZUQEN is editing your
-              website
-            </div>
-
-            <div className="loading-text">
-              AI tumhari request ke
-              according website ko update
-              kar raha hai. Existing
-              features ko preserve karne ki
-              koshish ki ja rahi hai...
-            </div>
-          </div>
         </div>
       )}
     </main>

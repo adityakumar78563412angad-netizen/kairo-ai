@@ -1,7 +1,19 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+
+const MAX_PROMPT_LENGTH = 10000;
+
+// Website Builder ke liye estimated credit cost.
+// Backend final cost ka authority rahega.
+const ESTIMATED_CREDITS = 100;
+
+type CreditsResponse = {
+  balance?: number;
+  error?: string;
+  code?: string;
+};
 
 export default function WebsiteBuilderPage() {
   const router = useRouter();
@@ -10,18 +22,104 @@ export default function WebsiteBuilderPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
+  const [creditBalance, setCreditBalance] =
+    useState<number | null>(null);
+
+  const [loadingCredits, setLoadingCredits] =
+    useState(true);
+
+  const [refreshingCredits, setRefreshingCredits] =
+    useState(false);
+
+  const remainingCredits =
+    creditBalance === null
+      ? null
+      : creditBalance - ESTIMATED_CREDITS;
+
+  const hasEnoughCredits =
+    creditBalance !== null &&
+    creditBalance >= ESTIMATED_CREDITS;
+
+  const creditsNeeded =
+    creditBalance === null
+      ? 0
+      : Math.max(
+          ESTIMATED_CREDITS - creditBalance,
+          0
+        );
+
+  async function loadCredits(silent = false) {
+    try {
+      if (silent) {
+        setRefreshingCredits(true);
+      } else {
+        setLoadingCredits(true);
+      }
+
+      const response = await fetch("/api/credits", {
+        method: "GET",
+        cache: "no-store",
+      });
+
+      const data: CreditsResponse =
+        await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.error || "Credits load nahi ho paaye."
+        );
+      }
+
+      setCreditBalance(
+        Number(data.balance ?? 0)
+      );
+    } catch (err) {
+      console.error(
+        "Website Builder credits error:",
+        err
+      );
+
+      setCreditBalance(null);
+    } finally {
+      setLoadingCredits(false);
+      setRefreshingCredits(false);
+    }
+  }
+
+  useEffect(() => {
+    loadCredits();
+  }, []);
+
   async function generateWebsite(event?: FormEvent) {
     event?.preventDefault();
 
     const finalPrompt = prompt.trim();
 
     if (!finalPrompt) {
-      setError("Pehle batao ki tum kis type ki website banana chahte ho.");
+      setError(
+        "Pehle batao ki tum kis type ki website banana chahte ho."
+      );
       return;
     }
 
-    if (finalPrompt.length > 10000) {
-      setError("Prompt 10,000 characters se chhota rakho.");
+    if (finalPrompt.length > MAX_PROMPT_LENGTH) {
+      setError(
+        `Prompt ${MAX_PROMPT_LENGTH.toLocaleString()} characters se chhota rakho.`
+      );
+      return;
+    }
+
+    if (creditBalance === null) {
+      setError(
+        "Credit balance load nahi hua. Thodi der baad dobara try karo."
+      );
+      return;
+    }
+
+    if (!hasEnoughCredits) {
+      setError(
+        `Not enough ZUQEN credits. Tumhe ${creditsNeeded.toLocaleString()} aur credits chahiye.`
+      );
       return;
     }
 
@@ -29,26 +127,84 @@ export default function WebsiteBuilderPage() {
     setLoading(true);
 
     try {
-      const response = await fetch("/api/website-builder", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          action: "generate",
-          prompt: finalPrompt,
-        }),
-      });
+      const response = await fetch(
+        "/api/website-builder",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            action: "generate",
+            prompt: finalPrompt,
+          }),
+        }
+      );
 
-      const data = await response.json();
+      let data: {
+        success?: boolean;
+        html?: string;
+        error?: string;
+        message?: string;
+        code?: string;
+        balance?: number;
+        required?: number;
+        missing?: number;
+      } = {};
 
-      if (!response.ok || !data.success) {
+      try {
+        data = await response.json();
+      } catch {
         throw new Error(
-          data.error || "Website generate nahi ho payi."
+          "Server ne valid response nahi diya."
         );
       }
 
-      if (!data.html || typeof data.html !== "string") {
+      if (!response.ok || !data.success) {
+        if (
+          data.code === "insufficient_credits"
+        ) {
+          if (
+            typeof data.balance === "number"
+          ) {
+            setCreditBalance(data.balance);
+          }
+
+          const required =
+            Number(
+              data.required ??
+                ESTIMATED_CREDITS
+            );
+
+          const balance =
+            Number(
+              data.balance ??
+                creditBalance ??
+                0
+            );
+
+          const missing =
+            Math.max(
+              required - balance,
+              0
+            );
+
+          throw new Error(
+            `Not enough ZUQEN credits. Tumhe ${missing.toLocaleString()} aur credits chahiye.`
+          );
+        }
+
+        throw new Error(
+          data.error ||
+            data.message ||
+            "Website generate nahi ho payi."
+        );
+      }
+
+      if (
+        !data.html ||
+        typeof data.html !== "string"
+      ) {
         throw new Error(
           "AI ne valid website code return nahi kiya."
         );
@@ -63,11 +219,40 @@ export default function WebsiteBuilderPage() {
           prompt: finalPrompt,
           html: data.html,
           name: websiteName,
-          createdAt: new Date().toISOString(),
+          createdAt:
+            new Date().toISOString(),
         })
       );
 
-      router.push("/website-builder/editor");
+      // Backend agar remaining balance bheje
+      // to immediately UI update hoga.
+      const remainingHeader =
+        response.headers.get(
+          "X-Zuqen-Credits-Remaining"
+        );
+
+      if (remainingHeader) {
+        const newBalance =
+          Number(remainingHeader);
+
+        if (
+          Number.isFinite(newBalance)
+        ) {
+          setCreditBalance(newBalance);
+        } else {
+          await loadCredits(true);
+        }
+      } else if (
+        typeof data.balance === "number"
+      ) {
+        setCreditBalance(data.balance);
+      } else {
+        await loadCredits(true);
+      }
+
+      router.push(
+        "/website-builder/editor"
+      );
     } catch (err) {
       console.error(
         "Website Builder generation error:",
@@ -117,7 +302,7 @@ export default function WebsiteBuilderPage() {
     setPrompt(text);
     setError("");
 
-    setTimeout(() => {
+    window.setTimeout(() => {
       document
         .getElementById("website-prompt")
         ?.focus();
@@ -195,7 +380,8 @@ export default function WebsiteBuilderPage() {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+          border-bottom: 1px solid
+            rgba(255, 255, 255, 0.06);
         }
 
         .builder-brand {
@@ -220,8 +406,10 @@ export default function WebsiteBuilderPage() {
               #4f46e5
             );
           box-shadow:
-            0 0 35px rgba(124, 92, 255, 0.3),
-            inset 0 1px rgba(255, 255, 255, 0.25);
+            0 0 35px
+              rgba(124, 92, 255, 0.3),
+            inset 0 1px
+              rgba(255, 255, 255, 0.25);
         }
 
         .builder-brand-name {
@@ -236,15 +424,69 @@ export default function WebsiteBuilderPage() {
           margin-top: 2px;
         }
 
+        .navbar-right {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+
+        .credit-badge {
+          height: 38px;
+          padding: 0 13px;
+          display: inline-flex;
+          align-items: center;
+          gap: 7px;
+          border-radius: 10px;
+          border: 1px solid
+            rgba(124, 92, 255, 0.2);
+          background: rgba(
+            124,
+            92,
+            255,
+            0.07
+          );
+          color: #bdb1ff;
+          font-size: 10px;
+          font-weight: 800;
+          white-space: nowrap;
+        }
+
+        .credit-icon {
+          color: #a995ff;
+        }
+
+        .refresh-credit {
+          border: 0;
+          background: transparent;
+          color: #777;
+          padding: 0 0 0 4px;
+          font-size: 13px;
+        }
+
+        .refresh-credit:hover {
+          color: white;
+        }
+
+        .refresh-credit:disabled {
+          opacity: 0.4;
+          cursor: not-allowed;
+        }
+
         .back-button {
           height: 38px;
           padding: 0 14px;
           display: inline-flex;
           align-items: center;
           gap: 7px;
-          border: 1px solid rgba(255, 255, 255, 0.09);
+          border: 1px solid
+            rgba(255, 255, 255, 0.09);
           border-radius: 10px;
-          background: rgba(255, 255, 255, 0.035);
+          background: rgba(
+            255,
+            255,
+            255,
+            0.035
+          );
           color: #aaa;
           font-size: 12px;
           transition: 0.2s ease;
@@ -252,8 +494,18 @@ export default function WebsiteBuilderPage() {
 
         .back-button:hover {
           color: #fff;
-          background: rgba(255, 255, 255, 0.07);
-          border-color: rgba(255, 255, 255, 0.15);
+          background: rgba(
+            255,
+            255,
+            255,
+            0.07
+          );
+          border-color: rgba(
+            255,
+            255,
+            255,
+            0.15
+          );
           transform: translateX(-1px);
         }
 
@@ -277,13 +529,20 @@ export default function WebsiteBuilderPage() {
           gap: 8px;
           padding: 7px 12px;
           border-radius: 999px;
-          border: 1px solid rgba(124, 92, 255, 0.2);
-          background: rgba(124, 92, 255, 0.07);
+          border: 1px solid
+            rgba(124, 92, 255, 0.2);
+          background: rgba(
+            124,
+            92,
+            255,
+            0.07
+          );
           color: #b9adff;
           font-size: 11px;
           font-weight: 700;
           margin-bottom: 25px;
-          box-shadow: 0 0 30px rgba(124, 92, 255, 0.08);
+          box-shadow: 0 0 30px
+            rgba(124, 92, 255, 0.08);
         }
 
         .ai-dot {
@@ -291,12 +550,17 @@ export default function WebsiteBuilderPage() {
           height: 6px;
           border-radius: 50%;
           background: #8b7cff;
-          box-shadow: 0 0 12px #8b7cff;
+          box-shadow: 0 0 12px
+            #8b7cff;
         }
 
         .builder-heading {
           margin: 0;
-          font-size: clamp(42px, 7vw, 76px);
+          font-size: clamp(
+            42px,
+            7vw,
+            76px
+          );
           line-height: 0.98;
           letter-spacing: -4px;
           font-weight: 900;
@@ -342,8 +606,10 @@ export default function WebsiteBuilderPage() {
               rgba(59, 130, 246, 0.2)
             );
           box-shadow:
-            0 35px 90px rgba(0, 0, 0, 0.45),
-            0 0 80px rgba(124, 92, 255, 0.07);
+            0 35px 90px
+              rgba(0, 0, 0, 0.45),
+            0 0 80px
+              rgba(124, 92, 255, 0.07);
         }
 
         .prompt-card-inner {
@@ -393,7 +659,12 @@ export default function WebsiteBuilderPage() {
           border-radius: 13px;
           padding: 15px;
           color: #f4f4f5;
-          background: rgba(255, 255, 255, 0.035);
+          background: rgba(
+            255,
+            255,
+            255,
+            0.035
+          );
           font-size: 14px;
           line-height: 1.7;
         }
@@ -403,7 +674,12 @@ export default function WebsiteBuilderPage() {
         }
 
         .prompt-input:focus {
-          background: rgba(255, 255, 255, 0.045);
+          background: rgba(
+            255,
+            255,
+            255,
+            0.045
+          );
         }
 
         .prompt-bottom {
@@ -419,6 +695,27 @@ export default function WebsiteBuilderPage() {
           color: #555;
           font-size: 10px;
           text-align: left;
+        }
+
+        .prompt-meta {
+          display: flex;
+          flex-direction: column;
+          gap: 5px;
+          align-items: flex-start;
+        }
+
+        .prompt-counter {
+          color: #555;
+          font-size: 9px;
+        }
+
+        .cost-text {
+          color: #777;
+          font-size: 9px;
+        }
+
+        .cost-text strong {
+          color: #a995ff;
         }
 
         .generate-button {
@@ -440,28 +737,112 @@ export default function WebsiteBuilderPage() {
               #5b4be7
             );
           box-shadow:
-            0 12px 28px rgba(91, 75, 231, 0.3),
-            inset 0 1px rgba(255, 255, 255, 0.2);
+            0 12px 28px
+              rgba(91, 75, 231, 0.3),
+            inset 0 1px
+              rgba(255, 255, 255, 0.2);
           transition:
             transform 0.2s ease,
             box-shadow 0.2s ease,
             opacity 0.2s ease;
         }
 
-        .generate-button:hover:not(:disabled) {
+        .generate-button:hover:not(
+            :disabled
+          ) {
           transform: translateY(-2px);
           box-shadow:
-            0 17px 35px rgba(91, 75, 231, 0.4),
-            inset 0 1px rgba(255, 255, 255, 0.25);
+            0 17px 35px
+              rgba(91, 75, 231, 0.4),
+            inset 0 1px
+              rgba(255, 255, 255, 0.25);
         }
 
-        .generate-button:active:not(:disabled) {
+        .generate-button:active:not(
+            :disabled
+          ) {
           transform: translateY(0);
         }
 
         .generate-button:disabled {
-          opacity: 0.6;
-          cursor: wait;
+          opacity: 0.45;
+          cursor: not-allowed;
+          box-shadow: none;
+        }
+
+        .credit-summary {
+          width: min(820px, 100%);
+          margin: 12px auto 0;
+          padding: 13px 15px;
+          border-radius: 12px;
+          border: 1px solid
+            rgba(124, 92, 255, 0.13);
+          background: rgba(
+            124,
+            92,
+            255,
+            0.045
+          );
+          display: grid;
+          grid-template-columns:
+            1fr 1fr 1fr;
+          gap: 1px;
+          text-align: left;
+        }
+
+        .credit-item {
+          padding: 3px 13px;
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+        }
+
+        .credit-item + .credit-item {
+          border-left: 1px solid
+            rgba(255, 255, 255, 0.06);
+        }
+
+        .credit-label {
+          color: #555;
+          font-size: 8px;
+          letter-spacing: 0.12em;
+          font-weight: 800;
+        }
+
+        .credit-value {
+          color: #bbb;
+          font-size: 13px;
+          font-weight: 800;
+        }
+
+        .credit-value.highlight {
+          color: #a995ff;
+        }
+
+        .credit-value.danger {
+          color: #ff858f;
+        }
+
+        .credit-warning {
+          width: min(820px, 100%);
+          margin: 10px auto 0;
+          padding: 11px 13px;
+          border-radius: 10px;
+          border: 1px solid
+            rgba(255, 80, 100, 0.2);
+          background: rgba(
+            255,
+            80,
+            100,
+            0.06
+          );
+          color: #ff9ba8;
+          text-align: left;
+          font-size: 10px;
+        }
+
+        .credit-warning strong {
+          color: #ff8d9b;
         }
 
         .examples {
@@ -482,8 +863,14 @@ export default function WebsiteBuilderPage() {
         }
 
         .example-button {
-          border: 1px solid rgba(255, 255, 255, 0.07);
-          background: rgba(255, 255, 255, 0.025);
+          border: 1px solid
+            rgba(255, 255, 255, 0.07);
+          background: rgba(
+            255,
+            255,
+            255,
+            0.025
+          );
           color: #777;
           border-radius: 999px;
           padding: 8px 11px;
@@ -493,17 +880,33 @@ export default function WebsiteBuilderPage() {
 
         .example-button:hover {
           color: #bbb;
-          background: rgba(255, 255, 255, 0.055);
-          border-color: rgba(124, 92, 255, 0.25);
+          background: rgba(
+            255,
+            255,
+            255,
+            0.055
+          );
+          border-color: rgba(
+            124,
+            92,
+            255,
+            0.25
+          );
         }
 
         .error-message {
           width: min(820px, 100%);
           margin: 12px auto 0;
           padding: 10px 13px;
-          border: 1px solid rgba(255, 75, 75, 0.2);
+          border: 1px solid
+            rgba(255, 75, 75, 0.2);
           border-radius: 10px;
-          background: rgba(255, 55, 55, 0.06);
+          background: rgba(
+            255,
+            55,
+            55,
+            0.06
+          );
           color: #ff9b9b;
           text-align: left;
           font-size: 11px;
@@ -519,9 +922,15 @@ export default function WebsiteBuilderPage() {
 
         .feature {
           padding: 15px;
-          border: 1px solid rgba(255, 255, 255, 0.055);
+          border: 1px solid
+            rgba(255, 255, 255, 0.055);
           border-radius: 12px;
-          background: rgba(255, 255, 255, 0.018);
+          background: rgba(
+            255,
+            255,
+            255,
+            0.018
+          );
           text-align: left;
         }
 
@@ -553,10 +962,13 @@ export default function WebsiteBuilderPage() {
         .loading-spinner {
           width: 15px;
           height: 15px;
-          border: 2px solid rgba(255, 255, 255, 0.25);
+          border: 2px solid
+            rgba(255, 255, 255, 0.25);
           border-top-color: white;
           border-radius: 50%;
-          animation: ZUQEN-spin 0.7s linear infinite;
+          animation:
+            ZUQEN-spin
+            0.7s linear infinite;
         }
 
         @keyframes ZUQEN-spin {
@@ -587,7 +999,11 @@ export default function WebsiteBuilderPage() {
           }
 
           .builder-heading {
-            font-size: clamp(38px, 13vw, 58px);
+            font-size: clamp(
+              38px,
+              13vw,
+              58px
+            );
             letter-spacing: -2.5px;
           }
 
@@ -614,12 +1030,31 @@ export default function WebsiteBuilderPage() {
             flex-direction: column;
           }
 
+          .prompt-meta {
+            align-items: center;
+          }
+
           .prompt-hint {
             text-align: center;
           }
 
           .generate-button {
             width: 100%;
+          }
+
+          .credit-summary {
+            grid-template-columns: 1fr;
+            gap: 8px;
+          }
+
+          .credit-item {
+            padding: 8px;
+          }
+
+          .credit-item + .credit-item {
+            border-left: 0;
+            border-top: 1px solid
+              rgba(255, 255, 255, 0.06);
           }
 
           .builder-features {
@@ -634,13 +1069,33 @@ export default function WebsiteBuilderPage() {
           .back-button {
             padding: 0 10px;
           }
+
+          .credit-badge {
+            padding: 0 9px;
+          }
+
+          .navbar-right {
+            gap: 5px;
+          }
+        }
+
+        @media (max-width: 520px) {
+          .credit-badge {
+            font-size: 9px;
+          }
+
+          .builder-brand-name {
+            font-size: 13px;
+          }
         }
       `}</style>
 
       <div className="builder-container">
         <nav className="builder-navbar">
           <div className="builder-brand">
-            <div className="builder-logo">K</div>
+            <div className="builder-logo">
+              K
+            </div>
 
             <div>
               <div className="builder-brand-name">
@@ -653,13 +1108,46 @@ export default function WebsiteBuilderPage() {
             </div>
           </div>
 
-          <button
-            type="button"
-            className="back-button"
-            onClick={() => router.back()}
-          >
-            ← Back
-          </button>
+          <div className="navbar-right">
+            <div className="credit-badge">
+              <span className="credit-icon">
+                ✦
+              </span>
+
+              <span>
+                {loadingCredits
+                  ? "Loading credits..."
+                  : creditBalance === null
+                  ? "Credits unavailable"
+                  : `${creditBalance.toLocaleString()} credits`}
+              </span>
+
+              <button
+                type="button"
+                className="refresh-credit"
+                onClick={() =>
+                  loadCredits(true)
+                }
+                disabled={
+                  loadingCredits ||
+                  refreshingCredits
+                }
+                title="Refresh credits"
+              >
+                {refreshingCredits
+                  ? "↻"
+                  : "⟳"}
+              </button>
+            </div>
+
+            <button
+              type="button"
+              className="back-button"
+              onClick={() => router.back()}
+            >
+              ← Back
+            </button>
+          </div>
         </nav>
 
         <section className="builder-main">
@@ -677,9 +1165,10 @@ export default function WebsiteBuilderPage() {
             </h1>
 
             <p className="builder-description">
-              Describe the website you have in mind.
-              ZUQEN AI will turn your idea into a
-              complete, responsive and professional
+              Describe the website you have
+              in mind. ZUQEN AI will turn
+              your idea into a complete,
+              responsive and professional
               website.
             </p>
 
@@ -694,6 +1183,7 @@ export default function WebsiteBuilderPage() {
                       <span className="prompt-spark">
                         ✦
                       </span>
+
                       Describe your website
                     </div>
 
@@ -707,23 +1197,52 @@ export default function WebsiteBuilderPage() {
                     className="prompt-input"
                     value={prompt}
                     onChange={(event) =>
-                      setPrompt(event.target.value)
+                      setPrompt(
+                        event.target.value
+                      )
                     }
                     disabled={loading}
-                    placeholder={`Example: Create a premium dark portfolio website for a full-stack developer. Include a hero section, projects, skills, experience, testimonials and a contact form with smooth animations...`}
-                    maxLength={10000}
+                    placeholder="Example: Create a premium dark portfolio website for a full-stack developer. Include a hero section, projects, skills, experience, testimonials and a contact form with smooth animations..."
+                    maxLength={
+                      MAX_PROMPT_LENGTH
+                    }
                   />
 
                   <div className="prompt-bottom">
-                    <div className="prompt-hint">
-                      Describe design, sections,
-                      features and style
+                    <div className="prompt-meta">
+                      <div className="prompt-hint">
+                        Describe design,
+                        sections, features
+                        and style
+                      </div>
+
+                      <div className="prompt-counter">
+                        {prompt.length.toLocaleString()}
+                        {" / "}
+                        {MAX_PROMPT_LENGTH.toLocaleString()}
+                        {" characters"}
+                      </div>
+
+                      <div className="cost-text">
+                        Estimated cost:{" "}
+                        <strong>
+                          ~
+                          {ESTIMATED_CREDITS.toLocaleString()}
+                          {" credits"}
+                        </strong>
+                      </div>
                     </div>
 
                     <button
                       type="submit"
                       className="generate-button"
-                      disabled={loading}
+                      disabled={
+                        loading ||
+                        loadingCredits ||
+                        creditBalance ===
+                          null ||
+                        !hasEnoughCredits
+                      }
                     >
                       {loading ? (
                         <>
@@ -740,6 +1259,69 @@ export default function WebsiteBuilderPage() {
                 </div>
               </div>
             </form>
+
+            <div className="credit-summary">
+              <div className="credit-item">
+                <span className="credit-label">
+                  AVAILABLE CREDITS
+                </span>
+
+                <span className="credit-value">
+                  {loadingCredits
+                    ? "..."
+                    : creditBalance === null
+                    ? "—"
+                    : creditBalance.toLocaleString()}
+                </span>
+              </div>
+
+              <div className="credit-item">
+                <span className="credit-label">
+                  THIS GENERATION
+                </span>
+
+                <span className="credit-value highlight">
+                  ~
+                  {ESTIMATED_CREDITS.toLocaleString()}
+                </span>
+              </div>
+
+              <div className="credit-item">
+                <span className="credit-label">
+                  REMAINING AFTER GENERATION
+                </span>
+
+                <span
+                  className={`credit-value ${
+                    remainingCredits !== null &&
+                    remainingCredits < 0
+                      ? "danger"
+                      : "highlight"
+                  }`}
+                >
+                  {remainingCredits === null
+                    ? "—"
+                    : remainingCredits >= 0
+                    ? remainingCredits.toLocaleString()
+                    : `-${Math.abs(
+                        remainingCredits
+                      ).toLocaleString()}`}
+                </span>
+              </div>
+            </div>
+
+            {creditBalance !== null &&
+              !hasEnoughCredits && (
+                <div className="credit-warning">
+                  <strong>
+                    Not enough credits:
+                  </strong>{" "}
+                  Is website generation ke
+                  liye{" "}
+                  {creditsNeeded.toLocaleString()}{" "}
+                  aur credits chahiye.
+                </div>
+              )}
 
             {error && (
               <div className="error-message">
@@ -814,8 +1396,8 @@ export default function WebsiteBuilderPage() {
                 </div>
 
                 <div className="feature-text">
-                  Turn a simple description into a
-                  complete website.
+                  Turn a simple description
+                  into a complete website.
                 </div>
               </div>
 
@@ -829,8 +1411,8 @@ export default function WebsiteBuilderPage() {
                 </div>
 
                 <div className="feature-text">
-                  Websites are designed for desktop,
-                  tablet and mobile.
+                  Websites are designed for
+                  desktop, tablet and mobile.
                 </div>
               </div>
 
@@ -844,8 +1426,9 @@ export default function WebsiteBuilderPage() {
                 </div>
 
                 <div className="feature-text">
-                  Continue editing your website using
-                  natural language.
+                  Continue editing your
+                  website using natural
+                  language.
                 </div>
               </div>
             </div>
