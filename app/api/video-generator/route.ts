@@ -3,6 +3,9 @@ import { InferenceClient } from "@huggingface/inference";
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
+const MODEL = "Wan-AI/Wan2.2-TI2V-5B";
+const PROVIDER = "fal-ai";
+
 export async function POST(request: Request) {
   try {
     const body = await request.json();
@@ -35,6 +38,10 @@ export async function POST(request: Request) {
     const token = process.env.HF_TOKEN;
 
     if (!token) {
+      console.error(
+        "ZUQEN video generator: HF_TOKEN is missing."
+      );
+
       return Response.json(
         {
           success: false,
@@ -47,13 +54,16 @@ export async function POST(request: Request) {
 
     const client = new InferenceClient(token);
 
-   const video = await client.textToVideo(
-  {
-    model: "Wan-AI/Wan2.2-TI2V-5B",
-    inputs: prompt,
-    provider: "fal-ai",
-  }
-);
+    /*
+     * Hugging Face routed inference request.
+     *
+     * We keep the existing model and Fal AI provider.
+     */
+    const video = await client.textToVideo({
+      model: MODEL,
+      inputs: prompt,
+      provider: PROVIDER,
+    });
 
     if (!video) {
       return Response.json(
@@ -66,13 +76,26 @@ export async function POST(request: Request) {
       );
     }
 
-   return new Response(video, {
-  status: 200,
-  headers: {
-    "Content-Type": "video/mp4",
-    "Cache-Control": "no-store",
-  },
-});
+    /*
+     * The SDK returns a Blob for text-to-video.
+     *
+     * We return the actual video bytes to the frontend.
+     *
+     * No artificial ZUQEN credit amount is deducted.
+     */
+    return new Response(video, {
+      status: 200,
+      headers: {
+        "Content-Type": "video/mp4",
+        "Cache-Control": "no-store",
+
+        "X-Zuquen-Provider": "huggingface",
+        "X-Zuquen-Feature": "video-generator",
+        "X-Zuquen-Model": MODEL,
+        "X-Zuquen-Routed-Provider": PROVIDER,
+        "X-Zuquen-Usage-Tracked": "false",
+      },
+    });
   } catch (error: unknown) {
     console.error(
       "ZUQEN video generation error:",
@@ -91,44 +114,84 @@ export async function POST(request: Request) {
     if (
       lowerMessage.includes("401") ||
       lowerMessage.includes("unauthorized") ||
-      lowerMessage.includes("invalid token")
+      lowerMessage.includes("invalid token") ||
+      lowerMessage.includes("authentication")
     ) {
       message =
         "Hugging Face authentication failed. Please check your HF_TOKEN.";
     } else if (
       lowerMessage.includes("403") ||
-      lowerMessage.includes("forbidden")
+      lowerMessage.includes("forbidden") ||
+      lowerMessage.includes("permission")
     ) {
       message =
         "Hugging Face denied the request. Please check your token permissions.";
     } else if (
+      lowerMessage.includes("402") ||
+      lowerMessage.includes("payment required") ||
+      lowerMessage.includes("insufficient credit") ||
+      lowerMessage.includes("insufficient credits")
+    ) {
+      message =
+        "Hugging Face credits are unavailable for this request. Please check your Hugging Face billing or available credits.";
+    } else if (
       lowerMessage.includes("429") ||
       lowerMessage.includes("rate limit") ||
+      lowerMessage.includes("too many requests") ||
       lowerMessage.includes("quota") ||
       lowerMessage.includes("credit")
     ) {
       message =
-        "Hugging Face free credits or rate limit have been reached. Please try again later.";
+        "Hugging Face rate limit or available credits were reached. Please try again later.";
     } else if (
       lowerMessage.includes("model") &&
-      lowerMessage.includes("not found")
+      (
+        lowerMessage.includes("not found") ||
+        lowerMessage.includes("unavailable")
+      )
     ) {
       message =
         "The selected video model is currently unavailable.";
     } else if (
       lowerMessage.includes("timeout") ||
-      lowerMessage.includes("timed out")
+      lowerMessage.includes("timed out") ||
+      lowerMessage.includes("time out")
     ) {
       message =
         "Video generation timed out. Please try again.";
     }
 
+    /*
+     * IMPORTANT:
+     *
+     * Failed requests do NOT trigger any artificial
+     * ZUQEN credit deduction.
+     */
     return Response.json(
       {
         success: false,
+        provider: "huggingface",
+        feature: "video-generator",
         error: message,
       },
-      { status: 500 }
+      {
+        status:
+          lowerMessage.includes("401") ||
+          lowerMessage.includes("unauthorized")
+            ? 401
+            : lowerMessage.includes("403") ||
+                lowerMessage.includes("forbidden")
+              ? 403
+              : lowerMessage.includes("429") ||
+                  lowerMessage.includes("rate limit") ||
+                  lowerMessage.includes("quota")
+                ? 429
+                : lowerMessage.includes("402") ||
+                    lowerMessage.includes("payment required") ||
+                    lowerMessage.includes("insufficient credit")
+                  ? 402
+                  : 500,
+      }
     );
   }
 }
