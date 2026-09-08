@@ -212,6 +212,12 @@ if (agent === "Video Generator") {
   router.push("/video-generator");
   return;
 }
+
+  if (agent === "voice-generator") {
+    window.location.href = "/generate-voice";
+    return;
+  }
+
   setSelectedAgent(agent);
 }
 
@@ -3706,6 +3712,36 @@ if (agent === "Video Generator") {
   </span>
 
   {selectedAgent === "Video Generator" && (
+    <span className="ZUQEN-agent-check">
+      ✓
+    </span>
+  )}
+</button>
+
+<button
+  type="button"
+  className={`ZUQEN-agent-option ${
+    selectedAgent === "Voice Generator"
+      ? "selected"
+      : ""
+  }`}
+  onClick={() => selectAgent("Voice Generator")}
+>
+  <span className="ZUQEN-agent-option-icon">
+    🎙️
+  </span>
+
+  <span>
+    <strong>
+      Voice Generator
+    </strong>
+
+    <small>
+      Generate realistic AI voices with ZUQEN
+    </small>
+  </span>
+
+  {selectedAgent === "Voice Generator" && (
     <span className="ZUQEN-agent-check">
       ✓
     </span>
