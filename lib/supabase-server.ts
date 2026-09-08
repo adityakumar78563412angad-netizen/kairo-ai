@@ -12,13 +12,21 @@ export async function createServerSupabaseClient() {
         getAll() {
           return cookieStore.getAll();
         },
+
         setAll(cookiesToSet) {
           try {
-            cookiesToSet.forEach(({ name, value, options }) => {
-              cookieStore.set(name, value, options);
-            });
+            cookiesToSet.forEach(
+              ({ name, value, options }) => {
+                cookieStore.set(
+                  name,
+                  value,
+                  options
+                );
+              }
+            );
           } catch {
-            // Cookie updates can fail in some server-rendering contexts.
+            // Server Components may not allow
+            // cookies to be written.
           }
         },
       },
