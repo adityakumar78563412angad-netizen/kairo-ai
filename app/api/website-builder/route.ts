@@ -20,7 +20,13 @@ const MAX_GENERATE_PROMPT_LENGTH = 10000;
 const MAX_EDIT_INSTRUCTION_LENGTH = 5000;
 const MAX_HTML_LENGTH = 200000;
 
-const MODEL = "gemini-3.7-flash";
+// Gemini fallback chain
+const GEMINI_MODELS = [
+  "gemini-3.7-flash",
+  "gemini-3.6-flash",
+  "gemini-3.5-flash",
+  "gemini-2.5-flash",
+];
 
 if (!apiKey) {
   console.error(
@@ -35,77 +41,83 @@ const ai = apiKey
   : null;
 
 // =========================================================
-// GENERATE SYSTEM INSTRUCTION
+// WEBSITE GENERATION INSTRUCTIONS
 // =========================================================
 
 const GENERATE_SYSTEM_INSTRUCTION = `
 You are ZUQEN AI Website Builder.
 
-Generate a complete, beautiful and professional website from the user's request.
+Your job is to generate complete, beautiful, production-quality websites from a user's description.
 
-RULES:
+IMPORTANT RULES:
 
 1. Return ONLY the complete HTML document.
 2. Do not use Markdown code fences.
-3. Do not explain anything outside the HTML.
-4. The output must start with <!DOCTYPE html>.
-5. Include HTML, CSS and JavaScript in the same document.
-6. Do not use npm packages.
-7. Do not use external JavaScript frameworks.
-8. Make the website fully responsive.
-9. Make it modern, premium and professional.
-10. Use semantic HTML.
-11. Add polished hover effects and transitions.
-12. Buttons should have sensible behavior.
-13. Use accessible labels where appropriate.
-14. Use CSS variables.
-15. Never expose API keys or secrets.
-16. Images may use images.unsplash.com or images.pexels.com.
-17. Do not include iframe elements.
-18. Do not include object elements.
-19. Do not include embed elements.
-20. Do not generate malicious code.
-21. Make the result feel like a real production website.
-22. Use excellent spacing, typography and hierarchy.
-23. Include realistic content based on the request.
-24. The final response must contain ONLY HTML.
+3. Do not write explanations before or after the HTML.
+4. The result must start with <!DOCTYPE html>.
+5. The result must contain:
+   - HTML
+   - CSS inside <style>
+   - JavaScript inside <script> when needed
+6. Everything must work inside a single HTML file.
+7. Do not depend on npm packages.
+8. Do not depend on external JavaScript frameworks.
+9. Make the website fully responsive.
+10. Make the design modern, premium and professional.
+11. Use semantic HTML.
+12. Add polished hover effects, transitions and animations where appropriate.
+13. Buttons and navigation should have sensible behavior.
+14. Use accessible labels where appropriate.
+15. Use CSS variables for reusable colors.
+16. Do not expose API keys or secrets.
+17. If images are needed, use safe remote images from images.unsplash.com or images.pexels.com.
+18. Do not include iframe elements.
+19. Do not include object elements.
+20. Do not include embed elements.
+21. Do not generate malicious code.
+22. Make the website feel like a real professional product.
+23. Use excellent spacing, typography, hierarchy and responsive layouts.
+24. Do not make the design look like a basic coding demo.
+25. Include realistic content based on the user's request.
+26. The final answer must be ONLY HTML.
 
 Keep the generated website reasonably sized.
 Do not unnecessarily generate extremely large HTML.
 `;
 
 // =========================================================
-// EDIT SYSTEM INSTRUCTION
+// WEBSITE EDIT INSTRUCTIONS
 // =========================================================
 
 const EDIT_SYSTEM_INSTRUCTION = `
 You are ZUQEN AI, an expert website editor.
 
-You will receive an existing complete HTML website and a requested change.
+You will receive an existing complete HTML website and a user's requested change.
 
-Modify the existing website according to the request.
+Your job is to modify the existing website according to the request.
 
-RULES:
+IMPORTANT RULES:
 
 1. Return ONLY the complete modified HTML document.
 2. Do not use Markdown code fences.
-3. Do not explain anything outside the HTML.
-4. Preserve the existing website unless the user requests a change.
-5. Do not unnecessarily remove existing sections.
-6. Preserve unrelated functionality.
+3. Do not explain what you changed.
+4. Preserve the existing website unless the user explicitly asks to change something.
+5. Never unnecessarily remove existing sections.
+6. Keep all existing functionality that is unrelated to the requested change.
 7. Keep the website responsive.
-8. Keep the design professional.
-9. Keep HTML, CSS and JavaScript inside one HTML document.
+8. Keep the design professional and polished.
+9. HTML, CSS and JavaScript must remain inside the same HTML document.
 10. Do not use npm packages.
 11. Do not use external JavaScript frameworks.
-12. Never expose API keys or secrets.
-13. Do not generate malicious code.
+12. Do not expose API keys or secrets.
+13. Do not add malicious code.
 14. Do not add iframe elements.
 15. Do not add object elements.
 16. Do not add embed elements.
-17. Actually implement the requested change.
-18. Return the COMPLETE HTML document.
-19. The result must start with <!DOCTYPE html>.
+17. If the user asks to add a feature, actually implement it.
+18. If the user asks to change colors, typography, spacing, layout or content, actually change it.
+19. Do not return partial HTML.
+20. Always return the complete <!DOCTYPE html> document.
 
 Keep the edited website reasonably sized.
 `;
@@ -206,7 +218,7 @@ function isValidHtml(html: string) {
 }
 
 // =========================================================
-// CREDIT RESPONSE HEADER
+// CREDIT RESPONSE
 // =========================================================
 
 function creditsResponse(
@@ -227,7 +239,7 @@ function creditsResponse(
 }
 
 // =========================================================
-// GET CREDIT BALANCE
+// CREDIT BALANCE
 // =========================================================
 
 async function getCreditBalance() {
@@ -289,7 +301,7 @@ async function getCreditBalance() {
 }
 
 // =========================================================
-// CONSUME CREDITS
+// CREDIT RESULT
 // =========================================================
 
 type CreditResult = {
@@ -300,6 +312,10 @@ type CreditResult = {
   amount?: number;
   error?: string;
 };
+
+// =========================================================
+// CONSUME CREDITS
+// =========================================================
 
 async function consumeCredits(
   amount: number,
@@ -418,11 +434,138 @@ async function consumeCredits(
 }
 
 // =========================================================
-// GEMINI GENERATE
+// GEMINI ERROR HELPERS
 // =========================================================
 
-async function generateWebsite(
-  prompt: string
+function getErrorStatus(
+  error: unknown
+) {
+  if (
+    typeof error === "object" &&
+    error !== null
+  ) {
+    const e =
+      error as Record<
+        string,
+        unknown
+      >;
+
+    if (
+      typeof e.status ===
+      "number"
+    ) {
+      return e.status;
+    }
+
+    if (
+      typeof e.code ===
+      "number"
+    ) {
+      return e.code;
+    }
+
+    if (
+      typeof e.error ===
+        "object" &&
+      e.error !== null
+    ) {
+      const nested =
+        e.error as Record<
+          string,
+          unknown
+        >;
+
+      if (
+        typeof nested.code ===
+        "number"
+      ) {
+        return nested.code;
+      }
+    }
+  }
+
+  const message =
+    error instanceof Error
+      ? error.message
+      : String(error);
+
+  if (
+    message.includes(
+      "503"
+    ) ||
+    message.includes(
+      "UNAVAILABLE"
+    ) ||
+    message.includes(
+      "high demand"
+    )
+  ) {
+    return 503;
+  }
+
+  if (
+    message.includes(
+      "429"
+    ) ||
+    message.includes(
+      "RESOURCE_EXHAUSTED"
+    )
+  ) {
+    return 429;
+  }
+
+  return 0;
+}
+
+function getErrorMessage(
+  error: unknown
+) {
+  if (
+    error instanceof Error
+  ) {
+    return error.message;
+  }
+
+  if (
+    typeof error ===
+      "string"
+  ) {
+    return error;
+  }
+
+  try {
+    return JSON.stringify(
+      error
+    );
+  } catch {
+    return "Unknown Gemini error.";
+  }
+}
+
+// =========================================================
+// WAIT / RETRY
+// =========================================================
+
+function wait(
+  ms: number
+) {
+  return new Promise(
+    (resolve) =>
+      setTimeout(
+        resolve,
+        ms
+      )
+  );
+}
+
+// =========================================================
+// GEMINI GENERATION WITH FALLBACK
+// =========================================================
+
+async function generateWithFallback(
+  contents: string,
+  systemInstruction: string,
+  temperature: number
 ) {
   if (!ai) {
     throw new Error(
@@ -430,101 +573,180 @@ async function generateWebsite(
     );
   }
 
-  try {
-    const response =
-      await ai.models.generateContent({
-        model: MODEL,
+  let lastError: unknown =
+    null;
 
-        contents: `
-Create a complete professional website based on this request:
+  for (
+    let modelIndex = 0;
+    modelIndex <
+    GEMINI_MODELS.length;
+    modelIndex++
+  ) {
+    const model =
+      GEMINI_MODELS[
+        modelIndex
+      ];
 
-${prompt}
-        `,
-
-        config: {
-          systemInstruction:
-            GENERATE_SYSTEM_INSTRUCTION,
-
-          temperature: 0.7,
-
-          maxOutputTokens: 16000,
-        },
-      });
-
-    const generatedText =
-      response.text || "";
-
-    if (
-      !generatedText.trim()
+    // Each model gets up to 2 attempts.
+    for (
+      let attempt = 1;
+      attempt <= 2;
+      attempt++
     ) {
-      throw new Error(
-        "Gemini returned an empty response."
-      );
+      try {
+        console.log(
+          `ZUQEN Gemini: trying ${model}, attempt ${attempt}/2`
+        );
+
+        const response =
+          await ai.models.generateContent(
+            {
+              model,
+
+              contents,
+
+              config: {
+                systemInstruction,
+
+                temperature,
+
+                maxOutputTokens:
+                  16000,
+              },
+            }
+          );
+
+        const text =
+          response.text || "";
+
+        if (
+          !text.trim()
+        ) {
+          throw new Error(
+            `${model} returned an empty response.`
+          );
+        }
+
+        console.log(
+          `ZUQEN Gemini: success with ${model}`
+        );
+
+        return text;
+      } catch (error) {
+        lastError =
+          error;
+
+        const status =
+          getErrorStatus(
+            error
+          );
+
+        const message =
+          getErrorMessage(
+            error
+          );
+
+        console.error(
+          `ZUQEN Gemini error [${model}] attempt ${attempt}:`,
+          message
+        );
+
+        // Retry temporary errors.
+        if (
+          status === 503 ||
+          status === 429
+        ) {
+          if (
+            attempt === 1
+          ) {
+            // Wait 2 seconds before retry.
+            await wait(
+              2000
+            );
+
+            continue;
+          }
+
+          // After 2 failed attempts,
+          // move to next model.
+          break;
+        }
+
+        // Other errors are not
+        // useful to retry with
+        // the same model.
+        throw new Error(
+          `Gemini request failed: ${message}`
+        );
+      }
     }
 
-    const html =
-      cleanHtml(
-        generatedText
-      );
-
-    if (
-      !isValidHtml(html)
-    ) {
-      throw new Error(
-        "Gemini did not return valid HTML."
-      );
-    }
-
-    if (
-      html.length >
-      MAX_HTML_LENGTH
-    ) {
-      throw new Error(
-        "Generated website is too large."
-      );
-    }
-
-    return html;
-  } catch (error) {
-    console.error(
-      "Gemini generation error:",
-      error
-    );
-
-    if (
-      error instanceof Error
-    ) {
-      throw new Error(
-        `Gemini generation failed: ${error.message}`
-      );
-    }
-
-    throw new Error(
-      "Gemini generation failed."
+    console.warn(
+      `ZUQEN Gemini: ${model} unavailable. Trying next model...`
     );
   }
+
+  throw new Error(
+    `All Gemini models are currently unavailable. Last error: ${getErrorMessage(
+      lastError
+    )}`
+  );
 }
 
 // =========================================================
-// GEMINI EDIT
+// GENERATE WEBSITE
+// =========================================================
+
+async function generateWebsite(
+  prompt: string
+) {
+  const generatedText =
+    await generateWithFallback(
+      `
+Create a complete professional website based on this request:
+
+${prompt}
+      `,
+      GENERATE_SYSTEM_INSTRUCTION,
+      0.7
+    );
+
+  const html =
+    cleanHtml(
+      generatedText
+    );
+
+  if (
+    !isValidHtml(html)
+  ) {
+    throw new Error(
+      "Gemini did not return valid HTML."
+    );
+  }
+
+  if (
+    html.length >
+    MAX_HTML_LENGTH
+  ) {
+    throw new Error(
+      "Generated website is too large."
+    );
+  }
+
+  return html;
+}
+
+// =========================================================
+// EDIT WEBSITE
 // =========================================================
 
 async function editWebsite(
   html: string,
   instruction: string
 ) {
-  if (!ai) {
-    throw new Error(
-      "Gemini API key is not configured."
-    );
-  }
-
-  try {
-    const response =
-      await ai.models.generateContent({
-        model: MODEL,
-
-        contents: `
+  const generatedText =
+    await generateWithFallback(
+      `
 Here is the existing website:
 
 ---------------- EXISTING WEBSITE ----------------
@@ -533,81 +755,45 @@ ${html}
 
 ---------------- END WEBSITE ----------------
 
-Apply this requested change:
+Now apply this user's requested change:
 
 ${instruction}
 
 Return the complete modified website.
-        `,
-
-        config: {
-          systemInstruction:
-            EDIT_SYSTEM_INSTRUCTION,
-
-          temperature: 0.6,
-
-          maxOutputTokens: 16000,
-        },
-      });
-
-    const generatedText =
-      response.text || "";
-
-    if (
-      !generatedText.trim()
-    ) {
-      throw new Error(
-        "Gemini returned an empty edited website."
-      );
-    }
-
-    const updatedHtml =
-      cleanHtml(
-        generatedText
-      );
-
-    if (
-      !isValidHtml(
-        updatedHtml
-      )
-    ) {
-      throw new Error(
-        "Gemini did not return valid HTML."
-      );
-    }
-
-    if (
-      updatedHtml.length >
-      MAX_HTML_LENGTH
-    ) {
-      throw new Error(
-        "Edited website is too large."
-      );
-    }
-
-    return updatedHtml;
-  } catch (error) {
-    console.error(
-      "Gemini edit error:",
-      error
+      `,
+      EDIT_SYSTEM_INSTRUCTION,
+      0.6
     );
 
-    if (
-      error instanceof Error
-    ) {
-      throw new Error(
-        `Gemini edit failed: ${error.message}`
-      );
-    }
+  const updatedHtml =
+    cleanHtml(
+      generatedText
+    );
 
+  if (
+    !isValidHtml(
+      updatedHtml
+    )
+  ) {
     throw new Error(
-      "Gemini edit failed."
+      "Gemini did not return valid HTML."
     );
   }
+
+  if (
+    updatedHtml.length >
+    MAX_HTML_LENGTH
+  ) {
+    throw new Error(
+      "Edited website is too large."
+    );
+  }
+
+  return updatedHtml;
 }
 
 // =========================================================
-// POST
+// POST API
 // =========================================================
 
 export async function POST(
@@ -615,7 +801,7 @@ export async function POST(
 ) {
   try {
     // -----------------------------------------------------
-    // API KEY
+    // GEMINI API KEY
     // -----------------------------------------------------
 
     if (!ai) {
@@ -633,7 +819,7 @@ export async function POST(
     }
 
     // -----------------------------------------------------
-    // AUTH
+    // AUTHENTICATION
     // -----------------------------------------------------
 
     const supabase =
@@ -678,7 +864,7 @@ export async function POST(
         : "generate";
 
     // =====================================================
-    // GENERATE
+    // GENERATE WEBSITE
     // =====================================================
 
     if (
@@ -718,7 +904,7 @@ export async function POST(
       }
 
       // ---------------------------------------------------
-      // CHECK CREDITS BEFORE GEMINI
+      // CHECK CREDIT BALANCE
       // ---------------------------------------------------
 
       const balanceResult =
@@ -767,7 +953,7 @@ export async function POST(
       }
 
       // ---------------------------------------------------
-      // GENERATE
+      // GEMINI GENERATION
       // ---------------------------------------------------
 
       const html =
@@ -812,11 +998,16 @@ export async function POST(
       const response =
         NextResponse.json({
           success: true,
-          action: "generate",
+
+          action:
+            "generate",
+
           html,
+
           credits: {
             cost:
               GENERATE_CREDIT_COST,
+
             remaining,
           },
         });
@@ -828,7 +1019,7 @@ export async function POST(
     }
 
     // =====================================================
-    // EDIT
+    // EDIT WEBSITE
     // =====================================================
 
     if (
@@ -953,7 +1144,7 @@ export async function POST(
       }
 
       // ---------------------------------------------------
-      // EDIT
+      // GEMINI EDIT
       // ---------------------------------------------------
 
       const updatedHtml =
@@ -963,7 +1154,7 @@ export async function POST(
         );
 
       // ---------------------------------------------------
-      // DEDUCT
+      // DEDUCT CREDITS
       // ---------------------------------------------------
 
       const creditResult =
@@ -999,11 +1190,17 @@ export async function POST(
       const response =
         NextResponse.json({
           success: true,
-          action: "edit",
-          html: updatedHtml,
+
+          action:
+            "edit",
+
+          html:
+            updatedHtml,
+
           credits: {
             cost:
               EDIT_CREDIT_COST,
+
             remaining,
           },
         });
@@ -1043,7 +1240,9 @@ export async function POST(
     return NextResponse.json(
       {
         success: false,
+
         error: message,
+
         code:
           "website_builder_error",
       },
