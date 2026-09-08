@@ -1,36 +1,61 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
-const voices = [
-  {
-    id: "21m00Tcm4TlvDq8ikWAM",
-    name: "Rachel",
-    description: "Calm & professional",
-  },
-  {
-    id: "EXAVITQu4vr4xnSDxMaL",
-    name: "Bella",
-    description: "Warm & friendly",
-  },
-  {
-    id: "ErXwobaYiN019PkySvjV",
-    name: "Antoni",
-    description: "Deep & confident",
-  },
-  {
-    id: "MF3mGyEYCl7XYWbV9V6O",
-    name: "Elli",
-    description: "Soft & natural",
-  },
-];
+type Voice = {
+  id: string;
+  name: string;
+  description: string;
+  previewUrl: string | null;
+};
 
 export default function GenerateVoicePage() {
+  const [voices, setVoices] = useState<Voice[]>([]);
+  const [selectedVoice, setSelectedVoice] = useState("");
   const [text, setText] = useState("");
-  const [selectedVoice, setSelectedVoice] = useState(voices[0].id);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
+
+  const [loadingVoices, setLoadingVoices] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    const loadVoices = async () => {
+      try {
+        setLoadingVoices(true);
+        setError("");
+
+        const response = await fetch("/api/voices", {
+          cache: "no-store",
+        });
+
+        if (!response.ok) {
+          throw new Error("Failed to load voices.");
+        }
+
+        const data = await response.json();
+
+        if (!data.voices || data.voices.length === 0) {
+          throw new Error("No ElevenLabs voices were found.");
+        }
+
+        setVoices(data.voices);
+        setSelectedVoice(data.voices[0].id);
+      } catch (err) {
+        console.error(err);
+
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Failed to load ElevenLabs voices."
+        );
+      } finally {
+        setLoadingVoices(false);
+      }
+    };
+
+    loadVoices();
+  }, []);
 
   const generateVoice = async () => {
     if (!text.trim()) {
@@ -38,9 +63,18 @@ export default function GenerateVoicePage() {
       return;
     }
 
+    if (!selectedVoice) {
+      setError("Please select a voice.");
+      return;
+    }
+
     setLoading(true);
     setError("");
-    setAudioUrl(null);
+
+    if (audioUrl) {
+      URL.revokeObjectURL(audioUrl);
+      setAudioUrl(null);
+    }
 
     try {
       const response = await fetch("/api/generate-voice", {
@@ -95,8 +129,10 @@ export default function GenerateVoicePage() {
     if (!audioUrl) return;
 
     const link = document.createElement("a");
+
     link.href = audioUrl;
     link.download = "zuqen-ai-voice.mp3";
+
     document.body.appendChild(link);
     link.click();
     link.remove();
@@ -122,18 +158,18 @@ export default function GenerateVoicePage() {
 
         {/* Main Card */}
         <section className="rounded-3xl border border-white/10 bg-white/[0.035] p-5 shadow-2xl backdrop-blur-xl sm:p-8">
-          {/* Text Input */}
+          {/* Text */}
           <div>
             <div className="mb-3 flex items-center justify-between">
               <label
                 htmlFor="voice-text"
-                className="text-sm font-semibold text-white"
+                className="text-sm font-semibold"
               >
                 Text to speak
               </label>
 
               <span className="text-xs text-white/40">
-                {text.length} characters
+                {text.length} / 5000
               </span>
             </div>
 
@@ -151,62 +187,77 @@ export default function GenerateVoicePage() {
             />
           </div>
 
-          {/* Voice Selection */}
+          {/* Voices */}
           <div className="mt-8">
             <div className="mb-4">
-              <h2 className="text-sm font-semibold">Choose a voice</h2>
+              <h2 className="text-sm font-semibold">
+                Choose a voice
+              </h2>
+
               <p className="mt-1 text-xs text-white/40">
-                Select the voice you want to use for your generated audio.
+                Voices are loaded directly from your ElevenLabs account.
               </p>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-2">
-              {voices.map((voice) => {
-                const active = selectedVoice === voice.id;
+            {loadingVoices ? (
+              <div className="rounded-2xl border border-white/10 bg-white/[0.025] p-6 text-center">
+                <div className="mx-auto mb-3 h-5 w-5 animate-spin rounded-full border-2 border-white/20 border-t-white" />
 
-                return (
-                  <button
-                    key={voice.id}
-                    type="button"
-                    onClick={() => setSelectedVoice(voice.id)}
-                    className={`rounded-2xl border p-4 text-left transition ${
-                      active
-                        ? "border-white/30 bg-white/[0.10]"
-                        : "border-white/10 bg-white/[0.025] hover:border-white/20 hover:bg-white/[0.05]"
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div
-                        className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-lg ${
-                          active
-                            ? "bg-white text-black"
-                            : "bg-white/10 text-white"
-                        }`}
-                      >
-                        🔊
-                      </div>
+                <p className="text-sm text-white/50">
+                  Loading ElevenLabs voices...
+                </p>
+              </div>
+            ) : voices.length > 0 ? (
+              <div className="grid gap-3 sm:grid-cols-2">
+                {voices.map((voice) => {
+                  const active = selectedVoice === voice.id;
 
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold">{voice.name}</p>
-                        <p className="mt-1 text-xs text-white/40">
-                          {voice.description}
-                        </p>
-                      </div>
-
-                      <div className="ml-auto">
+                  return (
+                    <button
+                      key={voice.id}
+                      type="button"
+                      onClick={() => setSelectedVoice(voice.id)}
+                      className={`rounded-2xl border p-4 text-left transition ${
+                        active
+                          ? "border-white/30 bg-white/[0.10]"
+                          : "border-white/10 bg-white/[0.025] hover:border-white/20 hover:bg-white/[0.05]"
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
                         <div
-                          className={`h-4 w-4 rounded-full border ${
+                          className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-lg ${
+                            active
+                              ? "bg-white text-black"
+                              : "bg-white/10 text-white"
+                          }`}
+                        >
+                          🔊
+                        </div>
+
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-semibold">
+                            {voice.name}
+                          </p>
+
+                          <p className="mt-1 truncate text-xs text-white/40">
+                            {voice.description ||
+                              "ElevenLabs voice"}
+                          </p>
+                        </div>
+
+                        <div
+                          className={`h-4 w-4 shrink-0 rounded-full border ${
                             active
                               ? "border-white bg-white"
                               : "border-white/25"
                           }`}
                         />
                       </div>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
           </div>
 
           {/* Error */}
@@ -216,11 +267,16 @@ export default function GenerateVoicePage() {
             </div>
           )}
 
-          {/* Generate Button */}
+          {/* Generate */}
           <button
             type="button"
             onClick={generateVoice}
-            disabled={loading || !text.trim()}
+            disabled={
+              loading ||
+              loadingVoices ||
+              !text.trim() ||
+              !selectedVoice
+            }
             className="mt-8 flex w-full items-center justify-center gap-2 rounded-2xl bg-white px-6 py-4 text-sm font-bold text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {loading ? (
@@ -229,18 +285,19 @@ export default function GenerateVoicePage() {
                 Generating voice...
               </>
             ) : (
-              <>
-                ✨ Generate Voice
-              </>
+              <>✨ Generate Voice</>
             )}
           </button>
 
-          {/* Audio Result */}
+          {/* Audio */}
           {audioUrl && (
             <div className="mt-8 rounded-2xl border border-white/10 bg-black/30 p-5">
               <div className="mb-4 flex items-center justify-between gap-4">
                 <div>
-                  <h2 className="text-sm font-semibold">Generated Voice</h2>
+                  <h2 className="text-sm font-semibold">
+                    Generated Voice
+                  </h2>
+
                   <p className="mt-1 text-xs text-white/40">
                     Your AI-generated audio is ready.
                   </p>
@@ -264,7 +321,6 @@ export default function GenerateVoicePage() {
           )}
         </section>
 
-        {/* Footer */}
         <div className="mt-8 text-center">
           <p className="text-xs text-white/25">
             Powered by ZUQEN AI
