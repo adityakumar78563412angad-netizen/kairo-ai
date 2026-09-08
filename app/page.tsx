@@ -198,7 +198,14 @@ export default function Home() {
   }
 function selectAgent(agent: string) {
   setAgentOpen(false);
+const selectAgent = (agent: string) => {
+  if (agent === "Voice Generator") {
+    window.location.href = "/generate-voice";
+    return;
+  }
 
+  // Baaki existing agents ka code yahin rahega
+};
   if (agent === "Website Builder") {
     router.push("/website-builder");
     return;
@@ -213,10 +220,7 @@ if (agent === "Video Generator") {
   return;
 }
 
-  if (agent === "voice-generator") {
-    window.location.href = "/generate-voice";
-    return;
-  }
+ 
 
   setSelectedAgent(agent);
 }
