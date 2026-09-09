@@ -327,15 +327,9 @@ export async function POST(
       );
     }
 
-  console.log(
-  "ZUQEN_CHAT_DEBUG",
-  JSON.stringify({
-    userId: user.id,
-    email: user.email ?? null,
-    chatCredits: currentChatCredits,
-  })
-);
-
+ console.log("ZUQEN_USER_ID_PART_1:", user.id.slice(0, 18));
+console.log("ZUQEN_USER_ID_PART_2:", user.id.slice(18));
+console.log("ZUQEN_CHAT_CREDITS:", currentChatCredits);
     if (
       currentChatCredits <= 0
     ) {
