@@ -1,10 +1,15 @@
+
 import {
   GetObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { NextResponse } from "next/server";
-import { checkFeatureAccess } from "@/lib/feature-access";
+import { createServerSupabaseClient } from "@/lib/supabase-server";
+import {
+  getFeatureCreditBalance,
+  consumeFeatureCredits,
+} from "@/lib/feature-credits";
 import { recordProviderUsage } from "@/lib/provider-usage";
 
 export const runtime = "nodejs";
@@ -33,9 +38,7 @@ type GroqUsage = {
   total_time?: number;
 };
 
-function isImageAttachment(
-  attachment: Attachment
-) {
+function isImageAttachment(attachment: Attachment) {
   const type =
     typeof attachment.type === "string"
       ? attachment.type.toLowerCase()
@@ -246,50 +249,111 @@ export async function POST(
 ) {
   try {
     // =======================================================
-    // 1. ZUQEN FEATURE ACCESS CHECK
+    // 1. AUTHENTICATE USER
     // =======================================================
 
-    const featureAccess =
-      await checkFeatureAccess("chat");
+    const supabase =
+      await createServerSupabaseClient();
 
-    if (!featureAccess.allowed) {
+    const {
+      data: {
+        user,
+      },
+      error: authError,
+    } = await supabase.auth.getUser();
+
+    if (
+      authError ||
+      !user
+    ) {
       return NextResponse.json(
         {
           success: false,
-          error: featureAccess.message,
-          code: featureAccess.code,
-          feature: "chat",
+          error:
+            "You must be logged in to use ZUQEN Chat.",
+          code: "UNAUTHENTICATED",
         },
         {
-          status:
-            featureAccess.status,
+          status: 401,
         }
       );
     }
 
+    const userId =
+      user.id;
+
+    // =======================================================
+    // 2. CHECK CHAT FEATURE CREDITS
+    // =======================================================
+
+    const creditBalance =
+      await getFeatureCreditBalance(
+        userId,
+        "chat"
+      );
+
+    if (!creditBalance.success) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            creditBalance.error ||
+            "Unable to check Chat credits.",
+          code: "CREDIT_BALANCE_ERROR",
+          feature: "chat",
+        },
+        {
+          status: 500,
+        }
+      );
+    }
+
+    const currentChatCredits =
+      creditBalance.balance?.balance ?? 0;
+
     console.log(
-      "ZUQEN CHAT ACCESS:",
+      "ZUQEN CHAT CREDITS:",
       {
-        userId:
-          featureAccess.userId,
-        feature:
-          featureAccess.featureKey,
-        provider:
-          featureAccess.provider,
-        packageType:
-          featureAccess.packageType,
+        userId,
+        balance:
+          currentChatCredits,
       }
     );
 
+    if (
+      currentChatCredits <= 0
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "Your ZUQEN Chat credits are exhausted. Please refill your Chat credits to continue.",
+          code:
+            "INSUFFICIENT_CREDITS",
+          feature:
+            "chat",
+          provider:
+            "groq",
+          creditBalance:
+            0,
+        },
+        {
+          status: 402,
+        }
+      );
+    }
+
     // =======================================================
-    // 2. READ REQUEST BODY
+    // 3. READ REQUEST BODY
     // =======================================================
 
     const body =
       await req.json();
 
     const rawMessages =
-      Array.isArray(body?.messages)
+      Array.isArray(
+        body?.messages
+      )
         ? body.messages
         : [];
 
@@ -298,13 +362,15 @@ export async function POST(
         .filter(
           (m: any) =>
             (
-              m?.role === "user" ||
-              m?.role === "assistant"
+              m?.role ===
+                "user" ||
+              m?.role ===
+                "assistant"
             ) &&
             typeof m?.content ===
               "string" &&
-            m.content.trim().length >
-              0
+            m.content.trim()
+              .length > 0
         )
         .map(
           (m: any) => ({
@@ -342,7 +408,7 @@ export async function POST(
     }
 
     // =======================================================
-    // 3. GROQ API KEY
+    // 4. GROQ API KEY
     // =======================================================
 
     const apiKey =
@@ -361,7 +427,7 @@ export async function POST(
     }
 
     // =======================================================
-    // 4. DETECT IMAGE ATTACHMENTS
+    // 5. DETECT IMAGE ATTACHMENTS
     // =======================================================
 
     const imageAttachments =
@@ -374,7 +440,7 @@ export async function POST(
       0;
 
     // =======================================================
-    // 5. SELECT GROQ MODEL
+    // 6. SELECT GROQ MODEL
     // =======================================================
 
     const model = hasImages
@@ -382,7 +448,7 @@ export async function POST(
       : "openai/gpt-oss-120b";
 
     // =======================================================
-    // 6. SYSTEM PROMPT
+    // 7. SYSTEM PROMPT
     // =======================================================
 
     const systemPrompt = `
@@ -423,7 +489,7 @@ Be concise by default, but never omit important information needed to correctly 
 `;
 
     // =======================================================
-    // 7. BUILD GROQ MESSAGES
+    // 8. BUILD GROQ MESSAGES
     // =======================================================
 
     let groqMessages: any[];
@@ -458,7 +524,8 @@ Be concise by default, but never omit important information needed to correctly 
           : null;
 
       const userText =
-        lastMessage?.role === "user"
+        lastMessage?.role ===
+        "user"
           ? lastMessage.content
           : "Please analyze the attached image.";
 
@@ -468,7 +535,6 @@ Be concise by default, but never omit important information needed to correctly 
           content:
             systemPrompt,
         },
-
         ...previousMessages.map(
           (message) => ({
             role:
@@ -477,7 +543,6 @@ Be concise by default, but never omit important information needed to correctly 
               message.content,
           })
         ),
-
         {
           role: "user",
           content: [
@@ -498,7 +563,6 @@ Be concise by default, but never omit important information needed to correctly 
           content:
             systemPrompt,
         },
-
         ...messages.map(
           (message) => ({
             role:
@@ -526,7 +590,7 @@ Be concise by default, but never omit important information needed to correctly 
     );
 
     // =======================================================
-    // 8. CALL GROQ
+    // 9. CALL GROQ
     // =======================================================
 
     const groqResponse =
@@ -545,7 +609,6 @@ Be concise by default, but never omit important information needed to correctly 
 
           body: JSON.stringify({
             model,
-
             messages:
               groqMessages,
 
@@ -559,9 +622,6 @@ Be concise by default, but never omit important information needed to correctly 
 
             stream: true,
 
-            // IMPORTANT:
-            // Ask Groq to include final usage
-            // information in the streaming response.
             stream_options: {
               include_usage: true,
             },
@@ -570,7 +630,7 @@ Be concise by default, but never omit important information needed to correctly 
       );
 
     // =======================================================
-    // 9. READ REAL GROQ QUOTA
+    // 10. READ REAL GROQ QUOTA
     // =======================================================
 
     const groqQuotaHeaders =
@@ -579,7 +639,7 @@ Be concise by default, but never omit important information needed to correctly 
       );
 
     // =======================================================
-    // 10. HANDLE GROQ ERROR
+    // 11. HANDLE GROQ ERROR
     // =======================================================
 
     if (!groqResponse.ok) {
@@ -624,11 +684,12 @@ Be concise by default, but never omit important information needed to correctly 
             "groq",
           groqQuota:
             groqQuotaHeaders,
+          creditBalance:
+            currentChatCredits,
         },
         {
           status:
             groqResponse.status,
-
           headers:
             groqQuotaHeaders,
         }
@@ -636,7 +697,7 @@ Be concise by default, but never omit important information needed to correctly 
     }
 
     // =======================================================
-    // 11. CHECK RESPONSE BODY
+    // 12. CHECK RESPONSE BODY
     // =======================================================
 
     if (!groqResponse.body) {
@@ -648,7 +709,6 @@ Be concise by default, but never omit important information needed to correctly 
         },
         {
           status: 500,
-
           headers:
             groqQuotaHeaders,
         }
@@ -661,7 +721,7 @@ Be concise by default, but never omit important information needed to correctly 
     );
 
     // =======================================================
-    // 12. STREAM GROQ RESPONSE
+    // 13. STREAM GROQ RESPONSE
     // =======================================================
 
     const encoder =
@@ -678,7 +738,8 @@ Be concise by default, but never omit important information needed to correctly 
           const reader =
             groqResponse.body!.getReader();
 
-          let buffer = "";
+          let buffer =
+            "";
 
           let groqUsage:
             GroqUsage | null =
@@ -754,7 +815,7 @@ Be concise by default, but never omit important information needed to correctly 
                     );
 
                   // -----------------------------------------
-                  // Capture Groq completion/request ID
+                  // Capture Groq request ID
                   // -----------------------------------------
 
                   if (
@@ -777,7 +838,7 @@ Be concise by default, but never omit important information needed to correctly 
                   }
 
                   // -----------------------------------------
-                  // Send generated text to frontend
+                  // Send generated text
                   // -----------------------------------------
 
                   const text =
@@ -813,7 +874,7 @@ Be concise by default, but never omit important information needed to correctly 
             }
 
             // =================================================
-            // 13. RECORD ACTUAL GROQ USAGE
+            // 14. ACTUAL GROQ USAGE
             // =================================================
 
             const inputTokens =
@@ -836,17 +897,26 @@ Be concise by default, but never omit important information needed to correctly 
               {
                 requestId:
                   groqRequestId,
+
                 inputTokens,
+
                 outputTokens,
+
                 totalTokens,
+
+                previousChatCredits:
+                  currentChatCredits,
               }
             );
+
+            // =================================================
+            // 15. RECORD PROVIDER USAGE
+            // =================================================
 
             const usageRecord =
               await recordProviderUsage(
                 {
-                  userId:
-                    featureAccess.userId,
+                  userId,
 
                   featureKey:
                     "chat",
@@ -904,11 +974,135 @@ Be concise by default, but never omit important information needed to correctly 
               );
             }
 
+            // =================================================
+            // 16. CONSUME FEATURE CREDITS
+            // =================================================
+
+            let remainingCredits =
+              currentChatCredits;
+
+            if (
+              totalTokens > 0
+            ) {
+              const creditUsage =
+                await consumeFeatureCredits(
+                  {
+                    userId,
+
+                    featureKey:
+                      "chat",
+
+                    amount:
+                      totalTokens,
+
+                    provider:
+                      "groq",
+
+                    providerRequestId:
+                      groqRequestId,
+
+                    description:
+                      "Groq Chat actual token usage",
+
+                    referenceId:
+                      usageRecord.id,
+
+                    metadata: {
+                      model,
+
+                      inputTokens,
+
+                      outputTokens,
+
+                      totalTokens,
+
+                      hasImages,
+
+                      imageCount:
+                        imageAttachments.length,
+
+                      groqUsage:
+                        groqUsage ??
+                        null,
+
+                      groqQuota:
+                        groqQuotaHeaders,
+                    },
+                  }
+                );
+
+              if (
+                !creditUsage.success
+              ) {
+                console.error(
+                  "ZUQEN FEATURE CREDIT CONSUMPTION FAILED:",
+                  creditUsage.error
+                );
+
+                /**
+                 * IMPORTANT:
+                 * Provider usage has already happened.
+                 * We do not hide the provider response from
+                 * the user. Instead, log the failure so it can
+                 * be reconciled from provider_usage.
+                 */
+              } else if (
+                typeof creditUsage.balance ===
+                "number"
+              ) {
+                remainingCredits =
+                  creditUsage.balance;
+              }
+            }
+
+            console.log(
+              "ZUQEN CHAT CREDIT RESULT:",
+              {
+                used:
+                  totalTokens,
+
+                remaining:
+                  remainingCredits,
+              }
+            );
+
             streamCompleted =
               true;
 
             // =================================================
-            // 14. FINISH STREAM
+            // 17. SEND FINAL CREDIT INFORMATION
+            // =================================================
+
+            controller.enqueue(
+              encoder.encode(
+                `data: ${JSON.stringify(
+                  {
+                    usage: {
+                      inputTokens,
+                      outputTokens,
+                      totalTokens,
+                    },
+
+                    credits: {
+                      feature:
+                        "chat",
+
+                      used:
+                        totalTokens,
+
+                      remaining:
+                        remainingCredits,
+                    },
+
+                    provider:
+                      "groq",
+                  }
+                )}\n\n`
+              )
+            );
+
+            // =================================================
+            // 18. FINISH STREAM
             // =================================================
 
             controller.enqueue(
@@ -933,8 +1127,7 @@ Be concise by default, but never omit important information needed to correctly 
             const failedRecord =
               await recordProviderUsage(
                 {
-                  userId:
-                    featureAccess.userId,
+                  userId,
 
                   featureKey:
                     "chat",
@@ -1003,7 +1196,7 @@ Be concise by default, but never omit important information needed to correctly 
       });
 
     // =======================================================
-    // 15. RESPONSE HEADERS
+    // 19. RESPONSE HEADERS
     // =======================================================
 
     const responseHeaders =
@@ -1026,12 +1219,13 @@ Be concise by default, but never omit important information needed to correctly 
         "X-Zuquen-Feature":
           "chat",
 
-        "X-Zuquen-Feature-Access":
-          "granted",
+        "X-Zuquen-Feature-Credits":
+          String(
+            currentChatCredits
+          ),
       });
 
-    // Forward Groq's REAL quota
-    // information to frontend.
+    // Forward Groq REAL quota information.
 
     for (
       const [
@@ -1048,7 +1242,7 @@ Be concise by default, but never omit important information needed to correctly 
     }
 
     // =======================================================
-    // 16. RETURN STREAM
+    // 20. RETURN STREAM
     // =======================================================
 
     return new Response(
@@ -1070,6 +1264,7 @@ Be concise by default, but never omit important information needed to correctly 
     return NextResponse.json(
       {
         success: false,
+
         error:
           error instanceof Error
             ? error.message
@@ -1081,3 +1276,4 @@ Be concise by default, but never omit important information needed to correctly 
     );
   }
 }
+
