@@ -1,4 +1,3 @@
-
 import { createClient } from "@supabase/supabase-js";
 
 export const FEATURE_KEYS = [
@@ -11,19 +10,23 @@ export const FEATURE_KEYS = [
 
 export type FeatureKey = (typeof FEATURE_KEYS)[number];
 
-export type FeatureCreditBalance = {
-  feature_key: FeatureKey;
-  balance: number;
-  total_granted: number;
-  total_used: number;
-};
-
 export type CreditTransactionType =
   | "grant"
   | "usage"
   | "refund"
   | "adjustment"
   | "purchase";
+
+export type FeatureCreditBalance = {
+  id?: string;
+  user_id: string;
+  feature_key: FeatureKey;
+  balance: number;
+  total_granted: number;
+  total_used: number;
+  created_at?: string;
+  updated_at?: string;
+};
 
 function getServiceRoleClient() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -45,170 +48,73 @@ function getServiceRoleClient() {
   });
 }
 
-function isValidFeatureKey(value: string): value is FeatureKey {
-  return FEATURE_KEYS.includes(value as FeatureKey);
-}
-
 /**
- * Get one user's feature-specific credit balance.
- *
- * Example:
- * const result = await getFeatureCreditBalance(userId, "chat");
+ * Get one feature's current credit balance.
  */
 export async function getFeatureCreditBalance(
   userId: string,
   featureKey: FeatureKey
-) {
-  if (!userId) {
-    return {
-      success: false,
-      balance: null,
-      error: "User ID is required.",
-    };
+): Promise<number> {
+  const supabase = getServiceRoleClient();
+
+  const { data, error } = await supabase
+    .from("feature_credit_balances")
+    .select("balance")
+    .eq("user_id", userId)
+    .eq("feature_key", featureKey)
+    .maybeSingle();
+
+  if (error) {
+    console.error("GET FEATURE CREDIT BALANCE ERROR:", error);
+    throw new Error(error.message);
   }
 
-  if (!isValidFeatureKey(featureKey)) {
-    return {
-      success: false,
-      balance: null,
-      error: "Invalid feature key.",
-    };
-  }
-
-  try {
-    const supabase = getServiceRoleClient();
-
-    const { data, error } = await supabase
-      .from("feature_credit_balances")
-      .select("feature_key, balance, total_granted, total_used")
-      .eq("user_id", userId)
-      .eq("feature_key", featureKey)
-      .maybeSingle();
-
-    if (error) {
-      console.error("GET FEATURE CREDIT BALANCE ERROR:", error);
-
-      return {
-        success: false,
-        balance: null,
-        error: error.message,
-      };
-    }
-
-    return {
-      success: true,
-      balance: data
-        ? {
-            feature_key: data.feature_key as FeatureKey,
-            balance: Number(data.balance ?? 0),
-            total_granted: Number(data.total_granted ?? 0),
-            total_used: Number(data.total_used ?? 0),
-          }
-        : {
-            feature_key: featureKey,
-            balance: 0,
-            total_granted: 0,
-            total_used: 0,
-          },
-      error: null,
-    };
-  } catch (error: any) {
-    console.error("GET FEATURE CREDIT BALANCE HELPER ERROR:", error);
-
-    return {
-      success: false,
-      balance: null,
-      error:
-        error?.message || "Failed to get feature credit balance.",
-    };
-  }
+  return Number(data?.balance ?? 0);
 }
 
 /**
- * Get all feature balances for a user.
+ * Get all feature credit balances for a user.
  */
-export async function getAllFeatureCreditBalances(userId: string) {
-  if (!userId) {
-    return {
-      success: false,
-      balances: [],
-      error: "User ID is required.",
-    };
-  }
+export async function getAllFeatureCreditBalances(
+  userId: string
+): Promise<FeatureCreditBalance[]> {
+  const supabase = getServiceRoleClient();
 
-  try {
-    const supabase = getServiceRoleClient();
-
-    const { data, error } = await supabase
-      .from("feature_credit_balances")
-      .select("feature_key, balance, total_granted, total_used")
-      .eq("user_id", userId);
-
-    if (error) {
-      console.error("GET ALL FEATURE CREDIT BALANCES ERROR:", error);
-
-      return {
-        success: false,
-        balances: [],
-        error: error.message,
-      };
-    }
-
-    const balanceMap = new Map<
-      FeatureKey,
-      FeatureCreditBalance
-    >();
-
-    for (const row of data ?? []) {
-      if (!isValidFeatureKey(row.feature_key)) {
-        continue;
-      }
-
-      balanceMap.set(row.feature_key, {
-        feature_key: row.feature_key,
-        balance: Number(row.balance ?? 0),
-        total_granted: Number(row.total_granted ?? 0),
-        total_used: Number(row.total_used ?? 0),
-      });
-    }
-
-    const balances = FEATURE_KEYS.map((featureKey) => {
-      return (
-        balanceMap.get(featureKey) ?? {
-          feature_key: featureKey,
-          balance: 0,
-          total_granted: 0,
-          total_used: 0,
-        }
-      );
+  const { data, error } = await supabase
+    .from("feature_credit_balances")
+    .select(
+      `
+        id,
+        user_id,
+        feature_key,
+        balance,
+        total_granted,
+        total_used,
+        created_at,
+        updated_at
+      `
+    )
+    .eq("user_id", userId)
+    .order("feature_key", {
+      ascending: true,
     });
 
-    return {
-      success: true,
-      balances,
-      error: null,
-    };
-  } catch (error: any) {
-    console.error(
-      "GET ALL FEATURE CREDIT BALANCES HELPER ERROR:",
-      error
-    );
-
-    return {
-      success: false,
-      balances: [],
-      error:
-        error?.message ||
-        "Failed to get all feature credit balances.",
-    };
+  if (error) {
+    console.error("GET ALL FEATURE CREDIT BALANCES ERROR:", error);
+    throw new Error(error.message);
   }
+
+  return (data ?? []) as FeatureCreditBalance[];
 }
 
 /**
- * Grant credits to one feature.
+ * Grant feature credits.
  *
- * IMPORTANT:
- * This function is intended for trusted server-side code only.
+ * Used for:
+ * - signup allocation
+ * - premium refill
+ * - admin adjustment
+ * - refund
  */
 export async function grantFeatureCredits(params: {
   userId: string;
@@ -220,219 +126,151 @@ export async function grantFeatureCredits(params: {
   referenceId?: string | null;
   metadata?: Record<string, unknown>;
 }) {
-  const {
-    userId,
-    featureKey,
-    amount,
-    transactionType = "grant",
-    provider = null,
-    description = null,
-    referenceId = null,
-    metadata = {},
-  } = params;
-
-  if (!userId) {
+  if (!Number.isFinite(params.amount) || params.amount <= 0) {
     return {
       success: false,
-      balance: null,
-      error: "User ID is required.",
+      code: "INVALID_AMOUNT",
+      message: "Credit amount must be greater than zero.",
     };
   }
 
-  if (!isValidFeatureKey(featureKey)) {
-    return {
-      success: false,
-      balance: null,
-      error: "Invalid feature key.",
-    };
-  }
+  const supabase = getServiceRoleClient();
 
-  if (!Number.isFinite(amount) || amount <= 0) {
-    return {
-      success: false,
-      balance: null,
-      error: "Credit amount must be greater than zero.",
-    };
-  }
-
-  try {
-    const supabase = getServiceRoleClient();
-
-    const { data, error } = await supabase.rpc(
-      "grant_feature_credits",
-      {
-        p_user_id: userId,
-        p_feature_key: featureKey,
-        p_amount: amount,
-        p_transaction_type: transactionType,
-        p_provider: provider,
-        p_description: description,
-        p_reference_id: referenceId,
-        p_metadata: metadata,
-      }
-    );
-
-    if (error) {
-      console.error("GRANT FEATURE CREDITS ERROR:", error);
-
-      return {
-        success: false,
-        balance: null,
-        error: error.message,
-      };
+  const { data, error } = await supabase.rpc(
+    "grant_feature_credits",
+    {
+      p_user_id: params.userId,
+      p_feature_key: params.featureKey,
+      p_amount: params.amount,
+      p_transaction_type:
+        params.transactionType ?? "grant",
+      p_provider: params.provider ?? null,
+      p_description:
+        params.description ??
+        "Feature credits granted",
+      p_reference_id:
+        params.referenceId ?? null,
+      p_metadata: params.metadata ?? {},
     }
+  );
 
-    return {
-      success: true,
-      balance:
-        typeof data === "number"
-          ? data
-          : Number(data ?? 0),
-      error: null,
-    };
-  } catch (error: any) {
-    console.error("GRANT FEATURE CREDITS HELPER ERROR:", error);
+  if (error) {
+    console.error("GRANT FEATURE CREDITS ERROR:", error);
 
     return {
       success: false,
-      balance: null,
-      error:
-        error?.message || "Failed to grant feature credits.",
+      code: "GRANT_FAILED",
+      message: error.message,
+      data: null,
     };
   }
+
+  return {
+    success: true,
+    code: "CREDITS_GRANTED",
+    message: "Feature credits granted successfully.",
+    data,
+  };
 }
 
 /**
- * Consume feature credits.
+ * Consume provider-backed feature credits.
  *
- * Credits should normally be consumed only after
- * the provider request succeeds and actual usage is known.
+ * This uses the new atomic RPC which:
+ * - locks the user's balance
+ * - checks available credits
+ * - deducts credits
+ * - updates total_used
+ * - updates provider consumed_credits
+ * - creates the usage ledger entry
+ *
+ * Everything happens atomically inside Supabase.
  */
 export async function consumeFeatureCredits(params: {
   userId: string;
   featureKey: FeatureKey;
   amount: number;
-  provider?: string | null;
   providerRequestId?: string | null;
   description?: string | null;
   referenceId?: string | null;
   metadata?: Record<string, unknown>;
 }) {
-  const {
-    userId,
-    featureKey,
-    amount,
-    provider = null,
-    providerRequestId = null,
-    description = null,
-    referenceId = null,
-    metadata = {},
-  } = params;
-
-  if (!userId) {
+  if (!Number.isFinite(params.amount) || params.amount <= 0) {
     return {
       success: false,
-      balance: null,
-      error: "User ID is required.",
-      code: "INVALID_USER",
-    };
-  }
-
-  if (!isValidFeatureKey(featureKey)) {
-    return {
-      success: false,
-      balance: null,
-      error: "Invalid feature key.",
-      code: "INVALID_FEATURE",
-    };
-  }
-
-  if (!Number.isFinite(amount) || amount <= 0) {
-    return {
-      success: false,
-      balance: null,
-      error: "Credit amount must be greater than zero.",
       code: "INVALID_AMOUNT",
+      message: "Credit amount must be greater than zero.",
+      data: null,
     };
   }
 
-  try {
-    const supabase = getServiceRoleClient();
+  const supabase = getServiceRoleClient();
 
-    const { data, error } = await supabase.rpc(
-      "consume_feature_credits",
-      {
-        p_user_id: userId,
-        p_feature_key: featureKey,
-        p_amount: amount,
-        p_provider: provider,
-        p_provider_request_id: providerRequestId,
-        p_description: description,
-        p_reference_id: referenceId,
-        p_metadata: metadata,
-      }
-    );
-
-    if (error) {
-      console.error("CONSUME FEATURE CREDITS ERROR:", error);
-
-      return {
-        success: false,
-        balance: null,
-        error: error.message,
-        code: "CREDIT_CONSUME_ERROR",
-      };
+  const { data, error } = await supabase.rpc(
+    "consume_provider_feature_credits",
+    {
+      p_user_id: params.userId,
+      p_feature_key: params.featureKey,
+      p_amount: params.amount,
+      p_provider_request_id:
+        params.providerRequestId ?? null,
+      p_description:
+        params.description ??
+        "Provider feature usage",
+      p_reference_id:
+        params.referenceId ?? null,
+      p_metadata: params.metadata ?? {},
     }
+  );
 
-    /**
-     * Our RPC returns INSUFFICIENT_CREDITS when
-     * the user's feature balance is not enough.
-     */
-    if (data?.code === "INSUFFICIENT_CREDITS") {
-      return {
-        success: false,
-        balance:
-          data?.balance !== undefined
-            ? Number(data.balance)
-            : 0,
-        error: "Insufficient feature credits.",
-        code: "INSUFFICIENT_CREDITS",
-      };
-    }
-
-    return {
-      success: true,
-      balance:
-        data?.balance !== undefined
-          ? Number(data.balance)
-          : typeof data === "number"
-            ? data
-            : null,
-      transactionId: data?.transaction_id ?? null,
-      error: null,
-      code: null,
-    };
-  } catch (error: any) {
+  if (error) {
     console.error(
-      "CONSUME FEATURE CREDITS HELPER ERROR:",
+      "CONSUME PROVIDER FEATURE CREDITS ERROR:",
       error
     );
 
     return {
       success: false,
-      balance: null,
-      error:
-        error?.message ||
-        "Failed to consume feature credits.",
-      code: "CREDIT_CONSUME_ERROR",
+      code: "CONSUME_FAILED",
+      message: error.message,
+      data: null,
     };
   }
+
+  /*
+   * Supabase RPC returns the JSON object created
+   * inside consume_provider_feature_credits().
+   */
+  const result =
+    data && typeof data === "object"
+      ? (data as Record<string, unknown>)
+      : null;
+
+  if (result?.success === false) {
+    return {
+      success: false,
+      code:
+        typeof result.code === "string"
+          ? result.code
+          : "CREDIT_CONSUMPTION_FAILED",
+      message:
+        typeof result.message === "string"
+          ? result.message
+          : "Unable to consume feature credits.",
+      data: result,
+    };
+  }
+
+  return {
+    success: true,
+    code: "CREDITS_CONSUMED",
+    message: "Feature credits consumed successfully.",
+    data: result,
+  };
 }
 
 /**
  * Refund feature credits.
- *
- * Intended for trusted server-side code only.
  */
 export async function refundFeatureCredits(params: {
   userId: string;
@@ -444,91 +282,50 @@ export async function refundFeatureCredits(params: {
   referenceId?: string | null;
   metadata?: Record<string, unknown>;
 }) {
-  const {
-    userId,
-    featureKey,
-    amount,
-    provider = null,
-    providerRequestId = null,
-    description = null,
-    referenceId = null,
-    metadata = {},
-  } = params;
-
-  if (!userId) {
+  if (!Number.isFinite(params.amount) || params.amount <= 0) {
     return {
       success: false,
-      balance: null,
-      error: "User ID is required.",
+      code: "INVALID_AMOUNT",
+      message: "Refund amount must be greater than zero.",
+      data: null,
     };
   }
 
-  if (!isValidFeatureKey(featureKey)) {
-    return {
-      success: false,
-      balance: null,
-      error: "Invalid feature key.",
-    };
-  }
+  const supabase = getServiceRoleClient();
 
-  if (!Number.isFinite(amount) || amount <= 0) {
-    return {
-      success: false,
-      balance: null,
-      error: "Refund amount must be greater than zero.",
-    };
-  }
-
-  try {
-    const supabase = getServiceRoleClient();
-
-    const { data, error } = await supabase.rpc(
-      "refund_feature_credits",
-      {
-        p_user_id: userId,
-        p_feature_key: featureKey,
-        p_amount: amount,
-        p_provider: provider,
-        p_provider_request_id: providerRequestId,
-        p_description: description,
-        p_reference_id: referenceId,
-        p_metadata: metadata,
-      }
-    );
-
-    if (error) {
-      console.error("REFUND FEATURE CREDITS ERROR:", error);
-
-      return {
-        success: false,
-        balance: null,
-        error: error.message,
-      };
+  const { data, error } = await supabase.rpc(
+    "refund_feature_credits",
+    {
+      p_user_id: params.userId,
+      p_feature_key: params.featureKey,
+      p_amount: params.amount,
+      p_provider: params.provider ?? null,
+      p_provider_request_id:
+        params.providerRequestId ?? null,
+      p_description:
+        params.description ??
+        "Feature credits refunded",
+      p_reference_id:
+        params.referenceId ?? null,
+      p_metadata: params.metadata ?? {},
     }
+  );
 
-    return {
-      success: true,
-      balance:
-        data?.balance !== undefined
-          ? Number(data.balance)
-          : typeof data === "number"
-            ? data
-            : null,
-      error: null,
-    };
-  } catch (error: any) {
-    console.error(
-      "REFUND FEATURE CREDITS HELPER ERROR:",
-      error
-    );
+  if (error) {
+    console.error("REFUND FEATURE CREDITS ERROR:", error);
 
     return {
       success: false,
-      balance: null,
-      error:
-        error?.message ||
-        "Failed to refund feature credits.",
+      code: "REFUND_FAILED",
+      message: error.message,
+      data: null,
     };
   }
-}
 
+  return {
+    success: true,
+    code: "CREDITS_REFUNDED",
+    message: "Feature credits refunded successfully.",
+    data,
+  };
+}
