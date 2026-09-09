@@ -1,3 +1,4 @@
+
 "use client";
 
 import {
@@ -62,6 +63,7 @@ function Icon({
       strokeWidth="1.8"
       strokeLinecap="round"
       strokeLinejoin="round"
+      aria-hidden="true"
     >
       {children}
     </svg>
@@ -86,6 +88,7 @@ function formatFileSize(size = 0) {
   if (!size) return "";
 
   if (size < 1024) return `${size} B`;
+
   if (size < 1024 * 1024) {
     return `${(size / 1024).toFixed(1)} KB`;
   }
@@ -103,6 +106,16 @@ function featureIcon(feature: string) {
   return "•";
 }
 
+function featureLabel(feature: string) {
+  if (feature === "chat") return "AI Chat";
+  if (feature === "website_builder") return "Website Builder";
+  if (feature === "image_generator") return "Image Generator";
+  if (feature === "video_generator") return "Video Generator";
+  if (feature === "voice_generator") return "Voice Generator";
+
+  return feature;
+}
+
 export default function HomePage() {
   const supabase = createClient();
 
@@ -118,9 +131,11 @@ export default function HomePage() {
 
   const [sidebar, setSidebar] = useState(true);
   const [archiveOpen, setArchiveOpen] = useState(false);
-  const [menuOpen, setMenuOpen] = useState<string | null>(null);
 
+  const [menuOpen, setMenuOpen] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingText, setEditingText] = useState("");
+
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [uploading, setUploading] = useState(false);
 
@@ -136,8 +151,13 @@ export default function HomePage() {
   const [creditsLoading, setCreditsLoading] =
     useState(false);
 
+  const [copiedMessage, setCopiedMessage] =
+    useState<string | null>(null);
+
   const fileInput = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const textareaRef =
+    useRef<HTMLTextAreaElement>(null);
 
   const activeChats = chats.filter(
     (chat) => !chat.archived
@@ -148,28 +168,32 @@ export default function HomePage() {
   );
 
   const totalCredits = featureCredits.reduce(
-    (total, item) => total + Number(item.balance || 0),
+    (total, item) =>
+      total + Number(item.balance || 0),
     0
   );
 
-  const totalAllocatedCredits = featureCredits.reduce(
-    (total, item) =>
-      total + Number(item.total_granted || 0),
-    0
-  );
+  const totalAllocatedCredits =
+    featureCredits.reduce(
+      (total, item) =>
+        total + Number(item.total_granted || 0),
+      0
+    );
 
-  const totalUsedCredits = featureCredits.reduce(
-    (total, item) =>
-      total + Number(item.total_used || 0),
-    0
-  );
+  const totalUsedCredits =
+    featureCredits.reduce(
+      (total, item) =>
+        total + Number(item.total_used || 0),
+      0
+    );
 
   const totalUsagePercentage =
     totalAllocatedCredits > 0
       ? Math.min(
           100,
           Math.round(
-            (totalUsedCredits / totalAllocatedCredits) *
+            (totalUsedCredits /
+              totalAllocatedCredits) *
               100
           )
         )
@@ -191,8 +215,8 @@ export default function HomePage() {
 
     try {
       const [
-        { data: balances },
-        { data: features },
+        { data: balances, error: balanceError },
+        { data: features, error: featureError },
       ] = await Promise.all([
         supabase
           .from("feature_credit_balances")
@@ -208,6 +232,14 @@ export default function HomePage() {
           )
           .eq("enabled", true),
       ]);
+
+      if (balanceError) {
+        console.error(balanceError);
+      }
+
+      if (featureError) {
+        console.error(featureError);
+      }
 
       const balanceMap = new Map(
         (balances || []).map((item: any) => [
@@ -225,9 +257,13 @@ export default function HomePage() {
 
         return {
           feature_key: feature.feature_key,
-          feature_name: feature.feature_name,
+          feature_name:
+            feature.feature_name ||
+            featureLabel(feature.feature_key),
           provider: feature.provider,
-          balance: Number(balance?.balance || 0),
+          balance: Number(
+            balance?.balance || 0
+          ),
           total_granted: Number(
             balance?.total_granted || 0
           ),
@@ -282,6 +318,7 @@ export default function HomePage() {
             "Anonymous auth failed:",
             error
           );
+
           setAuthReady(true);
           return;
         }
@@ -336,6 +373,19 @@ export default function HomePage() {
     });
   }, [messages, loading]);
 
+  function startNewConversation() {
+    setActiveChat(null);
+    setMessages([]);
+    setAttachments([]);
+    setInput("");
+    setEditingId(null);
+    setEditingText("");
+
+    setTimeout(() => {
+      textareaRef.current?.focus();
+    }, 50);
+  }
+
   async function createChat() {
     if (!user) return null;
 
@@ -369,6 +419,7 @@ export default function HomePage() {
     setActiveChat(chatId);
     setArchiveOpen(false);
     setMenuOpen(null);
+    setEditingId(null);
 
     const { data, error } = await supabase
       .from("ZUQEN_messages")
@@ -393,6 +444,7 @@ export default function HomePage() {
       .from("ZUQEN_chats")
       .update({
         archived: true,
+        updated_at: new Date().toISOString(),
       })
       .eq("id", chatId);
 
@@ -425,6 +477,7 @@ export default function HomePage() {
       .from("ZUQEN_chats")
       .update({
         archived: false,
+        updated_at: new Date().toISOString(),
       })
       .eq("id", chatId);
 
@@ -448,6 +501,12 @@ export default function HomePage() {
   }
 
   async function deleteChat(chatId: string) {
+    const confirmed = window.confirm(
+      "Delete this conversation permanently?"
+    );
+
+    if (!confirmed) return;
+
     const { error } = await supabase
       .from("ZUQEN_chats")
       .delete()
@@ -498,10 +557,24 @@ export default function HomePage() {
           ? {
               ...chat,
               title: cleanTitle,
+              updated_at:
+                new Date().toISOString(),
             }
           : chat
       )
     );
+  }
+
+  function beginRename(chat: Chat) {
+    const title = window.prompt(
+      "Rename conversation",
+      chat.title
+    );
+
+    if (title === null) return;
+
+    renameChat(chat.id, title);
+    setMenuOpen(null);
   }
 
   function handleFileChange(
@@ -512,6 +585,8 @@ export default function HomePage() {
     );
 
     if (!files.length) return;
+
+    setUploading(true);
 
     const newAttachments: Attachment[] =
       files.map((file) => ({
@@ -527,6 +602,7 @@ export default function HomePage() {
     ]);
 
     event.target.value = "";
+    setUploading(false);
   }
 
   function removeAttachment(id?: string) {
@@ -537,59 +613,145 @@ export default function HomePage() {
     );
   }
 
-  async function sendMessage() {
-    const text = input.trim();
+  async function copyMessage(
+    message: Message
+  ) {
+    try {
+      await navigator.clipboard.writeText(
+        message.content
+      );
 
-    if ((!text && !attachments.length) || loading) {
+      setCopiedMessage(message.id);
+
+      setTimeout(() => {
+        setCopiedMessage(null);
+      }, 1600);
+    } catch (error) {
+      console.error(error);
+    }
+  }
+
+  function beginEditMessage(message: Message) {
+    if (message.role !== "user") return;
+
+    setEditingId(message.id);
+    setEditingText(message.content);
+
+    setTimeout(() => {
+      textareaRef.current?.focus();
+    }, 50);
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setEditingText("");
+  }
+
+  async function saveEditedMessage(
+    message: Message
+  ) {
+    const cleanText = editingText.trim();
+
+    if (!cleanText || loading) return;
+
+    const index = messages.findIndex(
+      (item) => item.id === message.id
+    );
+
+    if (index === -1) return;
+
+    const updatedMessages =
+      messages.slice(0, index + 1);
+
+    updatedMessages[index] = {
+      ...updatedMessages[index],
+      content: cleanText,
+    };
+
+    setMessages(updatedMessages);
+    setEditingId(null);
+    setEditingText("");
+
+    if (!activeChat || !user) return;
+
+    try {
+      await supabase
+        .from("ZUQEN_messages")
+        .update({
+          content: cleanText,
+        })
+        .eq("id", message.id);
+
+      await generateAssistantResponse(
+        updatedMessages,
+        activeChat,
+        cleanText
+      );
+    } catch (error) {
+      console.error(error);
+    }
+  }
+
+  async function regenerate(
+    message: Message
+  ) {
+    if (loading || message.role !== "assistant") {
       return;
     }
 
+    const assistantIndex =
+      messages.findIndex(
+        (item) => item.id === message.id
+      );
+
+    if (assistantIndex <= 0) return;
+
+    const previousUserMessage =
+      [...messages]
+        .slice(0, assistantIndex)
+        .reverse()
+        .find((item) => item.role === "user");
+
+    if (!previousUserMessage) return;
+
+    const baseMessages =
+      messages.slice(0, assistantIndex);
+
+    setMessages(baseMessages);
+
+    if (!activeChat || !user) return;
+
+    await generateAssistantResponse(
+      baseMessages,
+      activeChat,
+      previousUserMessage.content
+    );
+  }
+
+  async function generateAssistantResponse(
+    conversationMessages: Message[],
+    chatId: string,
+    lastUserText: string
+  ) {
     if (!user) return;
 
-    let chatId = activeChat;
-
-    if (!chatId) {
-      chatId = await createChat();
-
-      if (!chatId) return;
-    }
-
-    const userMessage: Message = {
-      id: crypto.randomUUID(),
-      role: "user",
-      content: text,
-      created_at: new Date().toISOString(),
-      attachments:
-        attachments.length > 0
-          ? attachments
-          : undefined,
-    };
-
-    setMessages((previous) => [
-      ...previous,
-      userMessage,
-    ]);
-
-    setInput("");
-    setAttachments([]);
     setLoading(true);
 
     try {
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          messages: [
-            ...messages,
-            userMessage,
-          ],
-          attachments:
-            userMessage.attachments || [],
-          agent: selectedAgent,
-        }),
-      });
+      const response = await fetch(
+        "/api/chat",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            messages: conversationMessages,
+            attachments: [],
+            agent: selectedAgent,
+          }),
+        }
+      );
 
       if (!response.ok) {
         const errorText =
@@ -665,41 +827,48 @@ export default function HomePage() {
 
               setMessages((previous) =>
                 previous.map(
-                  (message) =>
-                    message.id ===
+                  (current) =>
+                    current.id ===
                     assistantId
                       ? {
-                          ...message,
+                          ...current,
                           content:
                             assistantText,
                         }
-                      : message
+                      : current
                 )
               );
             }
           } catch {
-            // Ignore non-JSON stream chunks.
+            // Ignore malformed stream chunks.
           }
         }
       }
 
+      if (assistantText.trim()) {
+        await supabase
+          .from("ZUQEN_messages")
+          .insert({
+            chat_id: chatId,
+            role: "assistant",
+            content: assistantText,
+            attachments: [],
+          });
+      }
+
       if (user?.id) {
         await loadFeatureCredits(user.id);
+        await loadChats(user.id);
       }
 
-      if (
-        text &&
-        activeChat === null
-      ) {
+      if (lastUserText) {
         await renameChat(
           chatId,
-          text.length > 45
-            ? `${text.slice(0, 45)}…`
-            : text
+          lastUserText.length > 45
+            ? `${lastUserText.slice(0, 45)}…`
+            : lastUserText
         );
       }
-
-      await loadChats(user.id);
     } catch (error) {
       console.error(error);
 
@@ -719,6 +888,58 @@ export default function HomePage() {
     } finally {
       setLoading(false);
     }
+  }
+
+  async function sendMessage() {
+    const text = input.trim();
+
+    if (
+      (!text && !attachments.length) ||
+      loading
+    ) {
+      return;
+    }
+
+    if (!user) return;
+
+    let chatId = activeChat;
+
+    if (!chatId) {
+      chatId = await createChat();
+
+      if (!chatId) return;
+    }
+
+    const userMessage: Message = {
+      id: crypto.randomUUID(),
+      role: "user",
+      content: text,
+      created_at:
+        new Date().toISOString(),
+      attachments:
+        attachments.length > 0
+          ? attachments
+          : undefined,
+    };
+
+    const conversation =
+      activeChat
+        ? [...messages, userMessage]
+        : [userMessage];
+
+    setMessages((previous) => [
+      ...previous,
+      userMessage,
+    ]);
+
+    setInput("");
+    setAttachments([]);
+
+    await generateAssistantResponse(
+      conversation,
+      chatId,
+      text
+    );
   }
 
   function handleKeyDown(
@@ -761,13 +982,34 @@ export default function HomePage() {
     }
   }
 
+  function handleComposerChange(
+    value: string
+  ) {
+    if (editingId) {
+      setEditingText(value);
+    } else {
+      setInput(value);
+    }
+  }
+
+  const composerValue = editingId
+    ? editingText
+    : input;
+
   if (!authReady) {
     return (
       <div className="ZUQEN-loading-screen">
-        <div className="ZUQEN-loading-logo">
-          Z
+        <div className="ZUQEN-loading-orb">
+          <span>Z</span>
         </div>
-        <div>Loading ZUQEN…</div>
+
+        <div className="ZUQEN-loading-title">
+          ZUQEN
+        </div>
+
+        <div className="ZUQEN-loading-sub">
+          Preparing your workspace…
+        </div>
       </div>
     );
   }
@@ -785,43 +1027,55 @@ export default function HomePage() {
       >
         <div className="ZUQEN-sidebar-inner">
           <div className="ZUQEN-side-top">
-            <div className="ZUQEN-brand">
-              <div className="ZUQEN-brand-mark">
-                Z
-              </div>
+            <div className="ZUQEN-brand-row">
+              <div className="ZUQEN-brand">
+                <div className="ZUQEN-brand-mark">
+                  Z
+                </div>
 
-              <span>ZUQEN</span>
+                <div className="ZUQEN-brand-text">
+                  <strong>ZUQEN</strong>
+                  <span>AI WORKSPACE</span>
+                </div>
+              </div>
             </div>
 
             <button
               type="button"
               className="ZUQEN-new-chat"
-              onClick={() => {
-                setActiveChat(null);
-                setMessages([]);
-                setAttachments([]);
-              }}
+              onClick={
+                startNewConversation
+              }
             >
-              <Icon size={16}>
-                <path d="M12 5v14" />
-                <path d="M5 12h14" />
-              </Icon>
+              <span className="ZUQEN-new-chat-icon">
+                <Icon size={16}>
+                  <path d="M12 5v14" />
+                  <path d="M5 12h14" />
+                </Icon>
+              </span>
 
               <span>
                 New conversation
+              </span>
+
+              <span className="ZUQEN-new-chat-shortcut">
+                ⌘K
               </span>
             </button>
           </div>
 
           <div className="ZUQEN-history">
-            <div className="ZUQEN-section-title">
-              <span>
-                {archiveOpen
-                  ? "Archived"
-                  : "Conversations"}
-              </span>
+            <div className="ZUQEN-section-header">
+              <div className="ZUQEN-section-title">
+                <span className="ZUQEN-section-dot" />
+                <span>
+                  {archiveOpen
+                    ? "Archived"
+                    : "Conversations"}
+                </span>
+              </div>
 
-              <span>
+              <span className="ZUQEN-section-count">
                 {archiveOpen
                   ? archivedChats.length
                   : activeChats.length}
@@ -830,163 +1084,132 @@ export default function HomePage() {
 
             {archiveOpen ? (
               <>
-                {archivedChats.length === 0 && (
+                {archivedChats.length ===
+                  0 && (
                   <div className="ZUQEN-empty-history">
-                    No archived chats
+                    <div className="ZUQEN-empty-icon">
+                      <Icon size={18}>
+                        <path d="M4 7h16" />
+                        <path d="M5 7v12h14V7" />
+                        <path d="M9 11h6" />
+                      </Icon>
+                    </div>
+
+                    <strong>
+                      No archived chats
+                    </strong>
+
+                    <span>
+                      Archived conversations
+                      will appear here.
+                    </span>
                   </div>
                 )}
 
                 {archivedChats.map(
                   (chat) => (
-                    <div
+                    <ChatItem
                       key={chat.id}
-                      className={`ZUQEN-chat-item ${
+                      chat={chat}
+                      active={
                         activeChat ===
                         chat.id
-                          ? "active"
-                          : ""
-                      }`}
-                    >
-                      <button
-                        type="button"
-                        className="ZUQEN-chat-main"
-                        onClick={() =>
-                          openChat(chat.id)
-                        }
-                      >
-                        <Icon size={14}>
-                          <path d="M4 5h16v12H4z" />
-                          <path d="m8 21 4-4 4 4" />
-                        </Icon>
-
-                        <span>
-                          {chat.title}
-                        </span>
-                      </button>
-
-                      <button
-                        type="button"
-                        className="ZUQEN-chat-more"
-                        onClick={() =>
-                          setMenuOpen(
-                            menuOpen ===
-                              chat.id
-                              ? null
-                              : chat.id
-                          )
-                        }
-                      >
-                        ⋯
-                      </button>
-
-                      {menuOpen ===
-                        chat.id && (
-                        <div className="ZUQEN-chat-menu">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              restoreChat(
-                                chat.id
-                              )
-                            }
-                          >
-                            Restore
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() =>
-                              deleteChat(
-                                chat.id
-                              )
-                            }
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      )}
-                    </div>
+                      }
+                      menuOpen={
+                        menuOpen ===
+                        chat.id
+                      }
+                      archived
+                      onOpen={() =>
+                        openChat(chat.id)
+                      }
+                      onMenu={() =>
+                        setMenuOpen(
+                          menuOpen ===
+                            chat.id
+                            ? null
+                            : chat.id
+                        )
+                      }
+                      onRestore={() =>
+                        restoreChat(
+                          chat.id
+                        )
+                      }
+                      onRename={() =>
+                        beginRename(chat)
+                      }
+                      onDelete={() =>
+                        deleteChat(
+                          chat.id
+                        )
+                      }
+                    />
                   )
                 )}
               </>
             ) : (
               <>
-                {activeChats.length === 0 && (
+                {activeChats.length ===
+                  0 && (
                   <div className="ZUQEN-empty-history">
-                    No conversations yet
+                    <div className="ZUQEN-empty-icon">
+                      <Icon size={18}>
+                        <path d="M4 5h16v12H4z" />
+                        <path d="m8 21 4-4 4 4" />
+                      </Icon>
+                    </div>
+
+                    <strong>
+                      No conversations yet
+                    </strong>
+
+                    <span>
+                      Start a new conversation
+                      with ZUQEN.
+                    </span>
                   </div>
                 )}
 
                 {activeChats.map(
                   (chat) => (
-                    <div
+                    <ChatItem
                       key={chat.id}
-                      className={`ZUQEN-chat-item ${
+                      chat={chat}
+                      active={
                         activeChat ===
                         chat.id
-                          ? "active"
-                          : ""
-                      }`}
-                    >
-                      <button
-                        type="button"
-                        className="ZUQEN-chat-main"
-                        onClick={() =>
-                          openChat(chat.id)
-                        }
-                      >
-                        <Icon size={14}>
-                          <path d="M4 5h16v12H4z" />
-                          <path d="m8 21 4-4 4 4" />
-                        </Icon>
-
-                        <span>
-                          {chat.title}
-                        </span>
-                      </button>
-
-                      <button
-                        type="button"
-                        className="ZUQEN-chat-more"
-                        onClick={() =>
-                          setMenuOpen(
-                            menuOpen ===
-                              chat.id
-                              ? null
-                              : chat.id
-                          )
-                        }
-                      >
-                        ⋯
-                      </button>
-
-                      {menuOpen ===
-                        chat.id && (
-                        <div className="ZUQEN-chat-menu">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              archiveChat(
-                                chat.id
-                              )
-                            }
-                          >
-                            Archive
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() =>
-                              deleteChat(
-                                chat.id
-                              )
-                            }
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      )}
-                    </div>
+                      }
+                      menuOpen={
+                        menuOpen ===
+                        chat.id
+                      }
+                      archived={false}
+                      onOpen={() =>
+                        openChat(chat.id)
+                      }
+                      onMenu={() =>
+                        setMenuOpen(
+                          menuOpen ===
+                            chat.id
+                            ? null
+                            : chat.id
+                        )
+                      }
+                      onArchive={() =>
+                        archiveChat(
+                          chat.id
+                        )
+                      }
+                      onRename={() =>
+                        beginRename(chat)
+                      }
+                      onDelete={() =>
+                        deleteChat(
+                          chat.id
+                        )
+                      }
+                    />
                   )
                 )}
               </>
@@ -994,18 +1217,22 @@ export default function HomePage() {
 
             <button
               type="button"
-              className="ZUQEN-archive-button"
+              className={`ZUQEN-archive-button ${
+                archiveOpen ? "active" : ""
+              }`}
               onClick={() =>
                 setArchiveOpen(
                   (value) => !value
                 )
               }
             >
-              <Icon size={15}>
-                <path d="M4 4h16v4H4z" />
-                <path d="M6 8v11h12V8" />
-                <path d="M9 12h6" />
-              </Icon>
+              <span className="ZUQEN-archive-icon">
+                <Icon size={15}>
+                  <path d="M4 4h16v4H4z" />
+                  <path d="M6 8v11h12V8" />
+                  <path d="M9 12h6" />
+                </Icon>
+              </span>
 
               <span>
                 {archiveOpen
@@ -1016,14 +1243,14 @@ export default function HomePage() {
               {!archiveOpen &&
                 archivedChats.length >
                   0 && (
-                  <span>
+                  <span className="ZUQEN-archive-count">
                     {archivedChats.length}
                   </span>
                 )}
             </button>
           </div>
 
-          <div className="ZUQEN-side-bottom">
+          <div className="ZUQEN-sidebar-footer">
             <div className="ZUQEN-account">
               <div className="ZUQEN-avatar">
                 {user?.email?.[0]?.toUpperCase() ||
@@ -1037,9 +1264,34 @@ export default function HomePage() {
                 </strong>
 
                 <span>
+                  <i />
                   Free account
                 </span>
               </div>
+
+              <button
+                type="button"
+                className="ZUQEN-account-more"
+                title="Account"
+              >
+                <Icon size={15}>
+                  <circle
+                    cx="12"
+                    cy="12"
+                    r="1"
+                  />
+                  <circle
+                    cx="19"
+                    cy="12"
+                    r="1"
+                  />
+                  <circle
+                    cx="5"
+                    cy="12"
+                    r="1"
+                  />
+                </Icon>
+              </button>
             </div>
           </div>
         </div>
@@ -1056,6 +1308,7 @@ export default function HomePage() {
                   (value) => !value
                 )
               }
+              title="Toggle sidebar"
             >
               <Icon size={18}>
                 <path d="M4 6h16" />
@@ -1065,16 +1318,23 @@ export default function HomePage() {
             </button>
 
             <div className="ZUQEN-topbar-info">
-              <strong>
-                {activeChat
-                  ? chats.find(
-                      (chat) =>
-                        chat.id ===
-                        activeChat
-                    )?.title ||
-                    "ZUQEN AI"
-                  : "ZUQEN AI"}
-              </strong>
+              <div className="ZUQEN-title-line">
+                <strong>
+                  {activeChat
+                    ? chats.find(
+                        (chat) =>
+                          chat.id ===
+                          activeChat
+                      )?.title ||
+                      "ZUQEN AI"
+                    : "ZUQEN AI"}
+                </strong>
+
+                <span className="ZUQEN-live-badge">
+                  <i />
+                  Online
+                </span>
+              </div>
 
               <span>
                 Your intelligent workspace
@@ -1083,7 +1343,6 @@ export default function HomePage() {
           </div>
 
           <div className="ZUQEN-topbar-actions">
-            {/* CREDITS */}
             <div
               className="ZUQEN-credits-selector"
               onClick={(event) =>
@@ -1105,7 +1364,7 @@ export default function HomePage() {
                 title="View credits"
               >
                 <span className="ZUQEN-credits-icon">
-                  <Icon size={14}>
+                  <Icon size={15}>
                     <circle
                       cx="12"
                       cy="12"
@@ -1116,16 +1375,22 @@ export default function HomePage() {
                   </Icon>
                 </span>
 
-                <span className="ZUQEN-credits-value">
-                  {creditsLoading
-                    ? "..."
-                    : formatCredits(
-                        totalCredits
-                      )}
+                <span className="ZUQEN-credits-info">
+                  <small>Credits</small>
+
+                  <strong>
+                    {creditsLoading
+                      ? "..."
+                      : formatCredits(
+                          totalCredits
+                        )}
+                  </strong>
                 </span>
 
-                <span className="ZUQEN-credits-label">
-                  Credits
+                <span className="ZUQEN-chevron">
+                  <Icon size={13}>
+                    <path d="m6 9 6 6 6-6" />
+                  </Icon>
                 </span>
               </button>
 
@@ -1136,26 +1401,28 @@ export default function HomePage() {
                     event.stopPropagation()
                   }
                 >
-                  <div className="ZUQEN-credit-panel-head">
+                  <div className="ZUQEN-credit-panel-top">
                     <div>
-                      <div className="ZUQEN-credit-panel-title">
-                        ZUQEN Credits
-                      </div>
+                      <span className="ZUQEN-credit-kicker">
+                        ZUQEN WALLET
+                      </span>
 
-                      <div className="ZUQEN-credit-panel-total">
-                        {creditsLoading
-                          ? "..."
-                          : formatCredits(
-                              totalCredits
-                            )}
-                      </div>
+                      <div className="ZUQEN-credit-total-row">
+                        <strong>
+                          {creditsLoading
+                            ? "..."
+                            : formatCredits(
+                                totalCredits
+                              )}
+                        </strong>
 
-                      <div className="ZUQEN-credit-panel-sub">
-                        credits available
+                        <span>
+                          available
+                        </span>
                       </div>
                     </div>
 
-                    <div className="ZUQEN-credit-panel-icon">
+                    <div className="ZUQEN-credit-symbol">
                       <Icon size={18}>
                         <circle
                           cx="12"
@@ -1168,32 +1435,54 @@ export default function HomePage() {
                     </div>
                   </div>
 
-                  <div className="ZUQEN-credit-progress">
-                    <div
-                      style={{
-                        width: `${totalUsagePercentage}%`,
-                      }}
-                    />
+                  <div className="ZUQEN-credit-progress-wrap">
+                    <div className="ZUQEN-credit-progress-labels">
+                      <span>
+                        Usage
+                      </span>
+
+                      <strong>
+                        {totalUsagePercentage}%
+                      </strong>
+                    </div>
+
+                    <div className="ZUQEN-credit-progress">
+                      <div
+                        style={{
+                          width: `${totalUsagePercentage}%`,
+                        }}
+                      />
+                    </div>
                   </div>
 
                   <div className="ZUQEN-credit-stats">
-                    <span>
-                      Allocated{" "}
-                      {formatCredits(
-                        totalAllocatedCredits
-                      )}
-                    </span>
+                    <div>
+                      <span>
+                        Allocated
+                      </span>
+                      <strong>
+                        {formatCredits(
+                          totalAllocatedCredits
+                        )}
+                      </strong>
+                    </div>
 
-                    <span>
-                      Used{" "}
-                      {formatCredits(
-                        totalUsedCredits
-                      )}
-                    </span>
+                    <div>
+                      <span>
+                        Used
+                      </span>
+                      <strong>
+                        {formatCredits(
+                          totalUsedCredits
+                        )}
+                      </strong>
+                    </div>
+                  </div>
 
-                    <span>
-                      {totalUsagePercentage}%
-                    </span>
+                  <div className="ZUQEN-credit-divider" />
+
+                  <div className="ZUQEN-credit-section-heading">
+                    Feature balances
                   </div>
 
                   <div className="ZUQEN-credit-features">
@@ -1207,6 +1496,10 @@ export default function HomePage() {
                           feature.balance <=
                             feature.total_granted *
                               0.15;
+
+                        const empty =
+                          feature.balance <=
+                          0;
 
                         return (
                           <div
@@ -1222,25 +1515,28 @@ export default function HomePage() {
                             </div>
 
                             <div className="ZUQEN-credit-feature-info">
-                              <div className="ZUQEN-credit-feature-name">
+                              <strong>
                                 {
                                   feature.feature_name
                                 }
-                              </div>
+                              </strong>
 
-                              <div className="ZUQEN-credit-feature-provider">
+                              <span>
                                 Provider-backed
                                 credits
-                              </div>
+                              </span>
                             </div>
 
                             <div
-                              className="ZUQEN-credit-feature-balance"
-                              style={{
-                                color: low
-                                  ? "#f59e0b"
-                                  : undefined,
-                              }}
+                              className={`ZUQEN-feature-balance ${
+                                low
+                                  ? "low"
+                                  : ""
+                              } ${
+                                empty
+                                  ? "empty"
+                                  : ""
+                              }`}
                             >
                               {formatCredits(
                                 feature.balance
@@ -1256,11 +1552,18 @@ export default function HomePage() {
                     chatCredits.balance <=
                       0 && (
                       <div className="ZUQEN-credit-empty">
-                        Chat credits are
-                        exhausted. Get
-                        more credits to
-                        continue using
-                        ZUQEN AI.
+                        <span>!</span>
+                        <div>
+                          <strong>
+                            Chat credits
+                            exhausted
+                          </strong>
+                          <small>
+                            Refill credits to
+                            continue using
+                            ZUQEN AI.
+                          </small>
+                        </div>
                       </div>
                     )}
 
@@ -1271,9 +1574,10 @@ export default function HomePage() {
                       totalAllocatedCredits *
                         0.15 && (
                       <div className="ZUQEN-credit-warning">
-                        Your credit
-                        balance is
-                        running low.
+                        <span>!</span>
+                        Your total credit
+                        balance is running
+                        low.
                       </div>
                     )}
 
@@ -1289,14 +1593,19 @@ export default function HomePage() {
                           )
                         }
                       >
-                        Get More Credits
+                        <span>
+                          Get More Credits
+                        </span>
+
+                        <Icon size={14}>
+                          <path d="m9 18 6-6-6-6" />
+                        </Icon>
                       </button>
                     )}
                 </div>
               )}
             </div>
 
-            {/* AGENT */}
             <div
               className="ZUQEN-agent-selector"
               onClick={(event) =>
@@ -1305,7 +1614,9 @@ export default function HomePage() {
             >
               <button
                 type="button"
-                className="ZUQEN-agent-button"
+                className={`ZUQEN-agent-button ${
+                  agentOpen ? "active" : ""
+                }`}
                 onClick={() =>
                   setAgentOpen(
                     (value) => !value
@@ -1320,11 +1631,17 @@ export default function HomePage() {
                   {selectedAgent}
                 </span>
 
-                <span>⌄</span>
+                <Icon size={13}>
+                  <path d="m6 9 6 6 6-6" />
+                </Icon>
               </button>
 
               {agentOpen && (
                 <div className="ZUQEN-agent-dropdown">
+                  <div className="ZUQEN-agent-dropdown-title">
+                    AI AGENTS
+                  </div>
+
                   {[
                     "ZUQEN AI",
                     "Website Builder",
@@ -1335,13 +1652,46 @@ export default function HomePage() {
                     <button
                       key={agent}
                       type="button"
+                      className={
+                        selectedAgent ===
+                        agent
+                          ? "selected"
+                          : ""
+                      }
                       onClick={() =>
                         selectAgent(
                           agent
                         )
                       }
                     >
-                      {agent}
+                      <span className="ZUQEN-agent-option-icon">
+                        {featureIcon(
+                          agent ===
+                            "ZUQEN AI"
+                            ? "chat"
+                            : agent ===
+                              "Website Builder"
+                            ? "website_builder"
+                            : agent ===
+                              "Image Generator"
+                            ? "image_generator"
+                            : agent ===
+                              "Video Generator"
+                            ? "video_generator"
+                            : "voice_generator"
+                        )}
+                      </span>
+
+                      <span>
+                        {agent}
+                      </span>
+
+                      {selectedAgent ===
+                        agent && (
+                        <span className="ZUQEN-agent-check">
+                          ✓
+                        </span>
+                      )}
                     </button>
                   ))}
                 </div>
@@ -1384,35 +1734,65 @@ export default function HomePage() {
         <div className="ZUQEN-chat-area">
           {messages.length === 0 ? (
             <div className="ZUQEN-welcome">
+              <div className="ZUQEN-welcome-glow" />
+
               <div className="ZUQEN-welcome-mark">
                 Z
               </div>
 
+              <div className="ZUQEN-welcome-kicker">
+                INTELLIGENT WORKSPACE
+              </div>
+
               <h1>
-                What can I help you with?
+                What can I help you
+                <span> create?</span>
               </h1>
 
               <p>
-                Ask anything, create
-                content, build ideas and
-                explore with ZUQEN AI.
+                Ask questions, write content,
+                analyze ideas, build websites,
+                generate media and more with
+                ZUQEN AI.
               </p>
 
               <div className="ZUQEN-prompts">
                 {[
-                  "Explain something to me",
-                  "Help me write something",
-                  "Build a website idea",
-                  "Analyze my idea",
+                  {
+                    icon: "✦",
+                    text:
+                      "Explain something to me",
+                  },
+                  {
+                    icon: "Aa",
+                    text:
+                      "Help me write something",
+                  },
+                  {
+                    icon: "⌘",
+                    text:
+                      "Build a website idea",
+                  },
+                  {
+                    icon: "◈",
+                    text:
+                      "Analyze my idea",
+                  },
                 ].map((prompt) => (
                   <button
-                    key={prompt}
+                    key={prompt.text}
                     type="button"
                     onClick={() =>
-                      setInput(prompt)
+                      setInput(
+                        prompt.text
+                      )
                     }
                   >
-                    {prompt}
+                    <span>
+                      {prompt.icon}
+                    </span>
+
+                    {prompt.text}
                   </button>
                 ))}
               </div>
@@ -1430,16 +1810,90 @@ export default function HomePage() {
                     <div className="ZUQEN-message-avatar">
                       {message.role ===
                       "user"
-                        ? "U"
+                        ? user?.email?.[0]?.toUpperCase() ||
+                          "U"
                         : "Z"}
                     </div>
 
                     <div className="ZUQEN-message-body">
-                      <div className="ZUQEN-message-role">
-                        {message.role ===
-                        "user"
-                          ? "You"
-                          : "ZUQEN"}
+                      <div className="ZUQEN-message-header">
+                        <div className="ZUQEN-message-role">
+                          {message.role ===
+                          "user"
+                            ? "You"
+                            : "ZUQEN"}
+                        </div>
+
+                        <div className="ZUQEN-message-actions">
+                          {message.role ===
+                            "assistant" && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                regenerate(
+                                  message
+                                )
+                              }
+                              title="Regenerate"
+                              disabled={
+                                loading
+                              }
+                            >
+                              <Icon size={14}>
+                                <path d="M20 11a8 8 0 0 0-14.9-4" />
+                                <path d="M4 5v5h5" />
+                                <path d="M4 13a8 8 0 0 0 14.9 4" />
+                                <path d="M20 19v-5h-5" />
+                              </Icon>
+                            </button>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() =>
+                              copyMessage(
+                                message
+                              )
+                            }
+                            title="Copy"
+                          >
+                            {copiedMessage ===
+                            message.id ? (
+                              <span className="ZUQEN-copied">
+                                ✓
+                              </span>
+                            ) : (
+                              <Icon size={14}>
+                                <rect
+                                  x="9"
+                                  y="9"
+                                  width="11"
+                                  height="11"
+                                  rx="2"
+                                />
+                                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                              </Icon>
+                            )}
+                          </button>
+
+                          {message.role ===
+                            "user" && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                beginEditMessage(
+                                  message
+                                )
+                              }
+                              title="Edit"
+                            >
+                              <Icon size={14}>
+                                <path d="M12 20h9" />
+                                <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z" />
+                              </Icon>
+                            </button>
+                          )}
+                        </div>
                       </div>
 
                       <div className="ZUQEN-message-content">
@@ -1461,16 +1915,32 @@ export default function HomePage() {
                                     attachment.id ||
                                     attachment.name
                                   }
+                                  className="ZUQEN-attachment-card"
                                 >
-                                  📎{" "}
-                                  {
-                                    attachment.name
-                                  }
-                                  {attachment.size
-                                    ? ` · ${formatFileSize(
+                                  <div className="ZUQEN-attachment-icon">
+                                    <Icon
+                                      size={
+                                        15
+                                      }
+                                    >
+                                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
+                                      <path d="M14 2v6h6" />
+                                    </Icon>
+                                  </div>
+
+                                  <div>
+                                    <strong>
+                                      {
+                                        attachment.name
+                                      }
+                                    </strong>
+
+                                    <span>
+                                      {formatFileSize(
                                         attachment.size
-                                      )}`
-                                    : ""}
+                                      )}
+                                    </span>
+                                  </div>
                                 </div>
                               )
                             )}
@@ -1486,9 +1956,32 @@ export default function HomePage() {
           )}
         </div>
 
-        <div className="ZUQEN-composer-wrap">
-          {attachments.length >
-            0 && (
+        <div className="ZUQEN-composer-area">
+          {editingId && (
+            <div className="ZUQEN-edit-bar">
+              <div>
+                <span className="ZUQEN-edit-icon">
+                  <Icon size={14}>
+                    <path d="M12 20h9" />
+                    <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z" />
+                  </Icon>
+                </span>
+
+                <span>
+                  Editing message
+                </span>
+              </div>
+
+              <button
+                type="button"
+                onClick={cancelEdit}
+              >
+                Cancel
+              </button>
+            </div>
+          )}
+
+          {attachments.length > 0 && (
             <div className="ZUQEN-pending-files">
               {attachments.map(
                 (attachment) => (
@@ -1496,11 +1989,26 @@ export default function HomePage() {
                     key={
                       attachment.id
                     }
+                    className="ZUQEN-pending-file"
                   >
-                    <span>
-                      📎{" "}
-                      {attachment.name}
-                    </span>
+                    <div className="ZUQEN-pending-file-icon">
+                      <Icon size={14}>
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
+                        <path d="M14 2v6h6" />
+                      </Icon>
+                    </div>
+
+                    <div className="ZUQEN-pending-file-info">
+                      <strong>
+                        {attachment.name}
+                      </strong>
+
+                      <span>
+                        {formatFileSize(
+                          attachment.size
+                        )}
+                      </span>
+                    </div>
 
                     <button
                       type="button"
@@ -1509,8 +2017,12 @@ export default function HomePage() {
                           attachment.id
                         )
                       }
+                      title="Remove"
                     >
-                      ×
+                      <Icon size={14}>
+                        <path d="M6 6l12 12" />
+                        <path d="M18 6 6 18" />
+                      </Icon>
                     </button>
                   </div>
                 )
@@ -1525,7 +2037,10 @@ export default function HomePage() {
               onClick={() =>
                 fileInput.current?.click()
               }
-              disabled={uploading}
+              disabled={
+                uploading || loading
+              }
+              title="Attach files"
             >
               <Icon size={18}>
                 <path d="M12 5v14" />
@@ -1542,57 +2057,118 @@ export default function HomePage() {
             />
 
             <textarea
-              value={input}
+              ref={textareaRef}
+              value={composerValue}
               onChange={(event) =>
-                setInput(
+                handleComposerChange(
                   event.target.value
                 )
               }
               onKeyDown={handleKeyDown}
-              placeholder="Message ZUQEN AI…"
+              placeholder={
+                editingId
+                  ? "Edit your message…"
+                  : "Message ZUQEN AI…"
+              }
               rows={1}
               disabled={loading}
             />
 
-            <button
-              type="button"
-              className="ZUQEN-send"
-              onClick={sendMessage}
-              disabled={
-                loading ||
-                (!input.trim() &&
-                  attachments.length ===
-                    0)
-              }
-            >
-              {loading ? (
-                <span className="ZUQEN-spinner" />
+            <div className="ZUQEN-composer-tools">
+              {editingId ? (
+                <button
+                  type="button"
+                  className="ZUQEN-send"
+                  onClick={() => {
+                    const message =
+                      messages.find(
+                        (item) =>
+                          item.id ===
+                          editingId
+                      );
+
+                    if (message) {
+                      saveEditedMessage(
+                        message
+                      );
+                    }
+                  }}
+                  disabled={
+                    loading ||
+                    !editingText.trim()
+                  }
+                  title="Save edit"
+                >
+                  <Icon size={17}>
+                    <path d="m5 12 4 4L19 6" />
+                  </Icon>
+                </button>
               ) : (
-                <Icon size={17}>
-                  <path d="m5 12 14-8-4 16-3-7-7-1Z" />
-                </Icon>
+                <button
+                  type="button"
+                  className="ZUQEN-send"
+                  onClick={sendMessage}
+                  disabled={
+                    loading ||
+                    (!input.trim() &&
+                      attachments.length ===
+                        0)
+                  }
+                  title="Send message"
+                >
+                  {loading ? (
+                    <span className="ZUQEN-spinner" />
+                  ) : (
+                    <Icon size={17}>
+                      <path d="m5 12 14-8-4 16-3-7-7-1Z" />
+                    </Icon>
+                  )}
+                </button>
               )}
-            </button>
+            </div>
           </div>
 
-          <div className="ZUQEN-composer-note">
-            ZUQEN AI can make mistakes.
-            Check important information.
+          <div className="ZUQEN-composer-footer">
+            <span>
+              ZUQEN can make mistakes. Check
+              important information.
+            </span>
+
+            <span>
+              Enter to send · Shift + Enter
+              for new line
+            </span>
           </div>
         </div>
       </section>
 
       <style jsx global>{`
         :root {
-          --bg: #09090b;
-          --panel: #111114;
-          --panel-solid: #111114;
-          --panel-soft: #18181c;
-          --text: #f4f4f5;
-          --muted: #a1a1aa;
-          --muted2: #71717a;
-          --line: rgba(255, 255, 255, 0.08);
-          --shadow: rgba(0, 0, 0, 0.45);
+          --bg: #07070a;
+          --panel: #0d0d11;
+          --panel-2: #111116;
+          --panel-3: #17171d;
+          --text: #f5f5f7;
+          --muted: #9b9ba5;
+          --muted-2: #686873;
+          --line: rgba(255, 255, 255, 0.075);
+          --line-strong: rgba(
+            255,
+            255,
+            255,
+            0.12
+          );
+          --accent: #8b5cf6;
+          --accent-2: #6366f1;
+          --accent-soft: rgba(
+            139,
+            92,
+            246,
+            0.11
+          );
+          --danger: #ef4444;
+          --warning: #f59e0b;
+          --shadow: rgba(0, 0, 0, 0.52);
         }
 
         * {
@@ -1628,34 +2204,55 @@ export default function HomePage() {
         }
 
         .light {
-          --bg: #f7f7f8;
+          --bg: #f6f7f9;
           --panel: #ffffff;
-          --panel-solid: #ffffff;
-          --panel-soft: #f1f1f3;
+          --panel-2: #ffffff;
+          --panel-3: #f1f2f5;
           --text: #18181b;
-          --muted: #52525b;
-          --muted2: #71717a;
-          --line: rgba(0, 0, 0, 0.09);
-          --shadow: rgba(0, 0, 0, 0.15);
+          --muted: #5f6068;
+          --muted-2: #888992;
+          --line: rgba(0, 0, 0, 0.08);
+          --line-strong: rgba(
+            0,
+            0,
+            0,
+            0.12
+          );
+          --accent-soft: rgba(
+            124,
+            58,
+            237,
+            0.08
+          );
+          --shadow: rgba(0, 0, 0, 0.16);
         }
 
         .ZUQEN-app {
           width: 100vw;
           height: 100vh;
           display: flex;
-          background: var(--bg);
+          overflow: hidden;
+          background:
+            radial-gradient(
+              circle at 75% -20%,
+              rgba(99, 102, 241, 0.07),
+              transparent 32%
+            ),
+            var(--bg);
         }
 
+        /* SIDEBAR */
+
         .ZUQEN-sidebar {
-          width: 290px;
-          min-width: 290px;
+          width: 292px;
+          min-width: 292px;
           height: 100%;
-          border-right: 1px solid var(--line);
           background: var(--panel);
+          border-right: 1px solid var(--line);
+          overflow: hidden;
           transition:
             width 0.25s ease,
             min-width 0.25s ease;
-          overflow: hidden;
         }
 
         .ZUQEN-sidebar.closed {
@@ -1665,7 +2262,7 @@ export default function HomePage() {
         }
 
         .ZUQEN-sidebar-inner {
-          width: 290px;
+          width: 292px;
           height: 100%;
           display: flex;
           flex-direction: column;
@@ -1675,105 +2272,214 @@ export default function HomePage() {
           padding: 18px 14px 12px;
         }
 
+        .ZUQEN-brand-row {
+          padding: 3px 8px 19px;
+        }
+
         .ZUQEN-brand {
           display: flex;
           align-items: center;
-          gap: 9px;
-          margin: 2px 8px 18px;
-          font-size: 15px;
-          font-weight: 850;
-          letter-spacing: 0.08em;
-        }
-
-        .ZUQEN-brand-mark,
-        .ZUQEN-welcome-mark {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          border-radius: 10px;
-          background: linear-gradient(
-            135deg,
-            #8b5cf6,
-            #6366f1
-          );
-          color: white;
-          font-weight: 900;
+          gap: 10px;
         }
 
         .ZUQEN-brand-mark {
-          width: 30px;
-          height: 30px;
+          width: 34px;
+          height: 34px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 11px;
+          background:
+            linear-gradient(
+              135deg,
+              #a78bfa,
+              #6366f1
+            );
+          box-shadow:
+            0 7px 24px
+              rgba(99, 102, 241, 0.25);
+          color: white;
+          font-size: 15px;
+          font-weight: 950;
+        }
+
+        .ZUQEN-brand-text {
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+        }
+
+        .ZUQEN-brand-text strong {
+          font-size: 14px;
+          letter-spacing: 0.12em;
+        }
+
+        .ZUQEN-brand-text span {
+          color: var(--muted-2);
+          font-size: 6px;
+          font-weight: 850;
+          letter-spacing: 0.2em;
         }
 
         .ZUQEN-new-chat {
           width: 100%;
-          height: 42px;
+          height: 46px;
           display: flex;
           align-items: center;
           gap: 10px;
-          padding: 0 13px;
+          padding: 0 10px;
           border: 1px solid var(--line);
-          border-radius: 11px;
+          border-radius: 13px;
+          background:
+            linear-gradient(
+              180deg,
+              var(--panel-3),
+              rgba(255, 255, 255, 0.015)
+            );
           color: var(--text);
-          background: var(--panel-soft);
-          font-size: 12px;
-          font-weight: 700;
+          font-size: 11px;
+          font-weight: 750;
+          transition:
+            transform 0.18s ease,
+            border-color 0.18s ease,
+            background 0.18s ease;
         }
 
         .ZUQEN-new-chat:hover {
-          border-color: rgba(139, 92, 246, 0.35);
+          transform: translateY(-1px);
+          border-color: rgba(
+            139,
+            92,
+            246,
+            0.35
+          );
+          background: var(--accent-soft);
+        }
+
+        .ZUQEN-new-chat-icon {
+          width: 28px;
+          height: 28px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 9px;
+          background: var(--accent-soft);
+          color: #a78bfa;
+        }
+
+        .ZUQEN-new-chat-shortcut {
+          margin-left: auto;
+          color: var(--muted-2);
+          font-size: 8px;
+          font-weight: 700;
         }
 
         .ZUQEN-history {
           flex: 1;
           min-height: 0;
           overflow-y: auto;
-          padding: 8px 10px;
+          padding: 8px 10px 12px;
+          scrollbar-width: thin;
+        }
+
+        .ZUQEN-section-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 8px 9px 10px;
         }
 
         .ZUQEN-section-title {
           display: flex;
           align-items: center;
-          justify-content: space-between;
-          padding: 7px 8px 10px;
-          color: var(--muted2);
-          font-size: 9px;
-          font-weight: 800;
-          letter-spacing: 0.12em;
+          gap: 7px;
+          color: var(--muted-2);
+          font-size: 8px;
+          font-weight: 850;
+          letter-spacing: 0.14em;
           text-transform: uppercase;
+        }
+
+        .ZUQEN-section-dot {
+          width: 5px;
+          height: 5px;
+          border-radius: 50%;
+          background: var(--accent);
+          box-shadow: 0 0 10px
+            rgba(139, 92, 246, 0.6);
+        }
+
+        .ZUQEN-section-count {
+          min-width: 20px;
+          height: 19px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 7px;
+          background: var(--panel-3);
+          color: var(--muted-2);
+          font-size: 7px;
+          font-weight: 800;
         }
 
         .ZUQEN-chat-item {
           position: relative;
           display: flex;
           align-items: center;
-          gap: 4px;
+          gap: 2px;
           margin-bottom: 3px;
-          border-radius: 9px;
+          border: 1px solid transparent;
+          border-radius: 11px;
+          transition:
+            background 0.15s ease,
+            border-color 0.15s ease;
+        }
+
+        .ZUQEN-chat-item:hover {
+          background: var(--panel-3);
+          border-color: var(--line);
         }
 
         .ZUQEN-chat-item.active {
-          background: var(--panel-soft);
+          background:
+            linear-gradient(
+              90deg,
+              rgba(139, 92, 246, 0.12),
+              transparent
+            ),
+            var(--panel-3);
+          border-color: rgba(
+            139,
+            92,
+            246,
+            0.12
+          );
         }
 
         .ZUQEN-chat-main {
           min-width: 0;
           flex: 1;
+          height: 42px;
           display: flex;
           align-items: center;
           gap: 9px;
-          padding: 10px 8px;
+          padding: 0 9px;
           border: 0;
           background: transparent;
           color: var(--muted);
           text-align: left;
-          font-size: 11px;
+        }
+
+        .ZUQEN-chat-main > svg {
+          flex: 0 0 auto;
+          opacity: 0.7;
         }
 
         .ZUQEN-chat-main span {
           overflow: hidden;
           white-space: nowrap;
           text-overflow: ellipsis;
+          font-size: 10px;
         }
 
         .ZUQEN-chat-item.active
@@ -1782,80 +2488,157 @@ export default function HomePage() {
         }
 
         .ZUQEN-chat-more {
-          width: 28px;
-          height: 28px;
+          width: 32px;
+          height: 32px;
           margin-right: 4px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
           border: 0;
-          border-radius: 7px;
+          border-radius: 8px;
           background: transparent;
-          color: var(--muted2);
+          color: var(--muted-2);
+          opacity: 0;
+          transition: opacity 0.15s ease,
+            background 0.15s ease;
+        }
+
+        .ZUQEN-chat-item:hover
+          .ZUQEN-chat-more,
+        .ZUQEN-chat-item.active
+          .ZUQEN-chat-more {
+          opacity: 1;
         }
 
         .ZUQEN-chat-more:hover {
-          background: var(--panel-soft);
+          background: rgba(
+            255,
+            255,
+            255,
+            0.06
+          );
           color: var(--text);
         }
 
         .ZUQEN-chat-menu {
           position: absolute;
-          top: 38px;
-          right: 5px;
-          z-index: 80;
-          width: 130px;
+          top: 39px;
+          right: 7px;
+          z-index: 100;
+          width: 156px;
           padding: 5px;
-          border: 1px solid var(--line);
-          border-radius: 10px;
-          background: var(--panel-solid);
-          box-shadow: 0 15px 40px var(--shadow);
+          border: 1px solid var(--line-strong);
+          border-radius: 12px;
+          background: var(--panel-2);
+          box-shadow:
+            0 20px 60px var(--shadow);
+          backdrop-filter: blur(18px);
+          animation:
+            ZUQEN-pop 0.14s ease;
         }
 
         .ZUQEN-chat-menu button {
           width: 100%;
-          padding: 8px;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          padding: 9px 10px;
           border: 0;
-          border-radius: 7px;
+          border-radius: 8px;
           background: transparent;
           color: var(--text);
           text-align: left;
-          font-size: 11px;
+          font-size: 9px;
+          font-weight: 650;
         }
 
         .ZUQEN-chat-menu button:hover {
-          background: var(--panel-soft);
+          background: var(--panel-3);
+        }
+
+        .ZUQEN-chat-menu button:last-child {
+          color: #f87171;
         }
 
         .ZUQEN-archive-button {
           width: 100%;
+          height: 40px;
           display: flex;
           align-items: center;
           gap: 9px;
-          margin-top: 10px;
-          padding: 10px 8px;
-          border: 0;
-          border-radius: 9px;
+          margin-top: 9px;
+          padding: 0 9px;
+          border: 1px solid transparent;
+          border-radius: 10px;
           background: transparent;
           color: var(--muted);
-          font-size: 11px;
+          font-size: 10px;
           text-align: left;
+          transition: all 0.15s ease;
         }
 
-        .ZUQEN-archive-button:hover {
-          background: var(--panel-soft);
+        .ZUQEN-archive-button:hover,
+        .ZUQEN-archive-button.active {
+          background: var(--panel-3);
+          border-color: var(--line);
           color: var(--text);
         }
 
-        .ZUQEN-archive-button span:last-child {
+        .ZUQEN-archive-icon {
+          display: flex;
+        }
+
+        .ZUQEN-archive-count {
+          min-width: 20px;
+          height: 18px;
           margin-left: auto;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 6px;
+          background: var(--accent-soft);
+          color: #a78bfa;
+          font-size: 7px;
+          font-weight: 850;
         }
 
         .ZUQEN-empty-history {
-          padding: 25px 10px;
-          color: var(--muted2);
+          min-height: 160px;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 6px;
+          padding: 20px;
           text-align: center;
-          font-size: 11px;
         }
 
-        .ZUQEN-side-bottom {
+        .ZUQEN-empty-icon {
+          width: 36px;
+          height: 36px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          margin-bottom: 5px;
+          border: 1px solid var(--line);
+          border-radius: 11px;
+          background: var(--panel-3);
+          color: var(--muted-2);
+        }
+
+        .ZUQEN-empty-history strong {
+          color: var(--muted);
+          font-size: 9px;
+        }
+
+        .ZUQEN-empty-history span {
+          max-width: 170px;
+          color: var(--muted-2);
+          font-size: 7px;
+          line-height: 1.6;
+        }
+
+        .ZUQEN-sidebar-footer {
           padding: 12px;
           border-top: 1px solid var(--line);
         }
@@ -1865,26 +2648,33 @@ export default function HomePage() {
           align-items: center;
           gap: 10px;
           padding: 9px;
-          border-radius: 11px;
-          background: var(--panel-soft);
+          border: 1px solid var(--line);
+          border-radius: 12px;
+          background: var(--panel-3);
         }
 
         .ZUQEN-avatar {
-          width: 31px;
-          height: 31px;
-          flex: 0 0 31px;
+          width: 32px;
+          height: 32px;
+          flex: 0 0 32px;
           display: flex;
           align-items: center;
           justify-content: center;
-          border-radius: 9px;
-          background: #27272a;
+          border-radius: 10px;
+          background:
+            linear-gradient(
+              135deg,
+              #27272a,
+              #18181b
+            );
           color: white;
-          font-size: 11px;
-          font-weight: 800;
+          font-size: 10px;
+          font-weight: 850;
         }
 
         .ZUQEN-account-info {
           min-width: 0;
+          flex: 1;
           display: flex;
           flex-direction: column;
           gap: 3px;
@@ -1894,13 +2684,44 @@ export default function HomePage() {
           overflow: hidden;
           text-overflow: ellipsis;
           white-space: nowrap;
-          font-size: 10px;
+          font-size: 9px;
         }
 
         .ZUQEN-account-info span {
-          color: var(--muted2);
-          font-size: 8px;
+          display: flex;
+          align-items: center;
+          gap: 5px;
+          color: var(--muted-2);
+          font-size: 7px;
         }
+
+        .ZUQEN-account-info i {
+          width: 5px;
+          height: 5px;
+          border-radius: 50%;
+          background: #22c55e;
+          box-shadow: 0 0 8px
+            rgba(34, 197, 94, 0.5);
+        }
+
+        .ZUQEN-account-more {
+          width: 28px;
+          height: 28px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border: 0;
+          border-radius: 8px;
+          background: transparent;
+          color: var(--muted-2);
+        }
+
+        .ZUQEN-account-more:hover {
+          background: var(--panel);
+          color: var(--text);
+        }
+
+        /* MAIN */
 
         .ZUQEN-main {
           min-width: 0;
@@ -1918,9 +2739,24 @@ export default function HomePage() {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding: 0 18px;
+          padding: 0 20px;
           border-bottom: 1px solid var(--line);
-          background: var(--panel);
+          background: rgba(
+            13,
+            13,
+            17,
+            0.84
+          );
+          backdrop-filter: blur(18px);
+        }
+
+        .light .ZUQEN-topbar {
+          background: rgba(
+            255,
+            255,
+            255,
+            0.86
+          );
         }
 
         .ZUQEN-topbar-left,
@@ -1930,8 +2766,8 @@ export default function HomePage() {
         }
 
         .ZUQEN-topbar-left {
-          gap: 12px;
           min-width: 0;
+          gap: 12px;
         }
 
         .ZUQEN-topbar-actions {
@@ -1948,11 +2784,12 @@ export default function HomePage() {
           border-radius: 10px;
           background: transparent;
           color: var(--muted);
+          transition: all 0.16s ease;
         }
 
         .ZUQEN-top-action:hover {
           border-color: var(--line);
-          background: var(--panel-soft);
+          background: var(--panel-3);
           color: var(--text);
         }
 
@@ -1960,39 +2797,74 @@ export default function HomePage() {
           min-width: 0;
           display: flex;
           flex-direction: column;
-          gap: 3px;
+          gap: 4px;
         }
 
-        .ZUQEN-topbar-info strong {
+        .ZUQEN-title-line {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          min-width: 0;
+        }
+
+        .ZUQEN-title-line strong {
+          max-width: 300px;
           overflow: hidden;
           white-space: nowrap;
           text-overflow: ellipsis;
-          font-size: 12px;
+          font-size: 11px;
+          font-weight: 800;
         }
 
-        .ZUQEN-topbar-info span {
-          color: var(--muted2);
-          font-size: 8px;
+        .ZUQEN-topbar-info > span {
+          color: var(--muted-2);
+          font-size: 7px;
         }
 
-        /* CREDIT BUTTON */
+        .ZUQEN-live-badge {
+          display: flex;
+          align-items: center;
+          gap: 4px;
+          padding: 3px 6px;
+          border: 1px solid
+            rgba(34, 197, 94, 0.14);
+          border-radius: 99px;
+          color: #4ade80;
+          background: rgba(
+            34,
+            197,
+            94,
+            0.06
+          );
+          font-size: 6px !important;
+          font-weight: 750;
+        }
+
+        .ZUQEN-live-badge i {
+          width: 4px;
+          height: 4px;
+          border-radius: 50%;
+          background: #22c55e;
+        }
+
+        /* CREDITS */
 
         .ZUQEN-credits-selector {
           position: relative;
         }
 
         .ZUQEN-credits-button {
-          height: 36px;
-          min-width: 92px;
+          min-width: 112px;
+          height: 38px;
           display: flex;
           align-items: center;
-          justify-content: center;
-          gap: 6px;
-          padding: 4px 9px;
+          gap: 8px;
+          padding: 4px 9px 4px 6px;
           border: 1px solid var(--line);
           border-radius: 11px;
-          background: var(--panel-soft);
+          background: var(--panel-3);
           color: var(--text);
+          transition: all 0.18s ease;
         }
 
         .ZUQEN-credits-button:hover,
@@ -2003,233 +2875,387 @@ export default function HomePage() {
             246,
             0.35
           );
-          background: rgba(
-            139,
-            92,
-            246,
-            0.08
-          );
+          background: var(--accent-soft);
+          box-shadow:
+            0 6px 24px
+              rgba(99, 102, 241, 0.08);
         }
 
         .ZUQEN-credits-icon {
-          width: 22px;
-          height: 22px;
+          width: 27px;
+          height: 27px;
           display: flex;
           align-items: center;
           justify-content: center;
-          border-radius: 7px;
-          background: rgba(
-            139,
-            92,
-            246,
-            0.12
-          );
+          border-radius: 8px;
+          background:
+            linear-gradient(
+              135deg,
+              rgba(139, 92, 246, 0.2),
+              rgba(99, 102, 241, 0.12)
+            );
           color: #a78bfa;
         }
 
-        .ZUQEN-credits-value {
-          font-size: 10px;
-          font-weight: 850;
+        .ZUQEN-credits-info {
+          display: flex;
+          flex-direction: column;
+          align-items: flex-start;
+          gap: 1px;
         }
 
-        .ZUQEN-credits-label {
-          color: var(--muted2);
-          font-size: 8px;
-          font-weight: 700;
+        .ZUQEN-credits-info small {
+          color: var(--muted-2);
+          font-size: 6px;
+          font-weight: 750;
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
         }
 
-        /* CREDIT PANEL */
+        .ZUQEN-credits-info strong {
+          font-size: 9px;
+          font-weight: 900;
+        }
+
+        .ZUQEN-chevron {
+          margin-left: auto;
+          display: flex;
+          color: var(--muted-2);
+        }
 
         .ZUQEN-credit-panel {
           position: absolute;
-          top: calc(100% + 9px);
+          top: calc(100% + 10px);
           right: 0;
-          z-index: 100;
-          width: 320px;
-          max-height: calc(100vh - 95px);
+          z-index: 200;
+          width: 350px;
+          max-height: calc(100vh - 94px);
           overflow-y: auto;
-          padding: 15px;
-          border: 1px solid var(--line);
-          border-radius: 17px;
-          background: var(--panel-solid);
+          padding: 17px;
+          border: 1px solid var(--line-strong);
+          border-radius: 18px;
+          background: var(--panel-2);
           box-shadow:
-            0 25px 70px var(--shadow);
+            0 28px 90px var(--shadow),
+            0 0 0 1px
+              rgba(139, 92, 246, 0.025);
+          backdrop-filter: blur(24px);
+          animation:
+            ZUQEN-pop 0.16s ease;
         }
 
-        .ZUQEN-credit-panel-head {
+        .ZUQEN-credit-panel-top {
           display: flex;
           align-items: flex-start;
           justify-content: space-between;
         }
 
-        .ZUQEN-credit-panel-title {
-          color: var(--muted2);
-          font-size: 8px;
+        .ZUQEN-credit-kicker {
+          color: var(--muted-2);
+          font-size: 7px;
           font-weight: 850;
-          letter-spacing: 0.14em;
-          text-transform: uppercase;
+          letter-spacing: 0.16em;
         }
 
-        .ZUQEN-credit-panel-total {
-          margin-top: 5px;
-          color: var(--text);
-          font-size: 28px;
+        .ZUQEN-credit-total-row {
+          display: flex;
+          align-items: baseline;
+          gap: 7px;
+          margin-top: 6px;
+        }
+
+        .ZUQEN-credit-total-row strong {
+          font-size: 29px;
           line-height: 1;
-          font-weight: 900;
-          letter-spacing: -0.04em;
+          font-weight: 950;
+          letter-spacing: -0.055em;
         }
 
-        .ZUQEN-credit-panel-sub {
-          margin-top: 5px;
-          color: var(--muted2);
-          font-size: 8px;
+        .ZUQEN-credit-total-row span {
+          color: var(--muted-2);
+          font-size: 7px;
         }
 
-        .ZUQEN-credit-panel-icon {
-          width: 35px;
-          height: 35px;
+        .ZUQEN-credit-symbol {
+          width: 39px;
+          height: 39px;
           display: flex;
           align-items: center;
           justify-content: center;
-          border-radius: 10px;
-          background: rgba(
-            139,
-            92,
-            246,
-            0.12
-          );
+          border: 1px solid
+            rgba(139, 92, 246, 0.15);
+          border-radius: 11px;
+          background: var(--accent-soft);
           color: #a78bfa;
+        }
+
+        .ZUQEN-credit-progress-wrap {
+          margin-top: 17px;
+        }
+
+        .ZUQEN-credit-progress-labels {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          margin-bottom: 7px;
+          color: var(--muted-2);
+          font-size: 7px;
+          font-weight: 700;
+        }
+
+        .ZUQEN-credit-progress-labels strong {
+          color: var(--muted);
+          font-size: 7px;
         }
 
         .ZUQEN-credit-progress {
           width: 100%;
-          height: 5px;
-          margin-top: 15px;
+          height: 6px;
           overflow: hidden;
           border-radius: 99px;
-          background: var(--panel-soft);
+          background: var(--panel-3);
         }
 
         .ZUQEN-credit-progress div {
           height: 100%;
           border-radius: inherit;
-          background: linear-gradient(
-            90deg,
-            #8b5cf6,
-            #6366f1
-          );
+          background:
+            linear-gradient(
+              90deg,
+              #8b5cf6,
+              #6366f1,
+              #7c3aed
+            );
+          box-shadow: 0 0 14px
+            rgba(139, 92, 246, 0.3);
+          transition: width 0.4s ease;
         }
 
         .ZUQEN-credit-stats {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 8px;
+          margin-top: 10px;
+        }
+
+        .ZUQEN-credit-stats > div {
           display: flex;
-          justify-content: space-between;
-          margin-top: 8px;
-          color: var(--muted2);
-          font-size: 8px;
+          flex-direction: column;
+          gap: 4px;
+          padding: 9px 10px;
+          border: 1px solid var(--line);
+          border-radius: 10px;
+          background: var(--panel-3);
+        }
+
+        .ZUQEN-credit-stats span {
+          color: var(--muted-2);
+          font-size: 6px;
+          text-transform: uppercase;
+          letter-spacing: 0.1em;
+        }
+
+        .ZUQEN-credit-stats strong {
+          font-size: 10px;
+          font-weight: 850;
+        }
+
+        .ZUQEN-credit-divider {
+          height: 1px;
+          margin: 15px 0 12px;
+          background: var(--line);
+        }
+
+        .ZUQEN-credit-section-heading {
+          color: var(--muted-2);
+          font-size: 7px;
+          font-weight: 850;
+          letter-spacing: 0.12em;
+          text-transform: uppercase;
         }
 
         .ZUQEN-credit-features {
           display: flex;
           flex-direction: column;
           gap: 5px;
-          margin-top: 14px;
+          margin-top: 9px;
         }
 
         .ZUQEN-credit-feature {
+          min-height: 49px;
           display: flex;
           align-items: center;
           gap: 9px;
-          padding: 9px;
+          padding: 7px 9px;
           border: 1px solid var(--line);
-          border-radius: 10px;
-          background: var(--panel-soft);
+          border-radius: 11px;
+          background: var(--panel-3);
+          transition:
+            border-color 0.15s ease,
+            transform 0.15s ease;
+        }
+
+        .ZUQEN-credit-feature:hover {
+          transform: translateX(1px);
+          border-color: var(--line-strong);
         }
 
         .ZUQEN-credit-feature-icon {
-          width: 27px;
-          height: 27px;
+          width: 30px;
+          height: 30px;
+          flex: 0 0 30px;
           display: flex;
           align-items: center;
           justify-content: center;
-          flex: 0 0 27px;
-          border-radius: 8px;
-          background: rgba(
-            139,
-            92,
-            246,
-            0.1
-          );
+          border-radius: 9px;
+          background: var(--accent-soft);
           color: #a78bfa;
           font-size: 12px;
+          font-weight: 800;
         }
 
         .ZUQEN-credit-feature-info {
           min-width: 0;
           flex: 1;
+          display: flex;
+          flex-direction: column;
+          gap: 3px;
         }
 
-        .ZUQEN-credit-feature-name {
+        .ZUQEN-credit-feature-info strong {
           overflow: hidden;
           white-space: nowrap;
           text-overflow: ellipsis;
-          font-size: 9px;
+          font-size: 8px;
           font-weight: 800;
         }
 
-        .ZUQEN-credit-feature-provider {
-          margin-top: 2px;
-          color: var(--muted2);
-          font-size: 7px;
+        .ZUQEN-credit-feature-info span {
+          color: var(--muted-2);
+          font-size: 6px;
         }
 
-        .ZUQEN-credit-feature-balance {
-          font-size: 10px;
-          font-weight: 850;
+        .ZUQEN-feature-balance {
+          font-size: 9px;
+          font-weight: 900;
         }
 
-        .ZUQEN-credit-warning,
-        .ZUQEN-credit-empty {
-          margin-top: 10px;
+        .ZUQEN-feature-balance.low {
+          color: #f59e0b;
+        }
+
+        .ZUQEN-feature-balance.empty {
+          color: #f87171;
+        }
+
+        .ZUQEN-credit-empty,
+        .ZUQEN-credit-warning {
+          display: flex;
+          align-items: flex-start;
+          gap: 8px;
+          margin-top: 9px;
           padding: 9px;
-          border-radius: 9px;
-          font-size: 8px;
+          border-radius: 10px;
+          font-size: 7px;
           line-height: 1.45;
         }
 
-        .ZUQEN-credit-warning {
-          color: #f59e0b;
-          background: rgba(
-            245,
-            158,
-            11,
-            0.08
-          );
-        }
-
         .ZUQEN-credit-empty {
-          color: #f87171;
+          color: #fca5a5;
           background: rgba(
             239,
             68,
             68,
-            0.08
+            0.07
+          );
+          border: 1px solid
+            rgba(239, 68, 68, 0.09);
+        }
+
+        .ZUQEN-credit-empty > span,
+        .ZUQEN-credit-warning > span {
+          width: 16px;
+          height: 16px;
+          flex: 0 0 16px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 50%;
+          font-size: 8px;
+          font-weight: 900;
+        }
+
+        .ZUQEN-credit-empty > span {
+          background: rgba(
+            239,
+            68,
+            68,
+            0.12
+          );
+        }
+
+        .ZUQEN-credit-empty div {
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+        }
+
+        .ZUQEN-credit-empty strong {
+          font-size: 7px;
+        }
+
+        .ZUQEN-credit-empty small {
+          color: #f87171;
+          font-size: 6px;
+        }
+
+        .ZUQEN-credit-warning {
+          color: #fbbf24;
+          background: rgba(
+            245,
+            158,
+            11,
+            0.07
+          );
+          border: 1px solid
+            rgba(245, 158, 11, 0.1);
+        }
+
+        .ZUQEN-credit-warning > span {
+          background: rgba(
+            245,
+            158,
+            11,
+            0.12
           );
         }
 
         .ZUQEN-credit-get-more {
           width: 100%;
-          height: 36px;
+          height: 40px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
           margin-top: 10px;
           border: 0;
-          border-radius: 9px;
-          background: linear-gradient(
-            135deg,
-            #8b5cf6,
-            #6366f1
-          );
+          border-radius: 10px;
+          background:
+            linear-gradient(
+              135deg,
+              #8b5cf6,
+              #6366f1
+            );
           color: white;
-          font-size: 9px;
+          font-size: 8px;
           font-weight: 850;
+          box-shadow:
+            0 8px 25px
+              rgba(99, 102, 241, 0.2);
+        }
+
+        .ZUQEN-credit-get-more:hover {
+          filter: brightness(1.08);
         }
 
         /* AGENT */
@@ -2239,49 +3265,90 @@ export default function HomePage() {
         }
 
         .ZUQEN-agent-button {
-          height: 36px;
+          height: 38px;
           display: flex;
           align-items: center;
           gap: 7px;
           padding: 0 10px;
           border: 1px solid var(--line);
-          border-radius: 10px;
-          background: var(--panel-soft);
+          border-radius: 11px;
+          background: var(--panel-3);
           color: var(--text);
-          font-size: 9px;
+          font-size: 8px;
           font-weight: 750;
+          transition: all 0.16s ease;
+        }
+
+        .ZUQEN-agent-button:hover,
+        .ZUQEN-agent-button.active {
+          border-color: var(--line-strong);
+          background: var(--panel);
         }
 
         .ZUQEN-agent-icon {
           color: #a78bfa;
+          font-size: 12px;
         }
 
         .ZUQEN-agent-dropdown {
           position: absolute;
-          top: calc(100% + 8px);
+          top: calc(100% + 9px);
           right: 0;
-          z-index: 90;
-          width: 190px;
-          padding: 5px;
-          border: 1px solid var(--line);
-          border-radius: 11px;
-          background: var(--panel-solid);
-          box-shadow: 0 20px 55px var(--shadow);
+          z-index: 150;
+          width: 220px;
+          padding: 7px;
+          border: 1px solid var(--line-strong);
+          border-radius: 14px;
+          background: var(--panel-2);
+          box-shadow:
+            0 22px 70px var(--shadow);
+          backdrop-filter: blur(22px);
+          animation:
+            ZUQEN-pop 0.14s ease;
+        }
+
+        .ZUQEN-agent-dropdown-title {
+          padding: 7px 9px;
+          color: var(--muted-2);
+          font-size: 6px;
+          font-weight: 850;
+          letter-spacing: 0.14em;
         }
 
         .ZUQEN-agent-dropdown button {
           width: 100%;
+          display: flex;
+          align-items: center;
+          gap: 9px;
           padding: 9px;
           border: 0;
-          border-radius: 7px;
+          border-radius: 9px;
           background: transparent;
           color: var(--text);
           text-align: left;
+          font-size: 8px;
+        }
+
+        .ZUQEN-agent-dropdown button:hover,
+        .ZUQEN-agent-dropdown button.selected {
+          background: var(--panel-3);
+        }
+
+        .ZUQEN-agent-option-icon {
+          width: 25px;
+          height: 25px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 7px;
+          background: var(--accent-soft);
+          color: #a78bfa;
           font-size: 9px;
         }
 
-        .ZUQEN-agent-dropdown button:hover {
-          background: var(--panel-soft);
+        .ZUQEN-agent-check {
+          margin-left: auto;
+          color: #a78bfa;
         }
 
         /* CHAT */
@@ -2290,101 +3357,203 @@ export default function HomePage() {
           min-height: 0;
           flex: 1;
           overflow-y: auto;
+          scrollbar-width: thin;
         }
 
         .ZUQEN-welcome {
+          position: relative;
           min-height: 100%;
           display: flex;
           flex-direction: column;
           align-items: center;
           justify-content: center;
-          padding: 35px 20px;
+          padding: 50px 20px;
           text-align: center;
+          overflow: hidden;
+        }
+
+        .ZUQEN-welcome-glow {
+          position: absolute;
+          width: 420px;
+          height: 420px;
+          border-radius: 50%;
+          background:
+            radial-gradient(
+              circle,
+              rgba(124, 58, 237, 0.1),
+              transparent 68%
+            );
+          pointer-events: none;
         }
 
         .ZUQEN-welcome-mark {
-          width: 52px;
-          height: 52px;
+          position: relative;
+          width: 62px;
+          height: 62px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
           margin-bottom: 17px;
-          border-radius: 15px;
-          font-size: 20px;
+          border: 1px solid
+            rgba(255, 255, 255, 0.1);
+          border-radius: 19px;
+          background:
+            linear-gradient(
+              135deg,
+              #8b5cf6,
+              #6366f1
+            );
+          box-shadow:
+            0 20px 60px
+              rgba(99, 102, 241, 0.25);
+          color: white;
+          font-size: 22px;
+          font-weight: 950;
+        }
+
+        .ZUQEN-welcome-kicker {
+          position: relative;
+          margin-bottom: 9px;
+          color: #a78bfa;
+          font-size: 7px;
+          font-weight: 850;
+          letter-spacing: 0.22em;
         }
 
         .ZUQEN-welcome h1 {
+          position: relative;
           margin: 0;
-          font-size: 27px;
-          letter-spacing: -0.04em;
+          color: var(--text);
+          font-size: clamp(
+            26px,
+            4vw,
+            40px
+          );
+          line-height: 1.1;
+          letter-spacing: -0.055em;
+          font-weight: 900;
+        }
+
+        .ZUQEN-welcome h1 span {
+          background:
+            linear-gradient(
+              90deg,
+              #a78bfa,
+              #818cf8
+            );
+          -webkit-background-clip: text;
+          background-clip: text;
+          color: transparent;
         }
 
         .ZUQEN-welcome p {
-          max-width: 450px;
-          margin: 10px 0 0;
+          position: relative;
+          max-width: 530px;
+          margin: 13px 0 0;
           color: var(--muted);
-          font-size: 11px;
-          line-height: 1.7;
+          font-size: 10px;
+          line-height: 1.8;
         }
 
         .ZUQEN-prompts {
-          display: flex;
-          flex-wrap: wrap;
-          justify-content: center;
-          gap: 7px;
-          margin-top: 23px;
+          position: relative;
+          display: grid;
+          grid-template-columns: repeat(
+            2,
+            minmax(0, 1fr)
+          );
+          gap: 8px;
+          width: min(560px, 100%);
+          margin-top: 26px;
         }
 
         .ZUQEN-prompts button {
-          padding: 9px 12px;
+          display: flex;
+          align-items: center;
+          gap: 9px;
+          min-height: 43px;
+          padding: 8px 11px;
           border: 1px solid var(--line);
-          border-radius: 9px;
-          background: var(--panel-soft);
+          border-radius: 11px;
+          background: var(--panel-3);
           color: var(--muted);
-          font-size: 9px;
+          text-align: left;
+          font-size: 8px;
+          transition: all 0.16s ease;
         }
 
         .ZUQEN-prompts button:hover {
-          color: var(--text);
+          transform: translateY(-1px);
           border-color: rgba(
             139,
             92,
             246,
-            0.3
+            0.25
           );
+          background: var(--accent-soft);
+          color: var(--text);
+        }
+
+        .ZUQEN-prompts button > span {
+          width: 25px;
+          height: 25px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          flex: 0 0 25px;
+          border-radius: 7px;
+          background: var(--accent-soft);
+          color: #a78bfa;
+          font-size: 8px;
+          font-weight: 850;
         }
 
         .ZUQEN-messages {
-          width: min(850px, 100%);
+          width: min(900px, 100%);
           margin: 0 auto;
-          padding: 35px 20px 25px;
+          padding: 38px 24px 28px;
         }
 
         .ZUQEN-message {
           display: flex;
           gap: 13px;
-          margin-bottom: 28px;
+          margin-bottom: 31px;
         }
 
         .ZUQEN-message-avatar {
-          width: 29px;
-          height: 29px;
-          flex: 0 0 29px;
+          width: 31px;
+          height: 31px;
+          flex: 0 0 31px;
           display: flex;
           align-items: center;
           justify-content: center;
-          border-radius: 9px;
-          background: var(--panel-soft);
+          margin-top: 1px;
+          border: 1px solid var(--line);
+          border-radius: 10px;
+          background: var(--panel-3);
           color: var(--muted);
           font-size: 9px;
-          font-weight: 850;
+          font-weight: 900;
         }
 
         .ZUQEN-message.assistant
           .ZUQEN-message-avatar {
-          color: white;
-          background: linear-gradient(
-            135deg,
-            #8b5cf6,
-            #6366f1
+          border-color: rgba(
+            139,
+            92,
+            246,
+            0.2
           );
+          background:
+            linear-gradient(
+              135deg,
+              #8b5cf6,
+              #6366f1
+            );
+          color: white;
+          box-shadow:
+            0 7px 20px
+              rgba(99, 102, 241, 0.16);
         }
 
         .ZUQEN-message-body {
@@ -2392,150 +3561,378 @@ export default function HomePage() {
           flex: 1;
         }
 
+        .ZUQEN-message-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          min-height: 22px;
+          margin-bottom: 5px;
+        }
+
         .ZUQEN-message-role {
-          margin-bottom: 6px;
-          color: var(--muted2);
-          font-size: 8px;
-          font-weight: 800;
+          color: var(--muted-2);
+          font-size: 7px;
+          font-weight: 850;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+        }
+
+        .ZUQEN-message-actions {
+          display: flex;
+          align-items: center;
+          gap: 2px;
+          opacity: 0;
+          transition: opacity 0.15s ease;
+        }
+
+        .ZUQEN-message:hover
+          .ZUQEN-message-actions {
+          opacity: 1;
+        }
+
+        .ZUQEN-message-actions button {
+          width: 27px;
+          height: 27px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border: 1px solid transparent;
+          border-radius: 7px;
+          background: transparent;
+          color: var(--muted-2);
+        }
+
+        .ZUQEN-message-actions button:hover {
+          border-color: var(--line);
+          background: var(--panel-3);
+          color: var(--text);
+        }
+
+        .ZUQEN-message-actions button:disabled {
+          opacity: 0.35;
+          cursor: not-allowed;
+        }
+
+        .ZUQEN-copied {
+          color: #4ade80;
+          font-size: 12px;
+          font-weight: 900;
         }
 
         .ZUQEN-message-content {
           white-space: pre-wrap;
           color: var(--text);
-          font-size: 12px;
-          line-height: 1.75;
+          font-size: 11px;
+          line-height: 1.82;
+          letter-spacing: 0.005em;
+        }
+
+        .ZUQEN-message.user
+          .ZUQEN-message-content {
+          color: var(--text);
         }
 
         .ZUQEN-attachments {
           display: flex;
           flex-wrap: wrap;
-          gap: 6px;
-          margin-top: 9px;
+          gap: 7px;
+          margin-top: 11px;
         }
 
-        .ZUQEN-attachments div {
-          padding: 6px 8px;
+        .ZUQEN-attachment-card {
+          min-width: 160px;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          padding: 8px 10px;
           border: 1px solid var(--line);
+          border-radius: 10px;
+          background: var(--panel-3);
+        }
+
+        .ZUQEN-attachment-icon {
+          width: 27px;
+          height: 27px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
           border-radius: 7px;
-          background: var(--panel-soft);
-          color: var(--muted);
-          font-size: 8px;
+          background: var(--accent-soft);
+          color: #a78bfa;
+        }
+
+        .ZUQEN-attachment-card > div:last-child {
+          min-width: 0;
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+        }
+
+        .ZUQEN-attachment-card strong {
+          max-width: 180px;
+          overflow: hidden;
+          white-space: nowrap;
+          text-overflow: ellipsis;
+          font-size: 7px;
+        }
+
+        .ZUQEN-attachment-card span {
+          color: var(--muted-2);
+          font-size: 6px;
         }
 
         /* COMPOSER */
 
-        .ZUQEN-composer-wrap {
-          width: min(850px, 100%);
+        .ZUQEN-composer-area {
+          width: min(900px, 100%);
           margin: 0 auto;
-          padding: 0 20px 18px;
+          padding: 0 24px 18px;
+        }
+
+        .ZUQEN-edit-bar {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          min-height: 34px;
+          margin-bottom: 7px;
+          padding: 0 10px;
+          border: 1px solid
+            rgba(139, 92, 246, 0.15);
+          border-radius: 9px;
+          background: var(--accent-soft);
+          color: var(--muted);
+          font-size: 7px;
+        }
+
+        .ZUQEN-edit-bar > div {
+          display: flex;
+          align-items: center;
+          gap: 7px;
+        }
+
+        .ZUQEN-edit-icon {
+          display: flex;
+          color: #a78bfa;
+        }
+
+        .ZUQEN-edit-bar button {
+          border: 0;
+          background: transparent;
+          color: var(--muted-2);
+          font-size: 7px;
+        }
+
+        .ZUQEN-edit-bar button:hover {
+          color: var(--text);
         }
 
         .ZUQEN-pending-files {
           display: flex;
           flex-wrap: wrap;
-          gap: 6px;
-          margin-bottom: 7px;
+          gap: 7px;
+          margin-bottom: 8px;
         }
 
-        .ZUQEN-pending-files div {
+        .ZUQEN-pending-file {
           display: flex;
           align-items: center;
-          gap: 6px;
-          padding: 6px 8px;
-          border: 1px solid var(--line);
-          border-radius: 8px;
-          background: var(--panel-soft);
-          font-size: 8px;
-        }
-
-        .ZUQEN-pending-files button {
-          border: 0;
-          background: transparent;
-          color: var(--muted2);
-        }
-
-        .ZUQEN-composer {
-          min-height: 54px;
-          display: flex;
-          align-items: flex-end;
           gap: 8px;
-          padding: 8px;
+          min-width: 150px;
+          padding: 7px 8px;
           border: 1px solid var(--line);
-          border-radius: 15px;
-          background: var(--panel);
-          box-shadow: 0 12px 40px var(--shadow);
+          border-radius: 10px;
+          background: var(--panel-3);
         }
 
-        .ZUQEN-composer textarea {
-          min-height: 35px;
-          max-height: 150px;
+        .ZUQEN-pending-file-icon {
+          width: 27px;
+          height: 27px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 7px;
+          background: var(--accent-soft);
+          color: #a78bfa;
+        }
+
+        .ZUQEN-pending-file-info {
+          min-width: 0;
           flex: 1;
-          resize: none;
-          padding: 9px 4px;
-          border: 0;
-          outline: none;
-          background: transparent;
-          color: var(--text);
-          font-size: 11px;
-          line-height: 1.5;
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
         }
 
-        .ZUQEN-composer textarea::placeholder {
-          color: var(--muted2);
+        .ZUQEN-pending-file-info strong {
+          max-width: 150px;
+          overflow: hidden;
+          white-space: nowrap;
+          text-overflow: ellipsis;
+          font-size: 7px;
         }
 
-        .ZUQEN-composer-action,
-        .ZUQEN-send {
-          width: 35px;
-          height: 35px;
-          flex: 0 0 35px;
+        .ZUQEN-pending-file-info span {
+          color: var(--muted-2);
+          font-size: 6px;
+        }
+
+        .ZUQEN-pending-file button {
+          width: 25px;
+          height: 25px;
           display: flex;
           align-items: center;
           justify-content: center;
           border: 0;
-          border-radius: 10px;
+          border-radius: 7px;
+          background: transparent;
+          color: var(--muted-2);
+        }
+
+        .ZUQEN-pending-file button:hover {
+          background: rgba(
+            239,
+            68,
+            68,
+            0.08
+          );
+          color: #f87171;
+        }
+
+        .ZUQEN-composer {
+          min-height: 58px;
+          display: flex;
+          align-items: flex-end;
+          gap: 8px;
+          padding: 9px;
+          border: 1px solid var(--line-strong);
+          border-radius: 17px;
+          background:
+            linear-gradient(
+              180deg,
+              var(--panel-2),
+              var(--panel)
+            );
+          box-shadow:
+            0 15px 50px
+              rgba(0, 0, 0, 0.18);
+          transition:
+            border-color 0.18s ease,
+            box-shadow 0.18s ease;
+        }
+
+        .ZUQEN-composer:focus-within {
+          border-color: rgba(
+            139,
+            92,
+            246,
+            0.35
+          );
+          box-shadow:
+            0 18px 60px
+              rgba(0, 0, 0, 0.2),
+            0 0 0 3px
+              rgba(139, 92, 246, 0.04);
+        }
+
+        .ZUQEN-composer textarea {
+          min-height: 37px;
+          max-height: 160px;
+          flex: 1;
+          resize: none;
+          padding: 10px 3px;
+          border: 0;
+          outline: none;
+          background: transparent;
+          color: var(--text);
+          font-size: 10px;
+          line-height: 1.6;
+        }
+
+        .ZUQEN-composer textarea::placeholder {
+          color: var(--muted-2);
+        }
+
+        .ZUQEN-composer-action,
+        .ZUQEN-send {
+          width: 37px;
+          height: 37px;
+          flex: 0 0 37px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 11px;
+          transition: all 0.16s ease;
         }
 
         .ZUQEN-composer-action {
-          background: var(--panel-soft);
+          border: 1px solid var(--line);
+          background: var(--panel-3);
           color: var(--muted);
         }
 
-        .ZUQEN-send {
-          background: linear-gradient(
-            135deg,
-            #8b5cf6,
-            #6366f1
-          );
-          color: white;
+        .ZUQEN-composer-action:hover {
+          border-color: var(--line-strong);
+          color: var(--text);
         }
 
-        .ZUQEN-send:disabled {
+        .ZUQEN-composer-action:disabled {
           opacity: 0.35;
           cursor: not-allowed;
         }
 
-        .ZUQEN-composer-note {
-          padding-top: 7px;
-          color: var(--muted2);
-          text-align: center;
-          font-size: 7px;
+        .ZUQEN-composer-tools {
+          display: flex;
+        }
+
+        .ZUQEN-send {
+          border: 0;
+          background:
+            linear-gradient(
+              135deg,
+              #8b5cf6,
+              #6366f1
+            );
+          color: white;
+          box-shadow:
+            0 7px 20px
+              rgba(99, 102, 241, 0.22);
+        }
+
+        .ZUQEN-send:hover:not(
+            :disabled
+          ) {
+          transform: translateY(-1px);
+          filter: brightness(1.08);
+        }
+
+        .ZUQEN-send:disabled {
+          opacity: 0.3;
+          cursor: not-allowed;
+          box-shadow: none;
+        }
+
+        .ZUQEN-composer-footer {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 7px 4px 0;
+          color: var(--muted-2);
+          font-size: 6px;
         }
 
         .ZUQEN-spinner {
           width: 14px;
           height: 14px;
-          border: 2px solid rgba(
-            255,
-            255,
-            255,
-            0.35
-          );
+          border: 2px solid
+            rgba(255, 255, 255, 0.3);
           border-top-color: white;
           border-radius: 50%;
-          animation: ZUQEN-spin 0.7s linear
+          animation:
+            ZUQEN-spin 0.7s linear
             infinite;
         }
+
+        /* LOADING */
 
         .ZUQEN-loading-screen {
           width: 100vw;
@@ -2544,26 +3941,48 @@ export default function HomePage() {
           flex-direction: column;
           align-items: center;
           justify-content: center;
-          gap: 12px;
-          background: #09090b;
+          gap: 8px;
+          background: #07070a;
           color: #a1a1aa;
-          font-size: 11px;
         }
 
-        .ZUQEN-loading-logo {
-          width: 45px;
-          height: 45px;
+        .ZUQEN-loading-orb {
+          width: 50px;
+          height: 50px;
           display: flex;
           align-items: center;
           justify-content: center;
-          border-radius: 13px;
-          background: linear-gradient(
-            135deg,
-            #8b5cf6,
-            #6366f1
-          );
+          margin-bottom: 4px;
+          border-radius: 15px;
+          background:
+            linear-gradient(
+              135deg,
+              #8b5cf6,
+              #6366f1
+            );
+          box-shadow:
+            0 15px 50px
+              rgba(99, 102, 241, 0.28);
           color: white;
-          font-weight: 900;
+          animation:
+            ZUQEN-breathe 1.8s ease-in-out
+            infinite;
+        }
+
+        .ZUQEN-loading-orb span {
+          font-weight: 950;
+        }
+
+        .ZUQEN-loading-title {
+          color: #f4f4f5;
+          font-size: 11px;
+          font-weight: 850;
+          letter-spacing: 0.15em;
+        }
+
+        .ZUQEN-loading-sub {
+          color: #71717a;
+          font-size: 7px;
         }
 
         @keyframes ZUQEN-spin {
@@ -2572,40 +3991,96 @@ export default function HomePage() {
           }
         }
 
+        @keyframes ZUQEN-pop {
+          from {
+            opacity: 0;
+            transform: translateY(-4px)
+              scale(0.98);
+          }
+
+          to {
+            opacity: 1;
+            transform: translateY(0)
+              scale(1);
+          }
+        }
+
+        @keyframes ZUQEN-breathe {
+          0%,
+          100% {
+            transform: scale(1);
+          }
+
+          50% {
+            transform: scale(1.04);
+          }
+        }
+
+        @media (max-width: 900px) {
+          .ZUQEN-sidebar {
+            width: 270px;
+            min-width: 270px;
+          }
+
+          .ZUQEN-sidebar-inner {
+            width: 270px;
+          }
+
+          .ZUQEN-title-line strong {
+            max-width: 190px;
+          }
+        }
+
         @media (max-width: 700px) {
           .ZUQEN-sidebar {
             position: fixed;
-            z-index: 200;
+            z-index: 300;
+            width: 292px;
+            min-width: 292px;
             height: 100vh;
+            box-shadow:
+              25px 0 80px
+                rgba(0, 0, 0, 0.4);
           }
 
           .ZUQEN-sidebar.closed {
             transform: translateX(-100%);
-            width: 290px;
-            min-width: 290px;
+            width: 292px;
+            min-width: 292px;
           }
 
-          .ZUQEN-credit-panel {
-            position: fixed;
-            top: 64px;
-            right: 9px;
-            width: min(
-              320px,
-              calc(100vw - 18px)
-            );
+          .ZUQEN-topbar {
+            height: 64px;
+            flex-basis: 64px;
+            padding: 0 10px;
           }
 
-          .ZUQEN-credits-label {
+          .ZUQEN-topbar-info
+            > span {
             display: none;
           }
 
-          .ZUQEN-credits-button {
-            min-width: 38px;
-            width: 38px;
-            padding: 0;
+          .ZUQEN-live-badge {
+            display: none !important;
           }
 
-          .ZUQEN-credits-value {
+          .ZUQEN-title-line strong {
+            max-width: 125px;
+          }
+
+          .ZUQEN-topbar-actions {
+            gap: 4px;
+          }
+
+          .ZUQEN-credits-button {
+            min-width: 39px;
+            width: 39px;
+            padding: 0;
+            justify-content: center;
+          }
+
+          .ZUQEN-credits-info,
+          .ZUQEN-chevron {
             display: none;
           }
 
@@ -2614,20 +4089,239 @@ export default function HomePage() {
           }
 
           .ZUQEN-agent-button {
-            width: 36px;
+            width: 38px;
             padding: 0;
             justify-content: center;
           }
 
-          .ZUQEN-topbar {
-            padding: 0 10px;
+          .ZUQEN-credit-panel {
+            position: fixed;
+            top: 73px;
+            right: 9px;
+            width: min(
+              350px,
+              calc(100vw - 18px)
+            );
+            max-height: calc(100vh - 85px);
+          }
+
+          .ZUQEN-welcome {
+            padding: 30px 16px;
           }
 
           .ZUQEN-welcome h1 {
-            font-size: 22px;
+            font-size: 28px;
+          }
+
+          .ZUQEN-welcome p {
+            font-size: 9px;
+          }
+
+          .ZUQEN-prompts {
+            grid-template-columns: 1fr;
+            width: min(
+              400px,
+              100%
+            );
+          }
+
+          .ZUQEN-messages {
+            padding: 25px 14px 20px;
+          }
+
+          .ZUQEN-message {
+            gap: 9px;
+            margin-bottom: 25px;
+          }
+
+          .ZUQEN-message-avatar {
+            width: 28px;
+            height: 28px;
+            flex-basis: 28px;
+          }
+
+          .ZUQEN-message-content {
+            font-size: 10px;
+          }
+
+          .ZUQEN-composer-area {
+            padding: 0 10px 12px;
+          }
+
+          .ZUQEN-composer-footer {
+            padding-left: 2px;
+            padding-right: 2px;
+          }
+
+          .ZUQEN-composer-footer span:last-child {
+            display: none;
+          }
+
+          .ZUQEN-message-actions {
+            opacity: 1;
+          }
+        }
+
+        @media (max-width: 430px) {
+          .ZUQEN-topbar-info {
+            display: none;
+          }
+
+          .ZUQEN-topbar-left {
+            margin-right: auto;
+          }
+
+          .ZUQEN-topbar-actions {
+            margin-left: auto;
+          }
+
+          .ZUQEN-credit-panel {
+            right: 6px;
+            width: calc(100vw - 12px);
+          }
+
+          .ZUQEN-credits-button,
+          .ZUQEN-agent-button,
+          .ZUQEN-top-action {
+            width: 35px;
+            height: 35px;
           }
         }
       `}</style>
     </main>
   );
 }
+
+function ChatItem({
+  chat,
+  active,
+  menuOpen,
+  archived,
+  onOpen,
+  onMenu,
+  onArchive,
+  onRestore,
+  onRename,
+  onDelete,
+}: {
+  chat: Chat;
+  active: boolean;
+  menuOpen: boolean;
+  archived: boolean;
+  onOpen: () => void;
+  onMenu: () => void;
+  onArchive?: () => void;
+  onRestore?: () => void;
+  onRename: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <div
+      className={`ZUQEN-chat-item ${
+        active ? "active" : ""
+      }`}
+    >
+      <button
+        type="button"
+        className="ZUQEN-chat-main"
+        onClick={onOpen}
+      >
+        <Icon size={14}>
+          <path d="M4 5h16v12H4z" />
+          <path d="m8 21 4-4 4 4" />
+        </Icon>
+
+        <span>{chat.title}</span>
+      </button>
+
+      <button
+        type="button"
+        className="ZUQEN-chat-more"
+        onClick={(event) => {
+          event.stopPropagation();
+          onMenu();
+        }}
+        title="Conversation options"
+      >
+        <Icon size={15}>
+          <circle
+            cx="5"
+            cy="12"
+            r="1"
+          />
+          <circle
+            cx="12"
+            cy="12"
+            r="1"
+          />
+          <circle
+            cx="19"
+            cy="12"
+            r="1"
+          />
+        </Icon>
+      </button>
+
+      {menuOpen && (
+        <div
+          className="ZUQEN-chat-menu"
+          onClick={(event) =>
+            event.stopPropagation()
+          }
+        >
+          <button
+            type="button"
+            onClick={onRename}
+          >
+            <Icon size={13}>
+              <path d="M12 20h9" />
+              <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z" />
+            </Icon>
+
+            Rename
+          </button>
+
+          {archived ? (
+            <button
+              type="button"
+              onClick={onRestore}
+            >
+              <Icon size={13}>
+                <path d="M3 12a9 9 0 1 0 3-6.7" />
+                <path d="M3 4v6h6" />
+              </Icon>
+
+              Restore
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={onArchive}
+            >
+              <Icon size={13}>
+                <path d="M4 4h16v4H4z" />
+                <path d="M6 8v11h12V8" />
+              </Icon>
+
+              Archive
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={onDelete}
+          >
+            <Icon size={13}>
+              <path d="M3 6h18" />
+              <path d="M8 6V4h8v2" />
+              <path d="M19 6l-1 14H6L5 6" />
+            </Icon>
+
+            Delete
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
