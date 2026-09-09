@@ -327,14 +327,11 @@ export async function POST(
       );
     }
 
-    console.log(
-      "ZUQEN CHAT CREDITS:",
-      {
-        userId,
-        balance:
-          currentChatCredits,
-      }
-    );
+   console.log("========== ZUQEN CHAT DEBUG ==========");
+console.log("ZUQEN AUTH USER ID:", user.id);
+console.log("ZUQEN AUTH USER EMAIL:", user.email);
+console.log("ZUQEN CHAT CREDIT BALANCE:", currentChatCredits);
+console.log("======================================");
 
     if (
       currentChatCredits <= 0
