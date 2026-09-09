@@ -1,9 +1,7 @@
-
 import {
   GetObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
-
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { NextResponse } from "next/server";
 
@@ -11,7 +9,9 @@ import { createServerSupabaseClient } from "@/lib/supabase-server";
 
 import {
   getFeatureCreditBalance,
-  consumeFeatureCredits,
+  reserveFeatureCredits,
+  settleFeatureCreditReservation,
+  refundFeatureCreditReservation,
 } from "@/lib/feature-credits";
 
 import { recordProviderUsage } from "@/lib/provider-usage";
@@ -254,6 +254,50 @@ function toSafeNumber(
   );
 }
 
+/**
+ * Estimate a safe maximum credit reservation.
+ *
+ * This is only a temporary upper-bound reservation.
+ * The final charge always comes from Groq's real usage.
+ */
+function estimateChatReservation(
+  messages: InputMessage[],
+  hasImages: boolean
+) {
+  const textLength =
+    messages.reduce(
+      (total, message) =>
+        total + message.content.length,
+      0
+    );
+
+  /*
+   * Roughly reserve enough credits for:
+   * - conversation input
+   * - system prompt
+   * - maximum completion
+   *
+   * Image requests receive a larger safety reserve because
+   * vision input can consume substantially more provider tokens.
+   */
+  const estimatedInputTokens =
+    Math.ceil(textLength / 3) +
+    600;
+
+  const maximumCompletionTokens =
+    2048;
+
+  const imageSafetyReserve =
+    hasImages ? 6000 : 0;
+
+  return Math.max(
+    1,
+    estimatedInputTokens +
+      maximumCompletionTokens +
+      imageSafetyReserve
+  );
+}
+
 export async function POST(
   req: Request
 ) {
@@ -327,9 +371,11 @@ export async function POST(
       );
     }
 
- console.log("ZUQEN_USER_ID_PART_1:", user.id.slice(0, 18));
-console.log("ZUQEN_USER_ID_PART_2:", user.id.slice(18));
-console.log("ZUQEN_CHAT_CREDITS:", currentChatCredits);
+    console.log(
+      "ZUQEN CHAT CREDITS:",
+      currentChatCredits
+    );
+
     if (
       currentChatCredits <= 0
     ) {
@@ -418,26 +464,7 @@ console.log("ZUQEN_CHAT_CREDITS:", currentChatCredits);
     }
 
     // =======================================================
-    // 4. GROQ API KEY
-    // =======================================================
-
-    const apiKey =
-      process.env.GROQ_API_KEY?.trim();
-
-    if (!apiKey) {
-      return NextResponse.json(
-        {
-          error:
-            "GROQ_API_KEY is missing.",
-        },
-        {
-          status: 500,
-        }
-      );
-    }
-
-    // =======================================================
-    // 5. DETECT IMAGE ATTACHMENTS
+    // 4. DETECT IMAGE ATTACHMENTS
     // =======================================================
 
     const imageAttachments =
@@ -450,7 +477,7 @@ console.log("ZUQEN_CHAT_CREDITS:", currentChatCredits);
       0;
 
     // =======================================================
-    // 6. SELECT GROQ MODEL
+    // 5. SELECT GROQ MODEL
     // =======================================================
 
     const model = hasImages
@@ -458,7 +485,163 @@ console.log("ZUQEN_CHAT_CREDITS:", currentChatCredits);
       : "openai/gpt-oss-120b";
 
     // =======================================================
-    // 7. SYSTEM PROMPT
+    // 6. RESERVE CHAT CREDITS
+    // =======================================================
+
+    const reservationAmount =
+      estimateChatReservation(
+        messages,
+        hasImages
+      );
+
+    const chatReferenceId =
+      `chat-${crypto.randomUUID()}`;
+
+    console.log(
+      "ZUQEN CHAT CREDIT RESERVATION:",
+      {
+        requested:
+          reservationAmount,
+        currentBalance:
+          currentChatCredits,
+        hasImages,
+      }
+    );
+
+    const reservation =
+      await reserveFeatureCredits(
+        {
+          userId,
+          featureKey:
+            "chat",
+          amount:
+            reservationAmount,
+          providerRequestId:
+            null,
+          referenceId:
+            chatReferenceId,
+          metadata: {
+            model,
+            hasImages,
+            imageCount:
+              imageAttachments.length,
+            reservationType:
+              "chat_request",
+          },
+        }
+      );
+
+    if (
+      !reservation.success
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            reservation.message ||
+            "Unable to reserve Chat credits.",
+          code:
+            reservation.code,
+          feature:
+            "chat",
+          provider:
+            "groq",
+          creditBalance:
+            currentChatCredits,
+          requestedReservation:
+            reservationAmount,
+        },
+        {
+          status:
+            reservation.code ===
+            "INSUFFICIENT_CREDITS"
+              ? 402
+              : 500,
+        }
+      );
+    }
+
+    const reservationData =
+      reservation.data &&
+      typeof reservation.data ===
+        "object"
+        ? (reservation.data as Record<
+            string,
+            unknown
+          >)
+        : null;
+
+    const reservationId =
+      typeof reservationData
+        ?.reservationId ===
+      "string"
+        ? reservationData.reservationId
+        : null;
+
+    if (!reservationId) {
+      console.error(
+        "ZUQEN RESERVATION ID MISSING:",
+        reservation
+      );
+
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "Chat credit reservation could not be created.",
+          code:
+            "RESERVATION_ID_MISSING",
+        },
+        {
+          status: 500,
+        }
+      );
+    }
+
+    const reservedBalance =
+      Number(
+        reservationData?.newBalance ??
+          Math.max(
+            0,
+            currentChatCredits -
+              reservationAmount
+          )
+      );
+
+    // =======================================================
+    // 7. GROQ API KEY
+    // =======================================================
+
+    const apiKey =
+      process.env.GROQ_API_KEY?.trim();
+
+    if (!apiKey) {
+      await refundFeatureCreditReservation(
+        {
+          reservationId,
+          referenceId:
+            chatReferenceId,
+          description:
+            "Chat reservation refunded because Groq API key is missing.",
+        }
+      );
+
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "GROQ_API_KEY is missing.",
+          code:
+            "GROQ_API_KEY_MISSING",
+        },
+        {
+          status: 500,
+        }
+      );
+    }
+
+    // =======================================================
+    // 8. SYSTEM PROMPT
     // =======================================================
 
     const systemPrompt = `
@@ -499,7 +682,7 @@ Be concise by default, but never omit important information needed to correctly 
 `;
 
     // =======================================================
-    // 8. BUILD GROQ MESSAGES
+    // 9. BUILD GROQ MESSAGES
     // =======================================================
 
     let groqMessages: any[];
@@ -546,7 +729,6 @@ Be concise by default, but never omit important information needed to correctly 
           content:
             systemPrompt,
         },
-
         ...previousMessages.map(
           (message) => ({
             role:
@@ -555,7 +737,6 @@ Be concise by default, but never omit important information needed to correctly 
               message.content,
           })
         ),
-
         {
           role: "user",
           content: [
@@ -576,7 +757,6 @@ Be concise by default, but never omit important information needed to correctly 
           content:
             systemPrompt,
         },
-
         ...messages.map(
           (message) => ({
             role:
@@ -604,48 +784,82 @@ Be concise by default, but never omit important information needed to correctly 
     );
 
     // =======================================================
-    // 9. CALL GROQ
+    // 10. CALL GROQ
     // =======================================================
 
-    const groqResponse =
-      await fetch(
-        "https://api.groq.com/openai/v1/chat/completions",
-        {
-          method: "POST",
+    let groqResponse: Response;
 
-          headers: {
-            "Content-Type":
-              "application/json",
-
-            Authorization:
-              `Bearer ${apiKey}`,
-          },
-
-          body: JSON.stringify({
-            model,
-
-            messages:
-              groqMessages,
-
-            temperature:
-              hasImages
-                ? 0.4
-                : 0.5,
-
-            max_completion_tokens:
-              2048,
-
-            stream: true,
-
-            stream_options: {
-              include_usage: true,
+    try {
+      groqResponse =
+        await fetch(
+          "https://api.groq.com/openai/v1/chat/completions",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type":
+                "application/json",
+              Authorization:
+                `Bearer ${apiKey}`,
             },
-          }),
+            body:
+              JSON.stringify({
+                model,
+                messages:
+                  groqMessages,
+                temperature:
+                  hasImages
+                    ? 0.4
+                    : 0.5,
+                max_completion_tokens:
+                  2048,
+                stream: true,
+                stream_options: {
+                  include_usage:
+                    true,
+                },
+              }),
+          }
+        );
+    } catch (error) {
+      console.error(
+        "ZUQEN GROQ FETCH ERROR:",
+        error
+      );
+
+      await refundFeatureCreditReservation(
+        {
+          reservationId,
+          referenceId:
+            chatReferenceId,
+          description:
+            "Chat reservation refunded because Groq request failed.",
+          metadata: {
+            error:
+              error instanceof Error
+                ? error.message
+                : String(error),
+          },
         }
       );
 
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Groq request failed.",
+          code:
+            "GROQ_REQUEST_FAILED",
+        },
+        {
+          status: 502,
+        }
+      );
+    }
+
     // =======================================================
-    // 10. READ REAL GROQ QUOTA
+    // 11. READ REAL GROQ QUOTA
     // =======================================================
 
     const groqQuotaHeaders =
@@ -659,7 +873,7 @@ Be concise by default, but never omit important information needed to correctly 
     );
 
     // =======================================================
-    // 11. SYNC REAL GROQ QUOTA
+    // 12. SYNC REAL GROQ QUOTA
     // =======================================================
 
     const quotaSync =
@@ -679,7 +893,7 @@ Be concise by default, but never omit important information needed to correctly 
     }
 
     // =======================================================
-    // 12. HANDLE GROQ ERROR
+    // 13. HANDLE GROQ ERROR
     // =======================================================
 
     if (!groqResponse.ok) {
@@ -708,11 +922,41 @@ Be concise by default, but never omit important information needed to correctly 
         // Keep original error text.
       }
 
+      const refundResult =
+        await refundFeatureCreditReservation(
+          {
+            reservationId,
+            referenceId:
+              chatReferenceId,
+            description:
+              "Chat reservation refunded because Groq returned an error.",
+            metadata: {
+              groqStatus:
+                groqResponse.status,
+              groqError:
+                message,
+              groqQuota:
+                groqQuotaHeaders,
+            },
+          }
+        );
+
+      if (
+        !refundResult.success
+      ) {
+        console.error(
+          "ZUQEN GROQ ERROR REFUND FAILED:",
+          refundResult.message
+        );
+      }
+
       return NextResponse.json(
         {
           success: false,
           error:
             `Groq request failed: ${message}`,
+          code:
+            "GROQ_REQUEST_FAILED",
           feature:
             "chat",
           provider:
@@ -721,11 +965,12 @@ Be concise by default, but never omit important information needed to correctly 
             groqQuotaHeaders,
           creditBalance:
             currentChatCredits,
+          reservationRefunded:
+            refundResult.success,
         },
         {
           status:
             groqResponse.status,
-
           headers:
             groqQuotaHeaders,
         }
@@ -733,15 +978,30 @@ Be concise by default, but never omit important information needed to correctly 
     }
 
     // =======================================================
-    // 13. CHECK RESPONSE BODY
+    // 14. CHECK RESPONSE BODY
     // =======================================================
 
     if (!groqResponse.body) {
+      const refundResult =
+        await refundFeatureCreditReservation(
+          {
+            reservationId,
+            referenceId:
+              chatReferenceId,
+            description:
+              "Chat reservation refunded because Groq returned no response body.",
+          }
+        );
+
       return NextResponse.json(
         {
           success: false,
           error:
             "Groq returned no response body.",
+          code:
+            "GROQ_EMPTY_RESPONSE",
+          reservationRefunded:
+            refundResult.success,
         },
         {
           status: 500,
@@ -752,7 +1012,7 @@ Be concise by default, but never omit important information needed to correctly 
     }
 
     // =======================================================
-    // 14. STREAM GROQ RESPONSE
+    // 15. STREAM GROQ RESPONSE
     // =======================================================
 
     const encoder =
@@ -780,6 +1040,9 @@ Be concise by default, but never omit important information needed to correctly 
             null;
 
           let streamCompleted =
+            false;
+
+          let reservationProcessed =
             false;
 
           try {
@@ -894,7 +1157,7 @@ Be concise by default, but never omit important information needed to correctly 
             }
 
             // =================================================
-            // 15. ACTUAL GROQ USAGE
+            // 16. ACTUAL GROQ USAGE
             // =================================================
 
             const inputTokens =
@@ -917,70 +1180,54 @@ Be concise by default, but never omit important information needed to correctly 
               {
                 requestId:
                   groqRequestId,
-
                 inputTokens,
-
                 outputTokens,
-
                 totalTokens,
-
-                previousChatCredits:
-                  currentChatCredits,
+                reserved:
+                  reservationAmount,
               }
             );
 
             // =================================================
-            // 16. RECORD PROVIDER USAGE
+            // 17. RECORD PROVIDER USAGE
             // =================================================
 
             const usageRecord =
               await recordProviderUsage(
                 {
                   userId,
-
                   featureKey:
                     "chat",
-
                   provider:
                     "groq",
-
                   model,
-
                   requestId:
                     groqRequestId,
-
                   status:
                     "success",
-
                   inputUnits:
                     inputTokens,
-
                   outputUnits:
                     outputTokens,
-
                   totalUnits:
                     totalTokens,
-
                   unitType:
                     "tokens",
-
                   metadata: {
                     hasImages,
-
                     imageCount:
                       imageAttachments.length,
-
                     groqUsage:
                       groqUsage ??
                       null,
-
                     groqQuota:
                       groqQuotaHeaders,
-
                     usageAvailable:
                       Boolean(
                         groqUsage
                       ),
+                    reservationId,
+                    reservationAmount,
                   },
                 }
               );
@@ -995,119 +1242,87 @@ Be concise by default, but never omit important information needed to correctly 
             }
 
             // =================================================
-            // 17. CONSUME FEATURE CREDITS
+            // 18. SETTLE CREDIT RESERVATION
             // =================================================
 
-            let remainingCredits =
-              currentChatCredits;
+            const settlement =
+              await settleFeatureCreditReservation(
+                {
+                  reservationId,
+                  actualAmount:
+                    totalTokens,
+                  providerRequestId:
+                    groqRequestId,
+                  description:
+                    "Groq Chat actual token usage",
+                  referenceId:
+                    usageRecord.id ??
+                    chatReferenceId,
+                  metadata: {
+                    model,
+                    inputTokens,
+                    outputTokens,
+                    totalTokens,
+                    hasImages,
+                    imageCount:
+                      imageAttachments.length,
+                    groqUsage:
+                      groqUsage ??
+                      null,
+                    groqQuota:
+                      groqQuotaHeaders,
+                    reservationAmount,
+                  },
+                }
+              );
 
-            let creditConsumption:
-              Awaited<
-                ReturnType<
-                  typeof consumeFeatureCredits
-                >
-              > | null =
-              null;
+            reservationProcessed =
+              settlement.success;
 
             if (
-              totalTokens > 0
+              !settlement.success
             ) {
-              creditConsumption =
-                await consumeFeatureCredits(
-                  {
-                    userId,
-
-                    featureKey:
-                      "chat",
-
-                    amount:
-                      totalTokens,
-
-                    providerRequestId:
-                      groqRequestId,
-
-                    description:
-                      "Groq Chat actual token usage",
-
-                    referenceId:
-                      usageRecord.id,
-
-                    metadata: {
-                      model,
-
-                      inputTokens,
-
-                      outputTokens,
-
-                      totalTokens,
-
-                      hasImages,
-
-                      imageCount:
-                        imageAttachments.length,
-
-                      groqUsage:
-                        groqUsage ??
-                        null,
-
-                      groqQuota:
-                        groqQuotaHeaders,
-                    },
-                  }
-                );
-
-              if (
-                !creditConsumption.success
-              ) {
-                console.error(
-                  "ZUQEN FEATURE CREDIT CONSUMPTION FAILED:",
-                  creditConsumption.message
-                );
-              } else {
-                const result =
-                  creditConsumption.data;
-
-                if (
-                  result &&
-                  typeof result ===
-                    "object" &&
-                  "new_balance" in
-                    result
-                ) {
-                  const newBalance =
-                    Number(
-                      (
-                        result as Record<
-                          string,
-                          unknown
-                        >
-                      ).new_balance
-                    );
-
-                  if (
-                    Number.isFinite(
-                      newBalance
-                    )
-                  ) {
-                    remainingCredits =
-                      newBalance;
-                  }
-                }
-              }
+              console.error(
+                "ZUQEN CREDIT SETTLEMENT FAILED:",
+                settlement.message
+              );
             }
+
+            const settlementData =
+              settlement.data &&
+              typeof settlement.data ===
+                "object"
+                ? (settlement.data as Record<
+                    string,
+                    unknown
+                  >)
+                : null;
+
+            const remainingCredits =
+              Number(
+                settlementData?.newBalance ??
+                  reservedBalance
+              );
+
+            const refundedCredits =
+              Number(
+                settlementData?.refunded ??
+                  0
+              );
 
             console.log(
               "ZUQEN CHAT CREDIT RESULT:",
               {
+                reserved:
+                  reservationAmount,
                 used:
                   totalTokens,
-
+                refunded:
+                  refundedCredits,
                 remaining:
                   remainingCredits,
-
-                consumption:
-                  creditConsumption?.code ??
-                  null,
+                settlement:
+                  settlement.code,
               }
             );
 
@@ -1115,7 +1330,7 @@ Be concise by default, but never omit important information needed to correctly 
               true;
 
             // =================================================
-            // 18. SEND FINAL INFORMATION
+            // 19. SEND FINAL INFORMATION
             // =================================================
 
             controller.enqueue(
@@ -1132,15 +1347,20 @@ Be concise by default, but never omit important information needed to correctly 
                       feature:
                         "chat",
 
+                      reserved:
+                        reservationAmount,
+
                       used:
                         totalTokens,
+
+                      refunded:
+                        refundedCredits,
 
                       remaining:
                         remainingCredits,
 
-                      consumed:
-                        creditConsumption?.success ??
-                        false,
+                      settled:
+                        settlement.success,
                     },
 
                     provider:
@@ -1154,7 +1374,7 @@ Be concise by default, but never omit important information needed to correctly 
             );
 
             // =================================================
-            // 19. FINISH STREAM
+            // 20. FINISH STREAM
             // =================================================
 
             controller.enqueue(
@@ -1180,41 +1400,28 @@ Be concise by default, but never omit important information needed to correctly 
               await recordProviderUsage(
                 {
                   userId,
-
                   featureKey:
                     "chat",
-
                   provider:
                     "groq",
-
                   model,
-
                   requestId:
                     groqRequestId,
-
                   status:
                     "failed",
-
                   inputUnits:
                     0,
-
                   outputUnits:
                     0,
-
                   totalUnits:
                     0,
-
                   unitType:
                     "tokens",
-
                   metadata: {
                     hasImages,
-
                     imageCount:
                       imageAttachments.length,
-
                     streamCompleted,
-
                     error:
                       error instanceof
                       Error
@@ -1222,9 +1429,9 @@ Be concise by default, but never omit important information needed to correctly 
                         : String(
                             error
                           ),
-
                     groqQuota:
                       groqQuotaHeaders,
+                    reservationId,
                   },
                 }
               );
@@ -1238,6 +1445,52 @@ Be concise by default, but never omit important information needed to correctly 
               );
             }
 
+            // ===============================================
+            // Refund reservation if not already settled
+            // ===============================================
+
+            if (
+              !reservationProcessed
+            ) {
+              const refundResult =
+                await refundFeatureCreditReservation(
+                  {
+                    reservationId,
+                    providerRequestId:
+                      groqRequestId,
+                    referenceId:
+                      failedRecord.id ??
+                      chatReferenceId,
+                    description:
+                      "Chat reservation refunded because the stream failed.",
+                    metadata: {
+                      hasImages,
+                      imageCount:
+                        imageAttachments.length,
+                      streamCompleted,
+                      error:
+                        error instanceof
+                        Error
+                          ? error.message
+                          : String(
+                              error
+                            ),
+                      groqQuota:
+                        groqQuotaHeaders,
+                    },
+                  }
+                );
+
+              if (
+                !refundResult.success
+              ) {
+                console.error(
+                  "ZUQEN STREAM REFUND FAILED:",
+                  refundResult.message
+                );
+              }
+            }
+
             controller.error(
               error
             );
@@ -1248,7 +1501,7 @@ Be concise by default, but never omit important information needed to correctly 
       });
 
     // =======================================================
-    // 20. RESPONSE HEADERS
+    // 21. RESPONSE HEADERS
     // =======================================================
 
     const responseHeaders =
@@ -1273,7 +1526,7 @@ Be concise by default, but never omit important information needed to correctly 
 
         "X-Zuquen-Feature-Credits":
           String(
-            currentChatCredits
+            reservedBalance
           ),
       });
 
@@ -1293,7 +1546,7 @@ Be concise by default, but never omit important information needed to correctly 
     }
 
     // =======================================================
-    // 21. RETURN STREAM
+    // 22. RETURN STREAM
     // =======================================================
 
     return new Response(
@@ -1326,4 +1579,3 @@ Be concise by default, but never omit important information needed to correctly 
     );
   }
 }
-
