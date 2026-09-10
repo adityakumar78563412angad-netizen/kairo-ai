@@ -1,35 +1,32 @@
 "use client";
 
 import {
-  ChangeEvent,
-  KeyboardEvent,
-  ReactNode,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
+import type { ChangeEvent, KeyboardEvent } from "react";
+import type { User } from "@supabase/supabase-js";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase";
 
-/* =========================================================
-   TYPES
-========================================================= */
+type Role = "user" | "assistant";
 
 type Attachment = {
+  id: string;
   name: string;
   type: string;
   size: number;
-  url?: string;
-  path?: string;
 };
 
 type Message = {
   id: string;
-  chat_id: string;
-  role: "user" | "assistant" | "system";
+  role: Role;
   content: string;
-  attachments?: Attachment[] | null;
   created_at: string;
+  attachments?: Attachment[];
 };
 
 type Chat = {
@@ -39,29 +36,54 @@ type Chat = {
   archived: boolean;
   created_at: string;
   updated_at: string;
+  messages?: Message[] | null;
 };
 
 type FeatureCredit = {
   feature_key: string;
-  feature_name: string;
-  provider: string;
   balance: number;
   total_granted: number;
   total_used: number;
+  provider_features?: {
+    feature_name?: string;
+    provider?: string;
+  } | null;
 };
 
-/* =========================================================
-   ICONS
-========================================================= */
+const supabase = createClient();
+
+const makeId = () =>
+  `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+
+const formatCredits = (value: number) => {
+  if (!Number.isFinite(value)) return "0";
+
+  if (value >= 1_000_000) {
+    return `${(value / 1_000_000).toFixed(1)}M`;
+  }
+
+  if (value >= 1_000) {
+    return `${(value / 1_000).toFixed(1)}K`;
+  }
+
+  return Math.floor(value).toLocaleString();
+};
+
+const formatFileSize = (bytes: number) => {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  }
+
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+};
 
 function Icon({
   name,
   size = 20,
-  stroke = 1.8,
 }: {
   name: string;
   size?: number;
-  stroke?: number;
 }) {
   const common = {
     width: size,
@@ -69,355 +91,289 @@ function Icon({
     viewBox: "0 0 24 24",
     fill: "none",
     stroke: "currentColor",
-    strokeWidth: stroke,
+    strokeWidth: 1.8,
     strokeLinecap: "round" as const,
     strokeLinejoin: "round" as const,
   };
 
-  const icons: Record<string, ReactNode> = {
-    plus: (
-      <svg {...common}>
-        <path d="M12 5v14M5 12h14" />
-      </svg>
-    ),
+  switch (name) {
+    case "plus":
+      return (
+        <svg {...common}>
+          <path d="M12 5v14M5 12h14" />
+        </svg>
+      );
 
-    search: (
-      <svg {...common}>
-        <circle cx="11" cy="11" r="7" />
-        <path d="m20 20-4-4" />
-      </svg>
-    ),
+    case "search":
+      return (
+        <svg {...common}>
+          <circle cx="11" cy="11" r="7" />
+          <path d="m20 20-4-4" />
+        </svg>
+      );
 
-    menu: (
-      <svg {...common}>
-        <path d="M4 6h16M4 12h16M4 18h16" />
-      </svg>
-    ),
+    case "menu":
+      return (
+        <svg {...common}>
+          <path d="M4 6h16M4 12h16M4 18h16" />
+        </svg>
+      );
 
-    close: (
-      <svg {...common}>
-        <path d="m6 6 12 12M18 6 6 18" />
-      </svg>
-    ),
+    case "more":
+      return (
+        <svg {...common}>
+          <circle cx="5" cy="12" r="1" fill="currentColor" />
+          <circle cx="12" cy="12" r="1" fill="currentColor" />
+          <circle cx="19" cy="12" r="1" fill="currentColor" />
+        </svg>
+      );
 
-    chat: (
-      <svg {...common}>
-        <path d="M20 11.5a7.5 7.5 0 0 1-8 7.5 8.4 8.4 0 0 1-3.6-.8L4 20l1.2-3.7A7.3 7.3 0 0 1 4 11.5 7.5 7.5 0 0 1 12 4a7.5 7.5 0 0 1 8 7.5Z" />
-      </svg>
-    ),
+    case "archive":
+      return (
+        <svg {...common}>
+          <path d="M4 7h16v13H4z" />
+          <path d="M3 4h18v3H3zM9 11h6" />
+        </svg>
+      );
 
-    archive: (
-      <svg {...common}>
-        <path d="M4 7h16v13H4z" />
-        <path d="M3 4h18v3H3zM9 11h6" />
-      </svg>
-    ),
+    case "trash":
+      return (
+        <svg {...common}>
+          <path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" />
+        </svg>
+      );
 
-    restore: (
-      <svg {...common}>
-        <path d="M4 7h16v13H4z" />
-        <path d="M3 4h18v3H3zM9 13h6" />
-        <path d="M12 10v6" />
-      </svg>
-    ),
+    case "edit":
+      return (
+        <svg {...common}>
+          <path d="M12 20h9" />
+          <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z" />
+        </svg>
+      );
 
-    trash: (
-      <svg {...common}>
-        <path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" />
-      </svg>
-    ),
+    case "copy":
+      return (
+        <svg {...common}>
+          <rect x="9" y="9" width="11" height="11" rx="2" />
+          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+        </svg>
+      );
 
-    edit: (
-      <svg {...common}>
-        <path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17l-1 3Z" />
-        <path d="m14 7 3 3" />
-      </svg>
-    ),
+    case "refresh":
+      return (
+        <svg {...common}>
+          <path d="M20 11a8 8 0 0 0-14.9-4L3 10" />
+          <path d="M3 5v5h5" />
+          <path d="M4 13a8 8 0 0 0 14.9 4L21 14" />
+          <path d="M21 19v-5h-5" />
+        </svg>
+      );
 
-    copy: (
-      <svg {...common}>
-        <rect x="8" y="8" width="12" height="12" rx="2" />
-        <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
-      </svg>
-    ),
+    case "send":
+      return (
+        <svg {...common}>
+          <path d="m22 2-7 20-4-9-9-4Z" />
+          <path d="M22 2 11 13" />
+        </svg>
+      );
 
-    refresh: (
-      <svg {...common}>
-        <path d="M20 11a8 8 0 0 0-14.9-3M4 5v4h4M4 13a8 8 0 0 0 14.9 3M20 19v-4h-4" />
-      </svg>
-    ),
+    case "paperclip":
+      return (
+        <svg {...common}>
+          <path d="m21.4 11.6-8.9 8.9a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7L9.7 17.7a2 2 0 1 1-2.8-2.8l8.5-8.5" />
+        </svg>
+      );
 
-    send: (
-      <svg {...common}>
-        <path d="m4 4 17 8-17 8 3-8-3-8Z" />
-        <path d="M7 12h14" />
-      </svg>
-    ),
+    case "x":
+      return (
+        <svg {...common}>
+          <path d="m6 6 12 12M18 6 6 18" />
+        </svg>
+      );
 
-    paperclip: (
-      <svg {...common}>
-        <path d="m21 11.5-8.7 8.7a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.3 9.3a2 2 0 0 1-2.8-2.8l8.4-8.4" />
-      </svg>
-    ),
+    case "sun":
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="4" />
+          <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+        </svg>
+      );
 
-    folder: (
-      <svg {...common}>
-        <path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
-      </svg>
-    ),
+    case "moon":
+      return (
+        <svg {...common}>
+          <path d="M21 12.8A8.5 8.5 0 1 1 11.2 3 6.6 6.6 0 0 0 21 12.8Z" />
+        </svg>
+      );
 
-    moon: (
-      <svg {...common}>
-        <path d="M20 15.5A8.5 8.5 0 0 1 8.5 4 8.5 8.5 0 1 0 20 15.5Z" />
-      </svg>
-    ),
+    case "credit":
+      return (
+        <svg {...common}>
+          <rect x="3" y="5" width="18" height="14" rx="2" />
+          <path d="M3 10h18M7 15h4" />
+        </svg>
+      );
 
-    sun: (
-      <svg {...common}>
-        <circle cx="12" cy="12" r="4" />
-        <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
-      </svg>
-    ),
+    case "bot":
+      return (
+        <svg {...common}>
+          <rect x="4" y="7" width="16" height="13" rx="3" />
+          <path d="M12 3v4M8 13h.01M16 13h.01M9 17h6" />
+        </svg>
+      );
 
-    more: (
-      <svg {...common}>
-        <circle cx="5" cy="12" r="1" fill="currentColor" />
-        <circle cx="12" cy="12" r="1" fill="currentColor" />
-        <circle cx="19" cy="12" r="1" fill="currentColor" />
-      </svg>
-    ),
+    case "spark":
+      return (
+        <svg {...common}>
+          <path d="m12 2 1.7 6.3L20 10l-6.3 1.7L12 18l-1.7-6.3L4 10l6.3-1.7Z" />
+          <path d="m19 16 .7 2.3L22 19l-2.3.7L19 22l-.7-2.3L16 19l2.3-.7Z" />
+        </svg>
+      );
 
-    user: (
-      <svg {...common}>
-        <circle cx="12" cy="8" r="4" />
-        <path d="M4 21a8 8 0 0 1 16 0" />
-      </svg>
-    ),
+    case "message":
+      return (
+        <svg {...common}>
+          <path d="M20 11.5a7.5 7.5 0 0 1-8 7.5 8.4 8.4 0 0 1-4-.9L3 20l1.9-4A7.2 7.2 0 0 1 4.5 12 7.5 7.5 0 0 1 12 4.5a7.5 7.5 0 0 1 8 7Z" />
+        </svg>
+      );
 
-    sparkles: (
-      <svg {...common}>
-        <path d="m12 3 1.3 4.7L18 9l-4.7 1.3L12 15l-1.3-4.7L6 9l4.7-1.3Z" />
-        <path d="m19 15 .7 2.3L22 18l-2.3.7L19 21l-.7-2.3L16 18l2.3-.7Z" />
-      </svg>
-    ),
+    case "check":
+      return (
+        <svg {...common}>
+          <path d="m5 12 4 4L19 6" />
+        </svg>
+      );
 
-    image: (
-      <svg {...common}>
-        <rect x="3" y="3" width="18" height="18" rx="3" />
-        <circle cx="8.5" cy="8.5" r="1.5" />
-        <path d="m21 15-5-5L5 21" />
-      </svg>
-    ),
+    case "folder":
+      return (
+        <svg {...common}>
+          <path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
+        </svg>
+      );
 
-    globe: (
-      <svg {...common}>
-        <circle cx="12" cy="12" r="9" />
-        <path d="M3 12h18M12 3c3 3.2 3 14.8 0 18M12 3c-3 3.2-3 14.8 0 18" />
-      </svg>
-    ),
+    case "globe":
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="9" />
+          <path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" />
+        </svg>
+      );
 
-    mic: (
-      <svg {...common}>
-        <rect x="9" y="3" width="6" height="11" rx="3" />
-        <path d="M5 11a7 7 0 0 0 14 0M12 18v3M8 21h8" />
-      </svg>
-    ),
-
-    video: (
-      <svg {...common}>
-        <rect x="3" y="5" width="13" height="14" rx="2" />
-        <path d="m16 10 5-3v10l-5-3" />
-      </svg>
-    ),
-
-    check: (
-      <svg {...common}>
-        <path d="m5 12 4 4L19 6" />
-      </svg>
-    ),
-
-    chevron: (
-      <svg {...common}>
-        <path d="m6 9 6 6 6-6" />
-      </svg>
-    ),
-
-    dollar: (
-      <svg {...common}>
-        <circle cx="12" cy="12" r="9" />
-        <path d="M15 8.5c-.8-.7-1.8-1-3-1-1.7 0-3 .9-3 2.2 0 3.4 6 1.7 6 5 0 1.3-1.2 2.3-3 2.3-1.3 0-2.5-.4-3.3-1.2M12 5v14" />
-      </svg>
-    ),
-
-    zap: (
-      <svg {...common}>
-        <path d="m13 2-9 12h7l-1 8 9-12h-7l1-8Z" />
-      </svg>
-    ),
-  };
-
-  return icons[name] ?? null;
-}
-
-/* =========================================================
-   HELPERS
-========================================================= */
-
-function formatCredits(value: number) {
-  if (!Number.isFinite(value)) return "0";
-  if (value >= 1_000_000) {
-    return `${(value / 1_000_000).toFixed(1)}M`;
-  }
-  if (value >= 1_000) {
-    return `${(value / 1_000).toFixed(1)}K`;
-  }
-  return Math.floor(value).toLocaleString();
-}
-
-function formatFileSize(size: number) {
-  if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
-  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function featureIcon(feature: string) {
-  switch (feature) {
-    case "chat":
-      return "chat";
-    case "website_builder":
-      return "globe";
-    case "image_generator":
-      return "image";
-    case "video_generator":
-      return "video";
-    case "voice_generator":
-      return "mic";
     default:
-      return "sparkles";
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="9" />
+        </svg>
+      );
   }
 }
-
-function getFeatureLabel(feature: string) {
-  switch (feature) {
-    case "chat":
-      return "AI Chat";
-    case "website_builder":
-      return "Website Builder";
-    case "image_generator":
-      return "Image Generator";
-    case "video_generator":
-      return "Video Generator";
-    case "voice_generator":
-      return "Voice Generator";
-    default:
-      return feature;
-  }
-}
-
-/* =========================================================
-   COMPONENT
-========================================================= */
 
 export default function HomePage() {
-  const supabase = useMemo(() => createClient(), []);
+  const router = useRouter();
 
-  const [user, setUser] = useState<any>(null);
+  const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
 
   const [chats, setChats] = useState<Chat[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [activeChat, setActiveChat] = useState<string | null>(null);
+  const [activeChat, setActiveChat] = useState<Chat | null>(null);
 
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [sidebar, setSidebar] = useState(true);
 
+  const [sidebar, setSidebar] = useState(true);
   const [archiveOpen, setArchiveOpen] = useState(false);
-  const [menuOpen, setMenuOpen] = useState<string | null>(null);
+
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [renameId, setRenameId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
 
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingValue, setEditingValue] = useState("");
 
   const [attachments, setAttachments] = useState<Attachment[]>([]);
-  const [uploading, setUploading] = useState(false);
-
   const [lightMode, setLightMode] = useState(false);
 
   const [agentOpen, setAgentOpen] = useState(false);
-  const [selectedAgent, setSelectedAgent] = useState("chat");
-
   const [creditsOpen, setCreditsOpen] = useState(false);
+
   const [featureCredits, setFeatureCredits] = useState<FeatureCredit[]>([]);
   const [creditsLoading, setCreditsLoading] = useState(false);
 
+  const [searchValue, setSearchValue] = useState("");
+
   const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [searchText, setSearchText] = useState("");
 
-  const fileInput = useRef<HTMLInputElement>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [errorMessage, setErrorMessage] = useState("");
 
-  /* =========================================================
-     DERIVED
-  ========================================================= */
+  const fileInput = useRef<HTMLInputElement | null>(null);
+  const bottomRef = useRef<HTMLDivElement | null>(null);
+  const mountedRef = useRef(true);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
-  const activeChats = useMemo(() => {
-    const filtered = chats.filter((chat) => !chat.archived);
-
-    if (!searchText.trim()) return filtered;
-
-    return filtered.filter((chat) =>
-      chat.title.toLowerCase().includes(searchText.toLowerCase())
-    );
-  }, [chats, searchText]);
+  const activeChats = useMemo(
+    () =>
+      chats.filter(
+        (chat) =>
+          !chat.archived &&
+          chat.title.toLowerCase().includes(searchValue.toLowerCase())
+      ),
+    [chats, searchValue]
+  );
 
   const archivedChats = useMemo(
-    () => chats.filter((chat) => chat.archived),
-    [chats]
+    () =>
+      chats.filter((chat) =>
+        chat.title.toLowerCase().includes(searchValue.toLowerCase())
+      ),
+    [chats, searchValue]
   );
+
+  const chatCredits = useMemo(() => {
+    const chat = featureCredits.find((item) => item.feature_key === "chat");
+    return Number(chat?.balance || 0);
+  }, [featureCredits]);
 
   const totalCredits = useMemo(
     () =>
       featureCredits.reduce(
-        (sum, item) => sum + Number(item.balance || 0),
+        (total, item) => total + Number(item.balance || 0),
         0
       ),
     [featureCredits]
   );
 
-  const allocatedCredits = useMemo(
+  const totalGranted = useMemo(
     () =>
       featureCredits.reduce(
-        (sum, item) => sum + Number(item.total_granted || 0),
+        (total, item) => total + Number(item.total_granted || 0),
         0
       ),
     [featureCredits]
   );
 
-  const usedCredits = useMemo(
+  const totalUsed = useMemo(
     () =>
       featureCredits.reduce(
-        (sum, item) => sum + Number(item.total_used || 0),
+        (total, item) => total + Number(item.total_used || 0),
         0
       ),
     [featureCredits]
   );
-
-  const chatCredits =
-    featureCredits.find((item) => item.feature_key === "chat")?.balance ?? 0;
-
-  /* =========================================================
-     THEME
-  ========================================================= */
 
   useEffect(() => {
-    document.documentElement.classList.toggle("zuqen-light", lightMode);
+    mountedRef.current = true;
+
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("light", lightMode);
   }, [lightMode]);
 
-  /* =========================================================
-     LOAD CREDITS
-  ========================================================= */
-
-  async function loadFeatureCredits(userId: string) {
+  const loadFeatureCredits = useCallback(async (userId: string) => {
     try {
       setCreditsLoading(true);
 
@@ -438,114 +394,118 @@ export default function HomePage() {
         .eq("user_id", userId);
 
       if (error) {
-        console.error("Credits error:", error);
+        console.error("Failed to load feature credits:", error);
         return;
       }
 
-      const normalized: FeatureCredit[] = (data ?? []).map((item: any) => ({
-        feature_key: item.feature_key,
-        feature_name:
-          item.provider_features?.feature_name ??
-          getFeatureLabel(item.feature_key),
-        provider: item.provider_features?.provider ?? "",
-        balance: Number(item.balance ?? 0),
-        total_granted: Number(item.total_granted ?? 0),
-        total_used: Number(item.total_used ?? 0),
-      }));
-
-      setFeatureCredits(normalized);
+      if (mountedRef.current) {
+        setFeatureCredits((data || []) as FeatureCredit[]);
+      }
+    } catch (error) {
+      console.error("loadFeatureCredits error:", error);
     } finally {
-      setCreditsLoading(false);
+      if (mountedRef.current) {
+        setCreditsLoading(false);
+      }
     }
-  }
+  }, []);
 
-  /* =========================================================
-     LOAD CHATS
-  ========================================================= */
-
-  async function loadChats(userId: string) {
-    const { data, error } = await supabase
-      .from("ZUQEN_chats")
-      .select("*")
-      .eq("user_id", userId)
-      .order("updated_at", { ascending: false });
-
-    if (error) {
-      console.error("Chats error:", error);
-      return;
-    }
-
-    setChats((data ?? []) as Chat[]);
-  }
-
-  /* =========================================================
-     AUTH
-  ========================================================= */
-
-  useEffect(() => {
-    let mounted = true;
-
-   async function initializeUser() {
-  try {
-    const {
-      data: { user: currentUser },
-    } = await supabase.auth.getUser();
-
-    let finalUser = currentUser;
-
-    if (!finalUser) {
-      const { data, error } = await supabase.auth.signInAnonymously();
+  const loadChats = useCallback(async (userId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from("chats")
+        .select("*")
+        .eq("user_id", userId)
+        .order("updated_at", { ascending: false });
 
       if (error) {
-        console.error("Anonymous auth failed:", error);
+        console.error("Failed to load chats:", error);
+        setErrorMessage(error.message);
         return;
       }
 
-      if (!data.user) {
-        console.error("Anonymous user was not created.");
-        return;
+      if (mountedRef.current) {
+        setChats((data || []) as Chat[]);
       }
-
-      finalUser = data.user;
+    } catch (error) {
+      console.error("loadChats error:", error);
     }
+  }, []);
 
-    if (!finalUser) {
-      console.error("No authenticated user found.");
-      return;
+  useEffect(() => {
+    let active = true;
+
+    async function initializeUser() {
+      try {
+        const {
+          data: { user: currentUser },
+          error: userError,
+        } = await supabase.auth.getUser();
+
+        if (userError) {
+          console.error("Failed to get current user:", userError);
+        }
+
+        let finalUser = currentUser;
+
+        if (!finalUser) {
+          const { data, error } =
+            await supabase.auth.signInAnonymously();
+
+          if (error || !data.user) {
+            console.error("Anonymous auth failed:", error);
+            setErrorMessage(
+              "Authentication failed. Please check Supabase Anonymous Auth."
+            );
+            return;
+          }
+
+          finalUser = data.user;
+        }
+
+        if (!active) return;
+
+        setUser(finalUser);
+
+        const userId = finalUser.id;
+
+        await Promise.all([
+          loadChats(userId),
+          loadFeatureCredits(userId),
+        ]);
+      } catch (error) {
+        console.error("initializeUser error:", error);
+        setErrorMessage("Unable to initialize ZUQEN AI.");
+      } finally {
+        if (active) {
+          setAuthReady(true);
+        }
+      }
     }
-
-    if (!mounted) return;
-
-    setUser(finalUser);
-
-    await Promise.all([
-      loadChats(finalUser.id),
-      loadFeatureCredits(finalUser.id),
-    ]);
-  } catch (error) {
-    console.error("User initialization failed:", error);
-  } finally {
-    if (mounted) {
-      setAuthReady(true);
-    }
-  }
-}
 
     initializeUser();
 
     return () => {
-      mounted = false;
+      active = false;
     };
-  }, [supabase]);
-
-  /* =========================================================
-     GLOBAL CLICK
-  ========================================================= */
+  }, [loadChats, loadFeatureCredits]);
 
   useEffect(() => {
-    function closeMenus() {
-      setMenuOpen(null);
-    }
+    const closeMenus = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+
+      if (!target.closest(".chat-menu-wrapper")) {
+        setOpenMenuId(null);
+      }
+
+      if (!target.closest(".agent-wrapper")) {
+        setAgentOpen(false);
+      }
+
+      if (!target.closest(".credits-wrapper")) {
+        setCreditsOpen(false);
+      }
+    };
 
     document.addEventListener("click", closeMenus);
 
@@ -554,138 +514,152 @@ export default function HomePage() {
     };
   }, []);
 
-  /* =========================================================
-     SCROLL
-  ========================================================= */
-
   useEffect(() => {
     bottomRef.current?.scrollIntoView({
       behavior: "smooth",
     });
   }, [messages, loading]);
 
-  /* =========================================================
-     AUTO RESIZE
-  ========================================================= */
-
-  useEffect(() => {
+  const autoResize = () => {
     const textarea = textareaRef.current;
+
     if (!textarea) return;
 
     textarea.style.height = "auto";
-    textarea.style.height = `${Math.min(textarea.scrollHeight, 240)}px`;
-  }, [input]);
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 220)}px`;
+  };
 
-  /* =========================================================
-     CHAT FUNCTIONS
-  ========================================================= */
+  const saveChatMessages = async (
+    chatId: string,
+    userId: string,
+    nextMessages: Message[]
+  ) => {
+    const { error } = await supabase
+      .from("chats")
+      .update({
+        messages: nextMessages,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", chatId)
+      .eq("user_id", userId);
 
-  async function createChat() {
+    if (error) {
+      console.error("Failed to save messages:", error);
+      throw error;
+    }
+  };
+
+  const createChat = async (firstMessage = "") => {
     if (!user) return null;
 
-    const title = "New conversation";
+    const title =
+      firstMessage.trim().slice(0, 55) || "New conversation";
+
+    const now = new Date().toISOString();
 
     const { data, error } = await supabase
-      .from("ZUQEN_chats")
+      .from("chats")
       .insert({
         user_id: user.id,
         title,
         archived: false,
+        messages: [],
+        created_at: now,
+        updated_at: now,
       })
-      .select()
+      .select("*")
       .single();
 
     if (error) {
-      console.error("Create chat error:", error);
+      console.error("Failed to create chat:", error);
+      setErrorMessage(error.message);
       return null;
     }
 
     const newChat = data as Chat;
 
-    setChats((prev) => [newChat, ...prev]);
-    setActiveChat(newChat.id);
+    setChats((previous) => [newChat, ...previous]);
+    setActiveChat(newChat);
     setMessages([]);
-    setInput("");
-    setEditingId(null);
-    setAttachments([]);
-    setArchiveOpen(false);
 
     return newChat;
-  }
+  };
 
-  async function openChat(chatId: string) {
-    setActiveChat(chatId);
-    setMenuOpen(null);
+  const openChat = async (chat: Chat) => {
+    setOpenMenuId(null);
+    setRenameId(null);
     setEditingId(null);
+    setErrorMessage("");
+
+    setActiveChat(chat);
+
+    const storedMessages = Array.isArray(chat.messages)
+      ? chat.messages
+      : [];
+
+    setMessages(storedMessages);
     setInput("");
-    setAttachments([]);
+  };
 
-    const { data, error } = await supabase
-      .from("ZUQEN_messages")
-      .select("*")
-      .eq("chat_id", chatId)
-      .order("created_at", { ascending: true });
+  const archiveChat = async (chatId: string) => {
+    if (!user) return;
 
-    if (error) {
-      console.error("Messages error:", error);
-      return;
-    }
-
-    setMessages((data ?? []) as Message[]);
-  }
-
-  async function archiveChat(chatId: string) {
     const { error } = await supabase
-      .from("ZUQEN_chats")
+      .from("chats")
       .update({
         archived: true,
         updated_at: new Date().toISOString(),
       })
-      .eq("id", chatId);
+      .eq("id", chatId)
+      .eq("user_id", user.id);
 
     if (error) {
       console.error(error);
       return;
     }
 
-    setChats((prev) =>
-      prev.map((chat) =>
-        chat.id === chatId ? { ...chat, archived: true } : chat
+    setChats((previous) =>
+      previous.map((chat) =>
+        chat.id === chatId
+          ? { ...chat, archived: true }
+          : chat
       )
     );
 
-    if (activeChat === chatId) {
-      setActiveChat(null);
-      setMessages([]);
-    }
+    setOpenMenuId(null);
+  };
 
-    setMenuOpen(null);
-  }
+  const restoreChat = async (chatId: string) => {
+    if (!user) return;
 
-  async function restoreChat(chatId: string) {
     const { error } = await supabase
-      .from("ZUQEN_chats")
+      .from("chats")
       .update({
         archived: false,
         updated_at: new Date().toISOString(),
       })
-      .eq("id", chatId);
+      .eq("id", chatId)
+      .eq("user_id", user.id);
 
     if (error) {
       console.error(error);
       return;
     }
 
-    setChats((prev) =>
-      prev.map((chat) =>
-        chat.id === chatId ? { ...chat, archived: false } : chat
+    setChats((previous) =>
+      previous.map((chat) =>
+        chat.id === chatId
+          ? { ...chat, archived: false }
+          : chat
       )
     );
 
-    setMenuOpen(null);
-  }
+    setOpenMenuId(null);
+  };
 
-  async function deleteChat(chatId: string) {
+  const deleteChat = async (chatId: string) => {
+    if (!user) return;
+
     const confirmed = window.confirm(
       "Delete this conversation permanently?"
     );
@@ -693,1341 +667,1568 @@ export default function HomePage() {
     if (!confirmed) return;
 
     const { error } = await supabase
-      .from("ZUQEN_chats")
+      .from("chats")
       .delete()
-      .eq("id", chatId);
+      .eq("id", chatId)
+      .eq("user_id", user.id);
 
     if (error) {
       console.error(error);
+      setErrorMessage(error.message);
       return;
     }
 
-    setChats((prev) => prev.filter((chat) => chat.id !== chatId));
+    setChats((previous) =>
+      previous.filter((chat) => chat.id !== chatId)
+    );
 
-    if (activeChat === chatId) {
+    if (activeChat?.id === chatId) {
       setActiveChat(null);
       setMessages([]);
     }
 
-    setMenuOpen(null);
-  }
+    setOpenMenuId(null);
+  };
 
-  async function renameChat(chatId: string) {
-    const chat = chats.find((item) => item.id === chatId);
-    if (!chat) return;
+  const startRename = (chat: Chat) => {
+    setRenameId(chat.id);
+    setRenameValue(chat.title);
+    setOpenMenuId(null);
+  };
 
-    const title = window.prompt(
-      "Rename conversation",
-      chat.title
-    );
+  const saveRename = async () => {
+    if (!user || !renameId) return;
 
-    if (!title?.trim()) return;
+    const title = renameValue.trim();
 
-    const cleanTitle = title.trim();
+    if (!title) return;
 
     const { error } = await supabase
-      .from("ZUQEN_chats")
+      .from("chats")
       .update({
-        title: cleanTitle,
+        title,
         updated_at: new Date().toISOString(),
       })
-      .eq("id", chatId);
+      .eq("id", renameId)
+      .eq("user_id", user.id);
 
     if (error) {
       console.error(error);
+      setErrorMessage(error.message);
       return;
     }
 
-    setChats((prev) =>
-      prev.map((item) =>
-        item.id === chatId
-          ? {
-              ...item,
-              title: cleanTitle,
-              updated_at: new Date().toISOString(),
-            }
-          : item
+    setChats((previous) =>
+      previous.map((chat) =>
+        chat.id === renameId
+          ? { ...chat, title }
+          : chat
       )
     );
 
-    setMenuOpen(null);
-  }
+    if (activeChat?.id === renameId) {
+      setActiveChat((previous) =>
+        previous ? { ...previous, title } : previous
+      );
+    }
 
-  /* =========================================================
-     FILES
-  ========================================================= */
+    setRenameId(null);
+    setRenameValue("");
+  };
 
-  function handleFileChange(e: ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(e.target.files ?? []);
+  const handleFileChange = (
+    event: ChangeEvent<HTMLInputElement>
+  ) => {
+    const files = Array.from(event.target.files || []);
 
-    if (!files.length) return;
-
-    const mapped: Attachment[] = files.map((file) => ({
+    const newAttachments: Attachment[] = files.map((file) => ({
+      id: makeId(),
       name: file.name,
       type: file.type,
       size: file.size,
-      url: URL.createObjectURL(file),
     }));
 
-    setAttachments((prev) => [...prev, ...mapped]);
-    e.target.value = "";
-  }
+    setAttachments((previous) => [
+      ...previous,
+      ...newAttachments,
+    ]);
 
-  function removeAttachment(index: number) {
-    setAttachments((prev) => prev.filter((_, i) => i !== index));
-  }
+    event.target.value = "";
+  };
 
-  /* =========================================================
-     COPY
-  ========================================================= */
+  const removeAttachment = (id: string) => {
+    setAttachments((previous) =>
+      previous.filter((item) => item.id !== id)
+    );
+  };
 
-  async function copyMessage(message: Message) {
-    try {
-      await navigator.clipboard.writeText(message.content);
+  const extractStreamText = (parsed: any): string => {
+    if (!parsed) return "";
 
-      setCopiedId(message.id);
-
-      setTimeout(() => {
-        setCopiedId(null);
-      }, 1500);
-    } catch (error) {
-      console.error(error);
+    if (typeof parsed.content === "string") {
+      return parsed.content;
     }
-  }
 
-  /* =========================================================
-     EDIT
-  ========================================================= */
+    if (typeof parsed.delta === "string") {
+      return parsed.delta;
+    }
 
-  function editMessage(message: Message) {
-    setEditingId(message.id);
-    setInput(message.content);
+    if (typeof parsed.text === "string") {
+      return parsed.text;
+    }
 
-    setTimeout(() => {
-      textareaRef.current?.focus();
-    }, 50);
-  }
+    if (
+      typeof parsed.message?.content === "string"
+    ) {
+      return parsed.message.content;
+    }
 
-  function cancelEdit() {
-    setEditingId(null);
-    setInput("");
-  }
+    if (
+      typeof parsed.choices?.[0]?.delta?.content ===
+      "string"
+    ) {
+      return parsed.choices[0].delta.content;
+    }
 
-  /* =========================================================
-     STREAM AI
-  ========================================================= */
+    if (
+      typeof parsed.choices?.[0]?.message?.content ===
+      "string"
+    ) {
+      return parsed.choices[0].message.content;
+    }
 
-  async function streamAI(
-    chatId: string,
-    conversationMessages: Message[],
-    requestAttachments: Attachment[] = []
-  ) {
-    if (!user) return;
+    return "";
+  };
 
-    const tempAssistantId = `assistant-${Date.now()}`;
+  const readStreamingResponse = async (
+    response: Response,
+    onText: (text: string) => void
+  ) => {
+    if (!response.body) {
+      throw new Error("Streaming response is unavailable.");
+    }
 
-    setLoading(true);
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
 
-    const temporaryAssistant: Message = {
-      id: tempAssistantId,
-      chat_id: chatId,
+    let buffer = "";
+
+    while (true) {
+      const { value, done } = await reader.read();
+
+      if (done) break;
+
+      buffer += decoder.decode(value, {
+        stream: true,
+      });
+
+      const lines = buffer.split("\n");
+
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+
+        if (!trimmed.startsWith("data:")) {
+          continue;
+        }
+
+        const raw = trimmed.slice(5).trim();
+
+        if (!raw || raw === "[DONE]") {
+          continue;
+        }
+
+        try {
+          const parsed = JSON.parse(raw);
+
+          const text = extractStreamText(parsed);
+
+          if (text) {
+            onText(text);
+          }
+        } catch {
+          // Ignore incomplete/non-JSON SSE lines.
+        }
+      }
+    }
+
+    if (buffer.trim().startsWith("data:")) {
+      const raw = buffer.trim().slice(5).trim();
+
+      if (raw && raw !== "[DONE]") {
+        try {
+          const parsed = JSON.parse(raw);
+          const text = extractStreamText(parsed);
+
+          if (text) {
+            onText(text);
+          }
+        } catch {
+          // Ignore final malformed SSE fragment.
+        }
+      }
+    }
+  };
+
+  const sendToAI = async (
+    chat: Chat,
+    conversation: Message[]
+  ) => {
+    const response = await fetch("/api/chat", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        chatId: chat.id,
+        messages: conversation.map((message) => ({
+          role: message.role,
+          content: message.content,
+          attachments: message.attachments || [],
+        })),
+      }),
+    });
+
+    if (!response.ok) {
+      let message = "ZUQEN AI request failed.";
+
+      try {
+        const json = await response.json();
+
+        if (json?.error) {
+          message = json.error;
+        }
+      } catch {
+        // Keep default error.
+      }
+
+      throw new Error(message);
+    }
+
+    let assistantText = "";
+
+    const assistantId = makeId();
+
+    const initialAssistant: Message = {
+      id: assistantId,
       role: "assistant",
       content: "",
-      attachments: null,
       created_at: new Date().toISOString(),
     };
 
-    setMessages((prev) => [...prev, temporaryAssistant]);
+    setMessages((previous) => [
+      ...previous,
+      initialAssistant,
+    ]);
 
-    try {
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          chatId,
-          messages: conversationMessages.map((message) => ({
-            role: message.role,
-            content: message.content,
-            attachments: message.attachments ?? [],
-          })),
-          attachments: requestAttachments,
-          agent: selectedAgent,
-        }),
-      });
+    await readStreamingResponse(response, (text) => {
+      assistantText += text;
 
-      if (!response.ok) {
-        const errorText = await response.text();
-
-        throw new Error(
-          errorText || `Request failed with ${response.status}`
-        );
-      }
-
-      if (!response.body) {
-        throw new Error("No response stream received.");
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-
-      let buffer = "";
-      let assistantText = "";
-
-      while (true) {
-        const { value, done } = await reader.read();
-
-        if (done) break;
-
-        buffer += decoder.decode(value, {
-          stream: true,
-        });
-
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-
-        for (const line of lines) {
-          const trimmed = line.trim();
-
-          if (!trimmed.startsWith("data:")) continue;
-
-          const payload = trimmed.replace(/^data:\s*/, "");
-
-          if (!payload || payload === "[DONE]") continue;
-
-          try {
-            const parsed = JSON.parse(payload);
-
-            const delta =
-              parsed.content ??
-              parsed.delta ??
-              parsed.text ??
-              parsed.message?.content ??
-              "";
-
-            if (typeof delta === "string" && delta.length) {
-              assistantText += delta;
-
-              setMessages((prev) =>
-                prev.map((message) =>
-                  message.id === tempAssistantId
-                    ? {
-                        ...message,
-                        content: assistantText,
-                      }
-                    : message
-                )
-              );
-            }
-          } catch {
-            /*
-             Some providers may send non-JSON SSE lines.
-             Ignore those safely.
-            */
-          }
-        }
-      }
-
-      if (!assistantText.trim()) {
-        throw new Error("ZUQEN AI returned an empty response.");
-      }
-
-      const { data: savedAssistant, error: saveError } =
-        await supabase
-          .from("ZUQEN_messages")
-          .insert({
-            chat_id: chatId,
-            role: "assistant",
-            content: assistantText,
-            attachments: null,
-          })
-          .select()
-          .single();
-
-      if (saveError) {
-        console.error("Save assistant message:", saveError);
-      }
-
-      setMessages((prev) =>
-        prev.map((message) =>
-          message.id === tempAssistantId
-            ? savedAssistant
-              ? (savedAssistant as Message)
-              : {
-                  ...message,
-                  content: assistantText,
-                }
+      setMessages((previous) =>
+        previous.map((message) =>
+          message.id === assistantId
+            ? {
+                ...message,
+                content: assistantText,
+              }
             : message
         )
       );
+    });
 
-      await supabase
-        .from("ZUQEN_chats")
-        .update({
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", chatId);
+    if (!assistantText.trim()) {
+      throw new Error(
+        "ZUQEN AI returned an empty response."
+      );
+    }
+
+    return {
+      ...initialAssistant,
+      content: assistantText,
+    };
+  };
+
+  const sendMessage = async () => {
+    const text = input.trim();
+
+    if (!text || loading || !user) return;
+
+    setErrorMessage("");
+    setLoading(true);
+
+    try {
+      let chat = activeChat;
+
+      if (!chat) {
+        chat = await createChat(text);
+
+        if (!chat) {
+          throw new Error(
+            "Unable to create a conversation."
+          );
+        }
+      }
+
+      const userMessage: Message = {
+        id: makeId(),
+        role: "user",
+        content: text,
+        created_at: new Date().toISOString(),
+        attachments:
+          attachments.length > 0
+            ? attachments
+            : undefined,
+      };
+
+      const conversation = [
+        ...messages,
+        userMessage,
+      ];
+
+      setMessages(conversation);
+      setInput("");
+      setAttachments([]);
+
+      if (textareaRef.current) {
+        textareaRef.current.style.height = "auto";
+      }
+
+      // Save user's message immediately.
+      // This prevents the prompt from disappearing
+      // if the AI request fails.
+      await saveChatMessages(
+        chat.id,
+        user.id,
+        conversation
+      );
+
+      if (
+        chat.title === "New conversation" ||
+        !chat.title.trim()
+      ) {
+        const newTitle =
+          text.slice(0, 55) || "New conversation";
+
+        await supabase
+          .from("chats")
+          .update({
+            title: newTitle,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", chat.id)
+          .eq("user_id", user.id);
+
+        chat = {
+          ...chat,
+          title: newTitle,
+        };
+
+        setActiveChat(chat);
+
+        setChats((previous) =>
+          previous.map((item) =>
+            item.id === chat!.id
+              ? { ...item, title: newTitle }
+              : item
+          )
+        );
+      }
+
+      const assistantMessage = await sendToAI(
+        chat,
+        conversation
+      );
+
+      const finalMessages = [
+        ...conversation,
+        assistantMessage,
+      ];
+
+      setMessages(finalMessages);
+
+      // Save BOTH user + AI message together.
+      await saveChatMessages(
+        chat.id,
+        user.id,
+        finalMessages
+      );
 
       await Promise.all([
         loadChats(user.id),
         loadFeatureCredits(user.id),
       ]);
-    } catch (error: any) {
-      console.error("ZUQEN AI error:", error);
+    } catch (error) {
+      console.error("sendMessage error:", error);
 
-      setMessages((prev) =>
-        prev.map((message) =>
-          message.id === tempAssistantId
-            ? {
-                ...message,
-                content:
-                  "Sorry, ZUQEN AI couldn't complete this request. Please try again.",
-              }
-            : message
-        )
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Something went wrong.";
+
+      setErrorMessage(message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const copyMessage = async (message: Message) => {
+    try {
+      await navigator.clipboard.writeText(
+        message.content
+      );
+
+      setCopiedId(message.id);
+
+      window.setTimeout(() => {
+        setCopiedId(null);
+      }, 1500);
+    } catch (error) {
+      console.error("Copy failed:", error);
+    }
+  };
+
+  const startEditMessage = (message: Message) => {
+    if (message.role !== "user") return;
+
+    setEditingId(message.id);
+    setEditingValue(message.content);
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setEditingValue("");
+  };
+
+  const saveEdit = async () => {
+    if (
+      !editingId ||
+      !user ||
+      !activeChat ||
+      loading
+    ) {
+      return;
+    }
+
+    const editedText = editingValue.trim();
+
+    if (!editedText) return;
+
+    const index = messages.findIndex(
+      (message) => message.id === editingId
+    );
+
+    if (index === -1) return;
+
+    setLoading(true);
+    setErrorMessage("");
+
+    try {
+      const editedMessage = {
+        ...messages[index],
+        content: editedText,
+      };
+
+      const conversation = [
+        ...messages.slice(0, index),
+        editedMessage,
+      ];
+
+      setMessages(conversation);
+      setEditingId(null);
+      setEditingValue("");
+
+      await saveChatMessages(
+        activeChat.id,
+        user.id,
+        conversation
+      );
+
+      const assistant = await sendToAI(
+        activeChat,
+        conversation
+      );
+
+      const finalMessages = [
+        ...conversation,
+        assistant,
+      ];
+
+      setMessages(finalMessages);
+
+      await saveChatMessages(
+        activeChat.id,
+        user.id,
+        finalMessages
+      );
+
+      await loadFeatureCredits(user.id);
+      await loadChats(user.id);
+    } catch (error) {
+      console.error("saveEdit error:", error);
+
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to edit message."
       );
     } finally {
       setLoading(false);
     }
-  }
+  };
 
-  /* =========================================================
-     SEND MESSAGE
-  ========================================================= */
+  const regenerate = async () => {
+    if (!activeChat || !user || loading) return;
 
-  async function sendMessage() {
-    const text = input.trim();
-
-    if (!text || loading || !user) return;
-
-    let chatId = activeChat;
-
-    if (!chatId) {
-      const created = await createChat();
-
-      if (!created) return;
-
-      chatId = created.id;
-    }
-
-    if (!chatId) return;
-
-    /* -------------------------------------------------------
-       EDIT MODE
-    ------------------------------------------------------- */
-
-    if (editingId) {
-      const editedMessage = messages.find(
-        (message) => message.id === editingId
-      );
-
-      if (!editedMessage) {
-        cancelEdit();
-        return;
-      }
-
-      const editedIndex = messages.findIndex(
-        (message) => message.id === editingId
-      );
-
-      const updatedConversation = messages
-        .slice(0, editedIndex + 1)
-        .map((message) =>
-          message.id === editingId
-            ? {
-                ...message,
-                content: text,
-              }
-            : message
-        );
-
-      const { error: updateError } = await supabase
-        .from("ZUQEN_messages")
-        .update({
-          content: text,
-        })
-        .eq("id", editingId);
-
-      if (updateError) {
-        console.error(updateError);
-        return;
-      }
-
-      const messagesAfterEdit = messages.slice(
-        editedIndex + 1
-      );
-
-      for (const message of messagesAfterEdit) {
-        await supabase
-          .from("ZUQEN_messages")
-          .delete()
-          .eq("id", message.id);
-      }
-
-      setMessages(updatedConversation);
-      setInput("");
-      setEditingId(null);
-
-      await streamAI(
-        chatId,
-        updatedConversation,
-        editedMessage.attachments ?? []
-      );
-
-      return;
-    }
-
-    /* -------------------------------------------------------
-       NEW USER MESSAGE
-    ------------------------------------------------------- */
-
-    const { data: savedMessage, error } = await supabase
-      .from("ZUQEN_messages")
-      .insert({
-        chat_id: chatId,
-        role: "user",
-        content: text,
-        attachments,
-      })
-      .select()
-      .single();
-
-    if (error) {
-      console.error("Save message error:", error);
-      return;
-    }
-
-    const userMessage = savedMessage as Message;
-
-    const nextMessages = [...messages, userMessage];
-
-    setMessages(nextMessages);
-    setInput("");
-    setAttachments([]);
-
-    await supabase
-      .from("ZUQEN_chats")
-      .update({
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", chatId);
-
-    const currentChat = chats.find(
-      (chat) => chat.id === chatId
-    );
-
-    if (
-      currentChat &&
-      currentChat.title === "New conversation"
-    ) {
-      const generatedTitle =
-        text.length > 45
-          ? `${text.slice(0, 45)}…`
-          : text;
-
-      await supabase
-        .from("ZUQEN_chats")
-        .update({
-          title: generatedTitle,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", chatId);
-
-      setChats((prev) =>
-        prev.map((chat) =>
-          chat.id === chatId
-            ? {
-                ...chat,
-                title: generatedTitle,
-              }
-            : chat
-        )
-      );
-    }
-
-    await streamAI(chatId, nextMessages, attachments);
-  }
-
-  /* =========================================================
-     REGENERATE
-  ========================================================= */
-
-  async function regenerate(message: Message) {
-    if (loading || !activeChat || !user) return;
-
-    const assistantIndex = messages.findIndex(
-      (item) => item.id === message.id
-    );
-
-    if (assistantIndex < 0) return;
-
-    const previousUserMessage = messages
-      .slice(0, assistantIndex)
+    const lastUserIndex = [...messages]
+      .map((message, index) => ({
+        message,
+        index,
+      }))
       .reverse()
-      .find((item) => item.role === "user");
+      .find(
+        ({ message }) => message.role === "user"
+      )?.index;
 
-    if (!previousUserMessage) return;
+    if (lastUserIndex === undefined) return;
 
-    await supabase
-      .from("ZUQEN_messages")
-      .delete()
-      .eq("id", message.id);
-
-    const conversation = messages.slice(0, assistantIndex);
-
-    setMessages(conversation);
-
-    await streamAI(
-      activeChat,
-      conversation,
-      previousUserMessage.attachments ?? []
+    const conversation = messages.slice(
+      0,
+      lastUserIndex + 1
     );
-  }
 
-  /* =========================================================
-     KEYBOARD
-  ========================================================= */
+    setLoading(true);
+    setErrorMessage("");
 
-  function handleKeyDown(
+    try {
+      setMessages(conversation);
+
+      await saveChatMessages(
+        activeChat.id,
+        user.id,
+        conversation
+      );
+
+      const assistant = await sendToAI(
+        activeChat,
+        conversation
+      );
+
+      const finalMessages = [
+        ...conversation,
+        assistant,
+      ];
+
+      setMessages(finalMessages);
+
+      await saveChatMessages(
+        activeChat.id,
+        user.id,
+        finalMessages
+      );
+
+      await loadFeatureCredits(user.id);
+      await loadChats(user.id);
+    } catch (error) {
+      console.error("regenerate error:", error);
+
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to regenerate response."
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleKeyDown = (
     event: KeyboardEvent<HTMLTextAreaElement>
-  ) {
+  ) => {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      sendMessage();
+      void sendMessage();
     }
-  }
+  };
 
-  /* =========================================================
-     AGENT
-  ========================================================= */
-
-  function selectAgent(agent: string) {
-    setSelectedAgent(agent);
+  const selectAgent = (agent: string) => {
     setAgentOpen(false);
 
-    if (agent === "website_builder") {
-      window.location.href = "/website-builder";
+    if (agent === "Website Builder") {
+      router.push("/website-builder");
+      return;
     }
 
-    if (agent === "image_generator") {
-      window.location.href = "/image-generator";
+    if (agent === "Image Generator") {
+      router.push("/image-generator");
+      return;
     }
 
-    if (agent === "video_generator") {
-      window.location.href = "/video-generator";
+    if (agent === "Video Generator") {
+      router.push("/video-generator");
+      return;
     }
 
-    if (agent === "voice_generator") {
-      window.location.href = "/generate-voice";
+    if (agent === "Voice Generator") {
+      router.push("/generate-voice");
+      return;
     }
-  }
+  };
 
-  /* =========================================================
-     CHAT ITEM
-  ========================================================= */
-
-  function ChatItem({ chat }: { chat: Chat }) {
-    return (
-      <div
-        className={`zuqen-chat-item ${
-          activeChat === chat.id ? "active" : ""
-        }`}
-        onClick={() => openChat(chat.id)}
-      >
-        <div className="zuqen-chat-icon">
-          <Icon name="chat" size={18} />
-        </div>
-
-        <div className="zuqen-chat-info">
-          <div className="zuqen-chat-title">
-            {chat.title || "New conversation"}
-          </div>
-
-          <div className="zuqen-chat-date">
-            {new Date(chat.updated_at).toLocaleDateString()}
-          </div>
-        </div>
-
-        <button
-          className="zuqen-chat-more"
-          onClick={(event) => {
-            event.stopPropagation();
-
-            setMenuOpen((current) =>
-              current === chat.id ? null : chat.id
-            );
-          }}
-        >
-          <Icon name="more" size={19} />
-        </button>
-
-        {menuOpen === chat.id && (
-          <div
-            className="zuqen-chat-menu"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <button onClick={() => renameChat(chat.id)}>
-              <Icon name="edit" size={17} />
-              Rename
-            </button>
-
-            {chat.archived ? (
-              <button onClick={() => restoreChat(chat.id)}>
-                <Icon name="restore" size={17} />
-                Restore
-              </button>
-            ) : (
-              <button onClick={() => archiveChat(chat.id)}>
-                <Icon name="archive" size={17} />
-                Archive
-              </button>
-            )}
-
-            <button
-              className="danger"
-              onClick={() => deleteChat(chat.id)}
-            >
-              <Icon name="trash" size={17} />
-              Delete
-            </button>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  /* =========================================================
-     RENDER
-  ========================================================= */
+  const newConversation = () => {
+    setActiveChat(null);
+    setMessages([]);
+    setInput("");
+    setAttachments([]);
+    setEditingId(null);
+    setErrorMessage("");
+  };
 
   if (!authReady) {
     return (
-      <div className="zuqen-loading-screen">
-        <div className="zuqen-loader-logo">
-          <div className="zuqen-logo-mark large">
-            <span>Z</span>
+      <>
+        <style>{globalStyles}</style>
+
+        <div className="zuqen-loading-screen">
+          <div className="zuqen-logo loading-logo">
+            Z
+          </div>
+
+          <div className="loading-title">
+            ZUQEN AI
+          </div>
+
+          <div className="loading-subtitle">
+            Preparing your workspace...
+          </div>
+
+          <div className="loading-dots">
+            <span />
+            <span />
+            <span />
           </div>
         </div>
-
-        <div className="zuqen-loading-title">
-          ZUQEN AI
-        </div>
-
-        <div className="zuqen-loading-dots">
-          <span />
-          <span />
-          <span />
-        </div>
-      </div>
+      </>
     );
   }
 
   return (
-    <div
-      className={`zuqen-app ${
-        lightMode ? "light" : ""
-      }`}
-    >
-      {/* =====================================================
-          SIDEBAR OVERLAY
-      ===================================================== */}
+    <>
+      <style>{globalStyles}</style>
 
-      {sidebar && (
-        <div
-          className="zuqen-mobile-overlay"
-          onClick={() => setSidebar(false)}
-        />
-      )}
-
-      {/* =====================================================
-          SIDEBAR
-      ===================================================== */}
-
-      <aside
-        className={`zuqen-sidebar ${
-          sidebar ? "" : "closed"
-        }`}
-      >
-        <div className="zuqen-sidebar-top">
-          {/* BRAND */}
-
-          <div className="zuqen-brand">
-            <div className="zuqen-brand-logo">
-              <span>Z</span>
-              <i />
-            </div>
-
-            <div>
-              <div className="zuqen-brand-name">
-                ZUQEN
+      <div className="zuqen-app">
+        <aside
+          className={`zuqen-sidebar ${
+            sidebar ? "" : "closed"
+          }`}
+        >
+          <div className="sidebar-top">
+            <div className="brand">
+              <div className="brand-mark">
+                Z
               </div>
 
-              <div className="zuqen-brand-ai">
-                ARTIFICIAL INTELLIGENCE
+              <div className="brand-text">
+                <strong>ZUQEN</strong>
+                <span>AI</span>
               </div>
             </div>
+
+            <button
+              className="icon-button sidebar-close"
+              onClick={() => setSidebar(false)}
+              title="Close sidebar"
+            >
+              <Icon name="menu" size={20} />
+            </button>
           </div>
 
-          {/* NEW CHAT */}
-
           <button
-            className="zuqen-new-chat"
-            onClick={createChat}
+            className="new-chat-button"
+            onClick={newConversation}
           >
-            <span className="new-chat-icon">
-              <Icon name="plus" size={21} />
-            </span>
-
+            <Icon name="plus" size={19} />
             <span>New conversation</span>
-
-            <kbd>⌘ K</kbd>
           </button>
 
-          {/* SEARCH */}
-
-          <div className="zuqen-search">
+          <div className="sidebar-search">
             <Icon name="search" size={18} />
 
             <input
-              value={searchText}
+              value={searchValue}
               onChange={(event) =>
-                setSearchText(event.target.value)
+                setSearchValue(event.target.value)
               }
-              placeholder="Search conversations"
+              placeholder="Search conversations..."
             />
+          </div>
 
-            {searchText && (
-              <button
-                onClick={() => setSearchText("")}
+          <div className="sidebar-section-title">
+            <span>
+              {archiveOpen
+                ? "Archived"
+                : "Conversations"}
+            </span>
+
+            <span className="chat-count">
+              {archiveOpen
+                ? archivedChats.filter(
+                    (chat) => chat.archived
+                  ).length
+                : activeChats.length}
+            </span>
+          </div>
+
+          <div className="chat-list">
+            {(archiveOpen
+              ? archivedChats.filter(
+                  (chat) => chat.archived
+                )
+              : activeChats
+            ).map((chat) => (
+              <div
+                key={chat.id}
+                className={`chat-item ${
+                  activeChat?.id === chat.id
+                    ? "active"
+                    : ""
+                }`}
+                onClick={() => void openChat(chat)}
               >
-                <Icon name="close" size={15} />
-              </button>
+                <div className="chat-item-icon">
+                  <Icon name="message" size={17} />
+                </div>
+
+                {renameId === chat.id ? (
+                  <input
+                    autoFocus
+                    className="rename-input"
+                    value={renameValue}
+                    onChange={(event) =>
+                      setRenameValue(
+                        event.target.value
+                      )
+                    }
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        void saveRename();
+                      }
+
+                      if (event.key === "Escape") {
+                        setRenameId(null);
+                      }
+                    }}
+                    onClick={(event) =>
+                      event.stopPropagation()
+                    }
+                    onBlur={() => {
+                      window.setTimeout(
+                        () => void saveRename(),
+                        100
+                      );
+                    }}
+                  />
+                ) : (
+                  <div className="chat-item-content">
+                    <div className="chat-item-title">
+                      {chat.title ||
+                        "New conversation"}
+                    </div>
+
+                    <div className="chat-item-time">
+                      {new Date(
+                        chat.updated_at
+                      ).toLocaleDateString()}
+                    </div>
+                  </div>
+                )}
+
+                <div className="chat-menu-wrapper">
+                  <button
+                    className="chat-more"
+                    onClick={(event) => {
+                      event.stopPropagation();
+
+                      setOpenMenuId(
+                        openMenuId === chat.id
+                          ? null
+                          : chat.id
+                      );
+                    }}
+                  >
+                    <Icon name="more" size={19} />
+                  </button>
+
+                  {openMenuId === chat.id && (
+                    <div
+                      className="chat-context-menu"
+                      onClick={(event) =>
+                        event.stopPropagation()
+                      }
+                    >
+                      <button
+                        onClick={() =>
+                          startRename(chat)
+                        }
+                      >
+                        <Icon
+                          name="edit"
+                          size={16}
+                        />
+                        Rename
+                      </button>
+
+                      {chat.archived ? (
+                        <button
+                          onClick={() =>
+                            void restoreChat(
+                              chat.id
+                            )
+                          }
+                        >
+                          <Icon
+                            name="refresh"
+                            size={16}
+                          />
+                          Restore
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() =>
+                            void archiveChat(
+                              chat.id
+                            )
+                          }
+                        >
+                          <Icon
+                            name="archive"
+                            size={16}
+                          />
+                          Archive
+                        </button>
+                      )}
+
+                      <button
+                        className="danger-menu"
+                        onClick={() =>
+                          void deleteChat(
+                            chat.id
+                          )
+                        }
+                      >
+                        <Icon
+                          name="trash"
+                          size={16}
+                        />
+                        Delete
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+
+            {(
+              archiveOpen
+                ? archivedChats.filter(
+                    (chat) => chat.archived
+                  )
+                : activeChats
+            ).length === 0 && (
+              <div className="empty-chats">
+                <Icon name="message" size={25} />
+                <span>
+                  {searchValue
+                    ? "No conversations found"
+                    : archiveOpen
+                    ? "No archived conversations"
+                    : "No conversations yet"}
+                </span>
+              </div>
             )}
           </div>
 
-          {/* NAV */}
-
-          <div className="zuqen-sidebar-section-title">
-            <span>WORKSPACE</span>
-          </div>
-
-          <div className="zuqen-side-nav">
+          <div className="sidebar-bottom">
             <button
-              className="zuqen-side-nav-item active"
-              onClick={() => {
-                setArchiveOpen(false);
-                setActiveChat(null);
-                setMessages([]);
-              }}
-            >
-              <Icon name="chat" size={20} />
-              <span>Conversations</span>
-              <b>{activeChats.length}</b>
-            </button>
-
-            <button
-              className={`zuqen-side-nav-item ${
-                archiveOpen ? "active" : ""
+              className={`sidebar-option ${
+                archiveOpen ? "selected" : ""
               }`}
               onClick={() =>
                 setArchiveOpen((value) => !value)
               }
             >
-              <Icon name="archive" size={20} />
-              <span>Archived</span>
-              <b>{archivedChats.length}</b>
-            </button>
-          </div>
-        </div>
-
-        {/* HISTORY */}
-
-        <div className="zuqen-history">
-          <div className="zuqen-history-heading">
-            <span>
-              {archiveOpen
-                ? "ARCHIVED"
-                : "CHAT HISTORY"}
-            </span>
-
-            <span>
-              {archiveOpen
-                ? archivedChats.length
-                : activeChats.length}
-            </span>
-          </div>
-
-          <div className="zuqen-chat-list">
-            {(archiveOpen
-              ? archivedChats
-              : activeChats
-            ).length === 0 ? (
-              <div className="zuqen-empty-history">
-                <div className="empty-history-icon">
-                  <Icon
-                    name={
-                      archiveOpen
-                        ? "archive"
-                        : "chat"
-                    }
-                    size={25}
-                  />
-                </div>
-
-                <strong>
-                  {archiveOpen
-                    ? "No archived chats"
-                    : "No conversations yet"}
-                </strong>
-
-                <span>
-                  {archiveOpen
-                    ? "Archived conversations will appear here."
-                    : "Start a new conversation with ZUQEN AI."}
-                </span>
-              </div>
-            ) : (
-              (archiveOpen
-                ? archivedChats
-                : activeChats
-              ).map((chat) => (
-                <ChatItem
-                  key={chat.id}
-                  chat={chat}
-                />
-              ))
-            )}
-          </div>
-        </div>
-
-        {/* ACCOUNT */}
-
-        <div className="zuqen-sidebar-bottom">
-          <div className="zuqen-account">
-            <div className="zuqen-account-avatar">
-              <Icon name="user" size={19} />
-            </div>
-
-            <div className="zuqen-account-info">
-              <strong>You</strong>
+              <Icon name="archive" size={18} />
               <span>
-                {user?.is_anonymous
-                  ? "Guest account"
-                  : "ZUQEN member"}
+                {archiveOpen
+                  ? "All conversations"
+                  : "Archived chats"}
               </span>
-            </div>
-
-            <button
-              className="zuqen-account-more"
-              title="Account"
-            >
-              <Icon name="more" size={18} />
-            </button>
-          </div>
-        </div>
-      </aside>
-
-      {/* =====================================================
-          MAIN
-      ===================================================== */}
-
-      <main className="zuqen-main">
-        {/* TOPBAR */}
-
-        <header className="zuqen-topbar">
-          <div className="zuqen-topbar-left">
-            <button
-              className="zuqen-icon-button sidebar-toggle"
-              onClick={() =>
-                setSidebar((value) => !value)
-              }
-              title="Toggle sidebar"
-            >
-              <Icon
-                name={sidebar ? "menu" : "menu"}
-                size={22}
-              />
             </button>
 
-            <div className="zuqen-top-title">
-              <div className="top-title-main">
-                {activeChat
-                  ? chats.find(
-                      (chat) => chat.id === activeChat
-                    )?.title || "Conversation"
-                  : "ZUQEN AI"}
+            <div className="account-card">
+              <div className="account-avatar">
+                Z
               </div>
 
-              <div className="top-title-sub">
-                <span className="online-dot" />
-                AI workspace
-              </div>
-            </div>
-          </div>
-
-          <div className="zuqen-topbar-actions">
-            {/* CREDITS */}
-
-            <div className="zuqen-dropdown-wrap">
-              <button
-                className={`zuqen-credit-button ${
-                  creditsOpen ? "active" : ""
-                }`}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setCreditsOpen((value) => !value);
-                  setAgentOpen(false);
-                }}
-              >
-                <span className="credit-icon">
-                  <Icon name="zap" size={16} />
-                </span>
-
-                <span className="credit-button-label">
-                  Credits
-                </span>
-
+              <div className="account-info">
                 <strong>
-                  {formatCredits(totalCredits)}
+                  {user?.is_anonymous
+                    ? "ZUQEN User"
+                    : user?.email ||
+                      "ZUQEN User"}
                 </strong>
 
-                <Icon name="chevron" size={15} />
-              </button>
+                <span>Free workspace</span>
+              </div>
+            </div>
+          </div>
+        </aside>
 
-              {creditsOpen && (
-                <div
-                  className="zuqen-credits-panel"
-                  onClick={(event) =>
-                    event.stopPropagation()
+        <main className="zuqen-main">
+          <header className="topbar">
+            <div className="topbar-left">
+              {!sidebar && (
+                <button
+                  className="icon-button"
+                  onClick={() =>
+                    setSidebar(true)
                   }
                 >
-                  <div className="credits-panel-header">
-                    <div>
-                      <span>YOUR BALANCE</span>
-                      <h3>
-                        {formatCredits(totalCredits)}
-                      </h3>
+                  <Icon name="menu" size={21} />
+                </button>
+              )}
+
+              <div className="topbar-title">
+                <div className="topbar-main-title">
+                  {activeChat?.title ||
+                    "ZUQEN AI"}
+                </div>
+
+                <div className="topbar-subtitle">
+                  {activeChat
+                    ? "AI conversation"
+                    : "Your intelligent AI workspace"}
+                </div>
+              </div>
+            </div>
+
+            <div className="topbar-actions">
+              <div className="credits-wrapper">
+                <button
+                  className="credits-button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+
+                    setCreditsOpen(
+                      (value) => !value
+                    );
+                  }}
+                >
+                  <Icon
+                    name="credit"
+                    size={17}
+                  />
+
+                  <span>
+                    {formatCredits(
+                      chatCredits
+                    )}
+                  </span>
+
+                  <small>
+                    Chat Credits
+                  </small>
+                </button>
+
+                {creditsOpen && (
+                  <div
+                    className="credits-dropdown"
+                    onClick={(event) =>
+                      event.stopPropagation()
+                    }
+                  >
+                    <div className="dropdown-heading">
+                      <div>
+                        <strong>
+                          ZUQEN Credits
+                        </strong>
+
+                        <span>
+                          Feature balances
+                        </span>
+                      </div>
+
+                      <Icon
+                        name="credit"
+                        size={22}
+                      />
                     </div>
 
-                    <div className="credits-large-icon">
-                      <Icon name="zap" size={24} />
-                    </div>
-                  </div>
+                    <div className="credit-total">
+                      <span>
+                        Total available
+                      </span>
 
-                  <div className="credits-stat-row">
-                    <div>
-                      <span>Allocated</span>
                       <strong>
                         {formatCredits(
-                          allocatedCredits
+                          totalCredits
                         )}
                       </strong>
                     </div>
 
-                    <div>
-                      <span>Used</span>
-                      <strong>
-                        {formatCredits(usedCredits)}
-                      </strong>
-                    </div>
-                  </div>
-
-                  <div className="credits-progress">
-                    <div
-                      style={{
-                        width: `${
-                          allocatedCredits > 0
-                            ? Math.min(
-                                100,
-                                Math.round(
-                                  (usedCredits /
-                                    allocatedCredits) *
-                                    100
-                                )
-                              )
-                            : 0
-                        }%`,
-                      }}
-                    />
-                  </div>
-
-                  <div className="credits-section-title">
-                    FEATURE BALANCES
-                  </div>
-
-                  <div className="credits-features">
-                    {creditsLoading ? (
-                      <div className="credits-loading">
-                        <span />
-                        <span />
-                        <span />
+                    <div className="credit-stats">
+                      <div>
+                        <span>
+                          Granted
+                        </span>
+                        <strong>
+                          {formatCredits(
+                            totalGranted
+                          )}
+                        </strong>
                       </div>
-                    ) : (
-                      featureCredits.map(
-                        (feature) => {
-                          const percentage =
-                            feature.total_granted > 0
-                              ? Math.min(
-                                  100,
-                                  (feature.balance /
-                                    feature.total_granted) *
-                                    100
-                                )
-                              : 0;
 
-                          return (
+                      <div>
+                        <span>
+                          Used
+                        </span>
+                        <strong>
+                          {formatCredits(
+                            totalUsed
+                          )}
+                        </strong>
+                      </div>
+                    </div>
+
+                    <div className="feature-credit-list">
+                      {creditsLoading ? (
+                        <div className="credit-loading">
+                          Loading credits...
+                        </div>
+                      ) : featureCredits.length ===
+                        0 ? (
+                        <div className="credit-loading">
+                          No feature credits found.
+                        </div>
+                      ) : (
+                        featureCredits.map(
+                          (feature) => (
                             <div
-                              className="credit-feature"
-                              key={feature.feature_key}
+                              key={
+                                feature.feature_key
+                              }
+                              className="feature-credit-row"
                             >
-                              <div className="credit-feature-icon">
+                              <div className="feature-credit-icon">
                                 <Icon
-                                  name={featureIcon(
-                                    feature.feature_key
-                                  )}
-                                  size={17}
+                                  name={
+                                    feature.feature_key ===
+                                    "chat"
+                                      ? "message"
+                                      : "spark"
+                                  }
+                                  size={16}
                                 />
                               </div>
 
-                              <div className="credit-feature-main">
-                                <div>
-                                  <span>
-                                    {
-                                      feature.feature_name
-                                    }
-                                  </span>
+                              <div>
+                                <strong>
+                                  {feature
+                                    .provider_features
+                                    ?.feature_name ||
+                                    feature.feature_key}
+                                </strong>
 
-                                  <strong>
-                                    {formatCredits(
-                                      feature.balance
-                                    )}
-                                  </strong>
-                                </div>
-
-                                <div className="credit-feature-bar">
-                                  <div
-                                    style={{
-                                      width: `${percentage}%`,
-                                    }}
-                                  />
-                                </div>
+                                <span>
+                                  {feature
+                                    .provider_features
+                                    ?.provider ||
+                                    "provider"}
+                                </span>
                               </div>
+
+                              <b>
+                                {formatCredits(
+                                  Number(
+                                    feature.balance ||
+                                      0
+                                  )
+                                )}
+                              </b>
                             </div>
-                          );
-                        }
-                      )
-                    )}
-                  </div>
-
-                  {chatCredits <= 0 && (
-                    <div className="credit-warning">
-                      <Icon name="zap" size={17} />
-
-                      <span>
-                        Your AI Chat credits are
-                        exhausted.
-                      </span>
+                          )
+                        )
+                      )}
                     </div>
-                  )}
+                  </div>
+                )}
+              </div>
 
-                  <button
-                    className="get-credit-button"
-                    onClick={() =>
-                      alert(
-                        "Premium credits purchase will be available soon."
-                      )
+              <div className="agent-wrapper">
+                <button
+                  className="agent-button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+
+                    setAgentOpen(
+                      (value) => !value
+                    );
+                  }}
+                >
+                  <Icon
+                    name="spark"
+                    size={17}
+                  />
+                  <span>AI Agents</span>
+                </button>
+
+                {agentOpen && (
+                  <div
+                    className="agent-dropdown"
+                    onClick={(event) =>
+                      event.stopPropagation()
                     }
                   >
-                    <Icon name="zap" size={18} />
-                    Get more credits
-                  </button>
-                </div>
-              )}
-            </div>
+                    <div className="dropdown-heading">
+                      <div>
+                        <strong>
+                          AI Agents
+                        </strong>
+                        <span>
+                          Choose a workspace
+                        </span>
+                      </div>
+                    </div>
 
-            {/* AGENT */}
-
-            <div className="zuqen-dropdown-wrap">
-              <button
-                className={`zuqen-agent-button ${
-                  agentOpen ? "active" : ""
-                }`}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setAgentOpen((value) => !value);
-                  setCreditsOpen(false);
-                }}
-              >
-                <Icon
-                  name={featureIcon(selectedAgent)}
-                  size={18}
-                />
-
-                <span>
-                  {getFeatureLabel(selectedAgent)}
-                </span>
-
-                <Icon name="chevron" size={15} />
-              </button>
-
-              {agentOpen && (
-                <div
-                  className="zuqen-agent-dropdown"
-                  onClick={(event) =>
-                    event.stopPropagation()
-                  }
-                >
-                  {[
-                    "chat",
-                    "website_builder",
-                    "image_generator",
-                    "video_generator",
-                    "voice_generator",
-                  ].map((agent) => (
                     <button
-                      key={agent}
-                      className={
-                        selectedAgent === agent
-                          ? "selected"
-                          : ""
-                      }
                       onClick={() =>
-                        selectAgent(agent)
+                        setAgentOpen(false)
                       }
                     >
-                      <span className="agent-option-icon">
+                      <span className="agent-icon">
                         <Icon
-                          name={featureIcon(agent)}
-                          size={18}
+                          name="message"
+                          size={17}
                         />
                       </span>
 
                       <span>
-                        {getFeatureLabel(agent)}
+                        <strong>AI Chat</strong>
+                        <small>
+                          General intelligence
+                        </small>
                       </span>
+                    </button>
 
-                      {selectedAgent === agent && (
+                    <button
+                      onClick={() =>
+                        selectAgent(
+                          "Website Builder"
+                        )
+                      }
+                    >
+                      <span className="agent-icon">
                         <Icon
-                          name="check"
+                          name="globe"
                           size={17}
                         />
-                      )}
+                      </span>
+
+                      <span>
+                        <strong>
+                          Website Builder
+                        </strong>
+                        <small>
+                          Build websites
+                        </small>
+                      </span>
                     </button>
-                  ))}
-                </div>
-              )}
+
+                    <button
+                      onClick={() =>
+                        selectAgent(
+                          "Image Generator"
+                        )
+                      }
+                    >
+                      <span className="agent-icon">
+                        <Icon
+                          name="spark"
+                          size={17}
+                        />
+                      </span>
+
+                      <span>
+                        <strong>
+                          Image Generator
+                        </strong>
+                        <small>
+                          Create images
+                        </small>
+                      </span>
+                    </button>
+
+                    <button
+                      onClick={() =>
+                        selectAgent(
+                          "Video Generator"
+                        )
+                      }
+                    >
+                      <span className="agent-icon">
+                        <Icon
+                          name="refresh"
+                          size={17}
+                        />
+                      </span>
+
+                      <span>
+                        <strong>
+                          Video Generator
+                        </strong>
+                        <small>
+                          Generate videos
+                        </small>
+                      </span>
+                    </button>
+
+                    <button
+                      onClick={() =>
+                        selectAgent(
+                          "Voice Generator"
+                        )
+                      }
+                    >
+                      <span className="agent-icon">
+                        <Icon
+                          name="message"
+                          size={17}
+                        />
+                      </span>
+
+                      <span>
+                        <strong>
+                          Voice Generator
+                        </strong>
+                        <small>
+                          Create voices
+                        </small>
+                      </span>
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              <button
+                className="icon-button theme-button"
+                onClick={() =>
+                  setLightMode(
+                    (value) => !value
+                  )
+                }
+                title={
+                  lightMode
+                    ? "Dark mode"
+                    : "Light mode"
+                }
+              >
+                <Icon
+                  name={
+                    lightMode ? "moon" : "sun"
+                  }
+                  size={19}
+                />
+              </button>
             </div>
+          </header>
 
-            {/* THEME */}
+          {errorMessage && (
+            <div className="error-banner">
+              <div>
+                <Icon name="x" size={17} />
+                <span>{errorMessage}</span>
+              </div>
 
-            <button
-              className="zuqen-icon-button"
-              onClick={() =>
-                setLightMode((value) => !value)
-              }
-              title={
-                lightMode
-                  ? "Dark mode"
-                  : "Light mode"
-              }
-            >
-              <Icon
-                name={lightMode ? "moon" : "sun"}
-                size={20}
-              />
-            </button>
-          </div>
-        </header>
+              <button
+                onClick={() =>
+                  setErrorMessage("")
+                }
+              >
+                <Icon name="x" size={16} />
+              </button>
+            </div>
+          )}
 
-        {/* ===================================================
-            CHAT AREA
-        =================================================== */}
-
-        <section className="zuqen-chat-area">
-          <div className="zuqen-chat-scroll">
+          <div className="chat-area">
             {messages.length === 0 ? (
-              <div className="zuqen-welcome">
-                <div className="welcome-glow" />
-
-                <div className="welcome-logo">
-                  <div className="zuqen-logo-mark">
-                    <span>Z</span>
-                    <i />
+              <div className="welcome-screen">
+                <div className="welcome-orb">
+                  <div className="welcome-z">
+                    Z
                   </div>
                 </div>
 
-                <div className="welcome-eyebrow">
-                  <span className="welcome-line" />
-                  INTELLIGENCE, REFINED
-                  <span className="welcome-line" />
+                <div className="welcome-badge">
+                  <Icon
+                    name="spark"
+                    size={14}
+                  />
+                  ZUQEN AI
                 </div>
 
                 <h1>
                   What can I help
                   <br />
-                  you <em>create?</em>
+                  <span>you create?</span>
                 </h1>
 
                 <p>
-                  Ask ZUQEN AI anything. Write,
-                  analyze, brainstorm, code, research,
-                  and turn your ideas into reality.
+                  Ask questions, generate ideas,
+                  write content, analyze information,
+                  or build something new.
                 </p>
 
-                <div className="welcome-suggestions">
+                <div className="home-search-card">
+                  <div className="home-search-icon">
+                    <Icon
+                      name="search"
+                      size={22}
+                    />
+                  </div>
+
+                  <div className="home-search-content">
+                    <strong>
+                      Search your conversations
+                    </strong>
+
+                    <span>
+                      Quickly find an earlier chat
+                      from your workspace.
+                    </span>
+                  </div>
+
+                  <button
+                    onClick={() => {
+                      setSidebar(true);
+
+                      window.setTimeout(() => {
+                        document
+                          .querySelector<HTMLInputElement>(
+                            ".sidebar-search input"
+                          )
+                          ?.focus();
+                      }, 50);
+                    }}
+                  >
+                    Search
+                  </button>
+                </div>
+
+                <div className="suggestion-grid">
                   <button
                     onClick={() =>
                       setInput(
-                        "Help me plan and build a modern website."
+                        "Give me 5 creative ideas for a new project."
                       )
                     }
                   >
-                    <Icon name="globe" size={20} />
+                    <Icon
+                      name="spark"
+                      size={19}
+                    />
                     <span>
-                      Build a website
+                      Brainstorm ideas
                     </span>
-                    <small>→</small>
                   </button>
 
                   <button
                     onClick={() =>
                       setInput(
-                        "Give me a creative image prompt for a futuristic city."
+                        "Explain a difficult topic to me in simple language."
                       )
                     }
                   >
-                    <Icon name="image" size={20} />
+                    <Icon
+                      name="bot"
+                      size={19}
+                    />
                     <span>
-                      Create an image idea
+                      Explain something
                     </span>
-                    <small>→</small>
                   </button>
 
                   <button
                     onClick={() =>
                       setInput(
-                        "Explain this topic to me in a simple way."
+                        "Help me write a professional message."
                       )
                     }
                   >
-                    <Icon name="sparkles" size={20} />
+                    <Icon
+                      name="edit"
+                      size={19}
+                    />
                     <span>
-                      Learn something
+                      Write something
                     </span>
-                    <small>→</small>
+                  </button>
+
+                  <button
+                    onClick={() =>
+                      setInput(
+                        "Help me plan a project step by step."
+                      )
+                    }
+                  >
+                    <Icon
+                      name="folder"
+                      size={19}
+                    />
+                    <span>
+                      Plan a project
+                    </span>
                   </button>
                 </div>
               </div>
             ) : (
-              <div className="zuqen-messages">
-                {messages.map((message) => {
+              <div className="messages-container">
+                {messages.map((message, index) => {
                   const isUser =
                     message.role === "user";
 
-                  const isAssistant =
-                    message.role === "assistant";
+                  const isEditing =
+                    editingId === message.id;
+
+                  const isLastAssistant =
+                    message.role ===
+                      "assistant" &&
+                    index === messages.length - 1;
 
                   return (
                     <div
                       key={message.id}
-                      className={`zuqen-message-row ${
+                      className={`message-row ${
                         isUser
-                          ? "user-message"
-                          : "ai-message"
+                          ? "user-row"
+                          : "assistant-row"
                       }`}
                     >
-                      <div className="zuqen-message-wrapper">
-                        {/* LABEL */}
-
-                        <div className="message-author">
+                      <div className="message-block">
+                        <div className="message-label">
                           {isUser ? (
-                            <>
-                              <div className="author-avatar user-avatar">
-                                <span>Y</span>
-                              </div>
-
-                              <span>You</span>
-                            </>
+                            <span>You</span>
                           ) : (
-                            <>
-                              <div className="author-avatar ai-avatar">
-                                <div className="mini-z-logo">
-                                  <span>Z</span>
-                                  <i />
-                                </div>
-                              </div>
-
-                              <span>
-                                ZUQEN AI
-                              </span>
-
-                              <span className="ai-status">
-                                AI
-                              </span>
-                            </>
+                            <span>
+                              ZUQEN AI
+                            </span>
                           )}
                         </div>
 
-                        {/* MESSAGE */}
-
                         <div
-                          className={`zuqen-message-card ${
+                          className={`message-box ${
                             isUser
-                              ? "user-card"
-                              : "ai-card"
+                              ? "user-message"
+                              : "assistant-message"
                           }`}
                         >
-                          {isAssistant &&
-                            !message.content &&
-                            loading ? (
-                            <div className="ai-thinking">
-                              <div className="thinking-orb">
-                                <span />
-                                <span />
-                                <span />
-                              </div>
+                          {isEditing ? (
+                            <div className="edit-box">
+                              <textarea
+                                value={
+                                  editingValue
+                                }
+                                onChange={(
+                                  event
+                                ) =>
+                                  setEditingValue(
+                                    event.target
+                                      .value
+                                  )
+                                }
+                                autoFocus
+                              />
 
-                              <div>
-                                <strong>
-                                  ZUQEN AI
-                                </strong>
+                              <div className="edit-actions">
+                                <button
+                                  onClick={
+                                    cancelEdit
+                                  }
+                                >
+                                  Cancel
+                                </button>
 
-                                <p>
-                                  Thinking and
-                                  preparing your
-                                  response
-                                </p>
+                                <button
+                                  className="primary-small"
+                                  onClick={() =>
+                                    void saveEdit()
+                                  }
+                                >
+                                  Save & regenerate
+                                </button>
                               </div>
                             </div>
                           ) : (
                             <>
-                              <div className="message-content">
-                                {message.content}
+                              <div className="message-text">
+                                {message.content
+                                  .split("\n")
+                                  .map(
+                                    (
+                                      line,
+                                      lineIndex
+                                    ) => (
+                                      <span
+                                        key={
+                                          lineIndex
+                                        }
+                                      >
+                                        {line}
+
+                                        {lineIndex <
+                                          message
+                                            .content
+                                            .split(
+                                              "\n"
+                                            ).length -
+                                            1 && (
+                                          <br />
+                                        )}
+                                      </span>
+                                    )
+                                  )}
+
+                                {!isUser &&
+                                  loading &&
+                                  isLastAssistant &&
+                                  !message
+                                    .content && (
+                                    <span className="typing-indicator">
+                                      <i />
+                                      <i />
+                                      <i />
+                                    </span>
+                                  )}
                               </div>
 
                               {message.attachments &&
                                 message.attachments
-                                  .length > 0 && (
+                                  .length >
+                                  0 && (
                                   <div className="message-attachments">
                                     {message.attachments.map(
                                       (
-                                        attachment,
-                                        index
+                                        attachment
                                       ) => (
                                         <div
-                                          key={`${attachment.name}-${index}`}
+                                          key={
+                                            attachment.id
+                                          }
                                           className="message-attachment"
                                         >
                                           <Icon
-                                            name={
-                                              attachment.type.startsWith(
-                                                "image/"
-                                              )
-                                                ? "image"
-                                                : "paperclip"
-                                            }
-                                            size={18}
+                                            name="paperclip"
+                                            size={15}
                                           />
 
                                           <span>
@@ -2050,97 +2251,92 @@ export default function HomePage() {
                           )}
                         </div>
 
-                        {/* ACTIONS */}
+                        {!isEditing && (
+                          <div className="message-actions">
+                            <button
+                              title="Copy"
+                              onClick={() =>
+                                void copyMessage(
+                                  message
+                                )
+                              }
+                            >
+                              <Icon
+                                name={
+                                  copiedId ===
+                                  message.id
+                                    ? "check"
+                                    : "copy"
+                                }
+                                size={15}
+                              />
 
-                        {(isUser || isAssistant) &&
-                          message.content && (
-                            <div className="message-actions">
+                              {copiedId ===
+                                message.id &&
+                                "Copied"}
+                            </button>
+
+                            {isUser && (
                               <button
+                                title="Edit"
                                 onClick={() =>
-                                  copyMessage(
+                                  startEditMessage(
                                     message
                                   )
                                 }
-                                title="Copy"
                               >
                                 <Icon
-                                  name={
-                                    copiedId ===
-                                    message.id
-                                      ? "check"
-                                      : "copy"
-                                  }
-                                  size={16}
+                                  name="edit"
+                                  size={15}
                                 />
-                                {copiedId ===
-                                  message.id &&
-                                  "Copied"}
                               </button>
+                            )}
 
-                              {isUser && (
+                            {!isUser &&
+                              isLastAssistant && (
                                 <button
-                                  onClick={() =>
-                                    editMessage(
-                                      message
-                                    )
-                                  }
-                                  title="Edit"
-                                >
-                                  <Icon
-                                    name="edit"
-                                    size={16}
-                                  />
-                                  Edit
-                                </button>
-                              )}
-
-                              {isAssistant && (
-                                <button
-                                  onClick={() =>
-                                    regenerate(
-                                      message
-                                    )
-                                  }
                                   title="Regenerate"
-                                  disabled={loading}
+                                  onClick={() =>
+                                    void regenerate()
+                                  }
                                 >
                                   <Icon
                                     name="refresh"
-                                    size={16}
+                                    size={15}
                                   />
                                   Regenerate
                                 </button>
                               )}
-                            </div>
-                          )}
+                          </div>
+                        )}
                       </div>
                     </div>
                   );
                 })}
 
-                {/* EXTRA THINKING INDICATOR */}
-
                 {loading &&
                   messages.length > 0 &&
-                  messages[messages.length - 1]
-                    ?.role !== "assistant" && (
-                    <div className="zuqen-ai-typing">
-                      <div className="typing-avatar">
-                        <div className="mini-z-logo">
-                          <span>Z</span>
-                          <i />
-                        </div>
-                      </div>
-
-                      <div className="typing-content">
-                        <strong>
+                  messages[
+                    messages.length - 1
+                  ]?.role === "user" && (
+                    <div className="message-row assistant-row">
+                      <div className="message-block">
+                        <div className="message-label">
                           ZUQEN AI
-                        </strong>
+                        </div>
 
-                        <div className="typing-dots">
-                          <span />
-                          <span />
-                          <span />
+                        <div className="message-box assistant-message">
+                          <div className="thinking-state">
+                            <span>
+                              Thinking
+                            </span>
+
+                            <div className="typing-indicator">
+                              <i />
+                              <i />
+                              <i />
+                            </div>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -2151,2248 +2347,1707 @@ export default function HomePage() {
             )}
           </div>
 
-          {/* =================================================
-              COMPOSER
-          ================================================= */}
+          <div className="composer-area">
+            {attachments.length > 0 && (
+              <div className="attachment-preview">
+                {attachments.map(
+                  (attachment) => (
+                    <div
+                      key={attachment.id}
+                      className="attachment-chip"
+                    >
+                      <Icon
+                        name="paperclip"
+                        size={15}
+                      />
 
-          <div className="zuqen-composer-area">
-            <div className="zuqen-composer-container">
-              {editingId && (
-                <div className="editing-banner">
-                  <div>
-                    <Icon
-                      name="edit"
-                      size={17}
-                    />
+                      <span>
+                        {attachment.name}
+                      </span>
 
-                    <span>
-                      Editing your message
-                    </span>
-                  </div>
+                      <small>
+                        {formatFileSize(
+                          attachment.size
+                        )}
+                      </small>
 
-                  <button
-                    onClick={cancelEdit}
-                  >
-                    <Icon
-                      name="close"
-                      size={16}
-                    />
-                    Cancel
-                  </button>
-                </div>
-              )}
-
-              {attachments.length > 0 && (
-                <div className="attachment-preview-row">
-                  {attachments.map(
-                    (attachment, index) => (
-                      <div
-                        className="attachment-preview"
-                        key={`${attachment.name}-${index}`}
+                      <button
+                        onClick={() =>
+                          removeAttachment(
+                            attachment.id
+                          )
+                        }
                       >
-                        <div className="attachment-preview-icon">
-                          <Icon
-                            name={
-                              attachment.type.startsWith(
-                                "image/"
-                              )
-                                ? "image"
-                                : "paperclip"
-                            }
-                            size={17}
-                          />
-                        </div>
+                        <Icon
+                          name="x"
+                          size={13}
+                        />
+                      </button>
+                    </div>
+                  )
+                )}
+              </div>
+            )}
 
-                        <div>
-                          <strong>
-                            {attachment.name}
-                          </strong>
+            <div className="composer">
+              <div className="composer-top">
+                <button
+                  className="composer-icon"
+                  onClick={() =>
+                    fileInput.current?.click()
+                  }
+                  title="Attach file"
+                >
+                  <Icon
+                    name="paperclip"
+                    size={20}
+                  />
+                </button>
 
-                          <small>
-                            {formatFileSize(
-                              attachment.size
-                            )}
-                          </small>
-                        </div>
-
-                        <button
-                          onClick={() =>
-                            removeAttachment(
-                              index
-                            )
-                          }
-                        >
-                          <Icon
-                            name="close"
-                            size={15}
-                          />
-                        </button>
-                      </div>
-                    )
-                  )}
-                </div>
-              )}
-
-              <div className="zuqen-composer">
                 <textarea
                   ref={textareaRef}
                   value={input}
-                  onChange={(event) =>
-                    setInput(event.target.value)
-                  }
+                  onChange={(event) => {
+                    setInput(event.target.value);
+                    autoResize();
+                  }}
                   onKeyDown={handleKeyDown}
                   placeholder="Message ZUQEN AI..."
                   rows={1}
                   disabled={loading}
                 />
 
-                <div className="composer-bottom">
-                  <div className="composer-tools">
-                    <input
-                      ref={fileInput}
-                      type="file"
-                      multiple
-                      hidden
-                      onChange={
-                        handleFileChange
-                      }
-                      accept="image/*,.pdf,.txt,.doc,.docx,.csv"
+                <button
+                  className={`send-button ${
+                    input.trim() && !loading
+                      ? "ready"
+                      : ""
+                  }`}
+                  onClick={() =>
+                    void sendMessage()
+                  }
+                  disabled={
+                    !input.trim() || loading
+                  }
+                  title="Send message"
+                >
+                  {loading ? (
+                    <span className="send-spinner" />
+                  ) : (
+                    <Icon
+                      name="send"
+                      size={19}
                     />
-
-                    <button
-                      onClick={() =>
-                        fileInput.current?.click()
-                      }
-                      title="Attach files"
-                    >
-                      <Icon
-                        name="paperclip"
-                        size={19}
-                      />
-
-                      <span>
-                        Attach
-                      </span>
-                    </button>
-
-                    <button
-                      onClick={() =>
-                        alert(
-                          "More tools coming soon."
-                        )
-                      }
-                    >
-                      <Icon
-                        name="sparkles"
-                        size={18}
-                      />
-
-                      <span>
-                        Tools
-                      </span>
-                    </button>
-                  </div>
-
-                  <div className="composer-right">
-                    <span className="composer-hint">
-                      Shift + Enter for new line
-                    </span>
-
-                    <button
-                      className={`zuqen-send ${
-                        input.trim()
-                          ? "ready"
-                          : ""
-                      }`}
-                      onClick={sendMessage}
-                      disabled={
-                        !input.trim() ||
-                        loading ||
-                        uploading
-                      }
-                      title="Send message"
-                    >
-                      {loading ? (
-                        <span className="send-spinner" />
-                      ) : (
-                        <Icon
-                          name="send"
-                          size={19}
-                        />
-                      )}
-                    </button>
-                  </div>
-                </div>
+                  )}
+                </button>
               </div>
 
-              <div className="composer-footer">
+              <div className="composer-bottom">
                 <span>
-                  ZUQEN AI can make mistakes. Check
-                  important information.
-                </span>
-
-                <span className="composer-security">
                   <Icon
-                    name="check"
+                    name="spark"
                     size={13}
                   />
-                  Secure AI workspace
+                  ZUQEN AI can make mistakes.
+                  Verify important information.
+                </span>
+
+                <span>
+                  Enter to send · Shift + Enter
+                  for new line
                 </span>
               </div>
             </div>
           </div>
-        </section>
-      </main>
-
-      {/* =====================================================
-          GLOBAL CSS
-      ===================================================== */}
-
-      <style jsx global>{`
-        :root {
-          --zuqen-bg: #07090d;
-          --zuqen-bg-2: #0b0e14;
-          --zuqen-sidebar: #090b10;
-          --zuqen-panel: #10131a;
-          --zuqen-panel-2: #141821;
-          --zuqen-border: rgba(255, 255, 255, 0.075);
-          --zuqen-border-strong: rgba(
-            255,
-            255,
-            255,
-            0.12
-          );
-          --zuqen-text: #f4f6f8;
-          --zuqen-muted: #8d95a3;
-          --zuqen-soft: #626b79;
-          --zuqen-accent: #ffffff;
-          --zuqen-accent-text: #07090d;
-          --zuqen-hover: rgba(
-            255,
-            255,
-            255,
-            0.055
-          );
-          --zuqen-green: #48d597;
-          --zuqen-danger: #ff6b7a;
-          --zuqen-shadow: 0 20px 60px
-            rgba(0, 0, 0, 0.35);
-        }
-
-        * {
-          box-sizing: border-box;
-        }
-
-        html,
-        body {
-          margin: 0;
-          padding: 0;
-          width: 100%;
-          height: 100%;
-          overflow: hidden;
-          background: var(--zuqen-bg);
-          color: var(--zuqen-text);
-          font-family:
-            Inter,
-            ui-sans-serif,
-            system-ui,
-            -apple-system,
-            BlinkMacSystemFont,
-            "Segoe UI",
-            sans-serif;
-        }
-
-        button,
-        input,
-        textarea {
-          font: inherit;
-        }
-
-        button {
-          border: 0;
-          cursor: pointer;
-        }
-
-        .zuqen-app {
-          width: 100%;
-          height: 100vh;
-          display: flex;
-          overflow: hidden;
-          background:
-            radial-gradient(
-              circle at 60% 10%,
-              rgba(255, 255, 255, 0.025),
-              transparent 28%
-            ),
-            var(--zuqen-bg);
-          color: var(--zuqen-text);
-        }
-
-        /* =====================================================
-           LIGHT
-        ===================================================== */
-
-        .zuqen-app.light {
-          --zuqen-bg: #f5f6f8;
-          --zuqen-bg-2: #ffffff;
-          --zuqen-sidebar: #ffffff;
-          --zuqen-panel: #ffffff;
-          --zuqen-panel-2: #f2f4f7;
-          --zuqen-border: rgba(
-            15,
-            23,
-            42,
-            0.09
-          );
-          --zuqen-border-strong: rgba(
-            15,
-            23,
-            42,
-            0.14
-          );
-          --zuqen-text: #12151c;
-          --zuqen-muted: #667085;
-          --zuqen-soft: #8b95a5;
-          --zuqen-accent: #111318;
-          --zuqen-accent-text: #ffffff;
-          --zuqen-hover: rgba(15, 23, 42, 0.045);
-          --zuqen-shadow: 0 20px 50px
-            rgba(15, 23, 42, 0.1);
-        }
-
-        /* =====================================================
-           LOADING
-        ===================================================== */
-
-        .zuqen-loading-screen {
-          width: 100vw;
-          height: 100vh;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          gap: 14px;
-          background: #07090d;
-        }
-
-        .zuqen-logo-mark {
-          position: relative;
-          width: 58px;
-          height: 58px;
-          border-radius: 17px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          background:
-            linear-gradient(
-              145deg,
-              #ffffff,
-              #bfc4cb
-            );
-          color: #080a0e;
-          font-size: 27px;
-          font-weight: 900;
-          letter-spacing: -2px;
-          box-shadow:
-            0 12px 35px rgba(255, 255, 255, 0.14),
-            inset 0 1px 0
-              rgba(255, 255, 255, 0.9);
-        }
-
-        .zuqen-logo-mark span {
-          transform: translateX(-1px);
-        }
-
-        .zuqen-logo-mark i {
-          position: absolute;
-          width: 8px;
-          height: 8px;
-          border-radius: 50%;
-          right: 10px;
-          top: 9px;
-          background: #07090d;
-        }
-
-        .zuqen-logo-mark.large {
-          width: 72px;
-          height: 72px;
-          border-radius: 21px;
-          font-size: 34px;
-        }
-
-        .zuqen-loading-title {
-          font-size: 19px;
-          font-weight: 800;
-          letter-spacing: 4px;
-        }
-
-        .zuqen-loading-dots,
-        .typing-dots,
-        .credits-loading {
-          display: flex;
-          align-items: center;
-          gap: 5px;
-        }
-
-        .zuqen-loading-dots span,
-        .typing-dots span,
-        .credits-loading span {
-          width: 5px;
-          height: 5px;
-          border-radius: 50%;
-          background: currentColor;
-          opacity: 0.35;
-          animation: zuqenPulse 1.2s
-            infinite ease-in-out;
-        }
-
-        .zuqen-loading-dots span:nth-child(2),
-        .typing-dots span:nth-child(2),
-        .credits-loading span:nth-child(2) {
-          animation-delay: 0.15s;
-        }
-
-        .zuqen-loading-dots span:nth-child(3),
-        .typing-dots span:nth-child(3),
-        .credits-loading span:nth-child(3) {
-          animation-delay: 0.3s;
-        }
-
-        @keyframes zuqenPulse {
-          0%,
-          70%,
-          100% {
-            transform: scale(0.7);
-            opacity: 0.25;
-          }
-
-          35% {
-            transform: scale(1);
-            opacity: 1;
-          }
-        }
-
-        /* =====================================================
-           SIDEBAR
-        ===================================================== */
-
-        .zuqen-sidebar {
-          width: 318px;
-          min-width: 318px;
-          height: 100vh;
-          display: flex;
-          flex-direction: column;
-          border-right: 1px solid var(--zuqen-border);
-          background: var(--zuqen-sidebar);
-          transition:
-            width 0.25s ease,
-            min-width 0.25s ease,
-            transform 0.25s ease;
-          z-index: 50;
-        }
-
-        .zuqen-sidebar.closed {
-          width: 0;
-          min-width: 0;
-          overflow: hidden;
-        }
-
-        .zuqen-sidebar-top {
-          padding: 24px 18px 12px;
-        }
-
-        .zuqen-brand {
-          display: flex;
-          align-items: center;
-          gap: 13px;
-          padding: 2px 8px 24px;
-        }
-
-        .zuqen-brand-logo {
-          position: relative;
-          width: 43px;
-          height: 43px;
-          flex: 0 0 43px;
-          border-radius: 13px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          background:
-            linear-gradient(
-              145deg,
-              #ffffff,
-              #c6cbd2
-            );
-          color: #07090d;
-          font-weight: 950;
-          font-size: 21px;
-          letter-spacing: -2px;
-          box-shadow:
-            0 8px 24px
-              rgba(255, 255, 255, 0.09),
-            inset 0 1px 0
-              rgba(255, 255, 255, 0.9);
-        }
-
-        .zuqen-brand-logo::after {
-          content: "";
-          position: absolute;
-          width: 6px;
-          height: 6px;
-          border-radius: 50%;
-          background: #07090d;
-          top: 7px;
-          right: 7px;
-        }
-
-        .zuqen-brand-name {
-          font-size: 18px;
-          font-weight: 850;
-          letter-spacing: 3px;
-          line-height: 1.1;
-        }
-
-        .zuqen-brand-ai {
-          margin-top: 5px;
-          font-size: 8px;
-          font-weight: 700;
-          letter-spacing: 2px;
-          color: var(--zuqen-muted);
-        }
-
-        .zuqen-new-chat {
-          width: 100%;
-          height: 52px;
-          display: flex;
-          align-items: center;
-          gap: 11px;
-          padding: 0 13px;
-          border-radius: 14px;
-          color: var(--zuqen-text);
-          background:
-            linear-gradient(
-              135deg,
-              rgba(255, 255, 255, 0.1),
-              rgba(255, 255, 255, 0.035)
-            );
-          border: 1px solid var(--zuqen-border);
-          transition: 0.2s ease;
-          box-shadow:
-            inset 0 1px 0
-              rgba(255, 255, 255, 0.04);
-        }
-
-        .zuqen-new-chat:hover {
-          background: var(--zuqen-hover);
-          border-color: var(--zuqen-border-strong);
-          transform: translateY(-1px);
-        }
-
-        .new-chat-icon {
-          width: 31px;
-          height: 31px;
-          border-radius: 9px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          background: var(--zuqen-accent);
-          color: var(--zuqen-accent-text);
-        }
-
-        .zuqen-new-chat > span:nth-child(2) {
-          font-size: 14px;
-          font-weight: 650;
-          flex: 1;
-          text-align: left;
-        }
-
-        .zuqen-new-chat kbd {
-          color: var(--zuqen-soft);
-          font-size: 10px;
-          border: 1px solid var(--zuqen-border);
-          border-radius: 6px;
-          padding: 3px 6px;
-        }
-
-        .zuqen-search {
-          height: 45px;
-          display: flex;
-          align-items: center;
-          gap: 9px;
-          padding: 0 13px;
-          margin-top: 13px;
-          border: 1px solid var(--zuqen-border);
-          border-radius: 12px;
-          background: var(--zuqen-panel);
-          color: var(--zuqen-muted);
-        }
-
-        .zuqen-search:focus-within {
-          border-color: var(--zuqen-border-strong);
-        }
-
-        .zuqen-search input {
-          width: 100%;
-          min-width: 0;
-          border: 0;
-          outline: 0;
-          color: var(--zuqen-text);
-          background: transparent;
-          font-size: 13px;
-        }
-
-        .zuqen-search input::placeholder {
-          color: var(--zuqen-soft);
-        }
-
-        .zuqen-search button {
-          display: flex;
-          color: var(--zuqen-muted);
-          background: transparent;
-        }
-
-        .zuqen-sidebar-section-title {
-          padding: 24px 9px 9px;
-          color: var(--zuqen-soft);
-          font-size: 9px;
-          font-weight: 800;
-          letter-spacing: 1.7px;
-        }
-
-        .zuqen-side-nav {
-          display: flex;
-          flex-direction: column;
-          gap: 4px;
-        }
-
-        .zuqen-side-nav-item {
-          height: 46px;
-          width: 100%;
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          padding: 0 12px;
-          border-radius: 11px;
-          background: transparent;
-          color: var(--zuqen-muted);
-          transition: 0.18s ease;
-          text-align: left;
-        }
-
-        .zuqen-side-nav-item:hover,
-        .zuqen-side-nav-item.active {
-          color: var(--zuqen-text);
-          background: var(--zuqen-hover);
-        }
-
-        .zuqen-side-nav-item.active {
-          box-shadow:
-            inset 2px 0 0
-              var(--zuqen-text);
-        }
-
-        .zuqen-side-nav-item span {
-          flex: 1;
-          font-size: 14px;
-          font-weight: 650;
-        }
-
-        .zuqen-side-nav-item b {
-          min-width: 24px;
-          text-align: right;
-          color: var(--zuqen-soft);
-          font-size: 11px;
-          font-weight: 600;
-        }
-
-        .zuqen-history {
-          min-height: 0;
-          flex: 1;
-          padding: 10px 12px;
-          overflow: hidden;
-          display: flex;
-          flex-direction: column;
-        }
-
-        .zuqen-history-heading {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          padding: 11px 7px;
-          color: var(--zuqen-soft);
-          font-size: 9px;
-          font-weight: 800;
-          letter-spacing: 1.6px;
-        }
-
-        .zuqen-chat-list {
-          min-height: 0;
-          flex: 1;
-          overflow-y: auto;
-          padding-right: 2px;
-        }
-
-        .zuqen-chat-list::-webkit-scrollbar {
-          width: 4px;
-        }
-
-        .zuqen-chat-list::-webkit-scrollbar-thumb {
-          background: var(--zuqen-border-strong);
-          border-radius: 99px;
-        }
-
-        .zuqen-chat-item {
-          position: relative;
-          min-height: 60px;
-          width: 100%;
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          padding: 9px 8px;
-          margin-bottom: 3px;
-          border-radius: 12px;
-          cursor: pointer;
-          color: var(--zuqen-muted);
-          transition: 0.18s ease;
-        }
-
-        .zuqen-chat-item:hover,
-        .zuqen-chat-item.active {
-          background: var(--zuqen-hover);
-          color: var(--zuqen-text);
-        }
-
-        .zuqen-chat-item.active {
-          box-shadow:
-            inset 2px 0 0
-              var(--zuqen-text);
-        }
-
-        .zuqen-chat-icon {
-          width: 34px;
-          height: 34px;
-          flex: 0 0 34px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          border-radius: 10px;
-          background: var(--zuqen-panel-2);
-          color: var(--zuqen-muted);
-        }
-
-        .zuqen-chat-info {
-          min-width: 0;
-          flex: 1;
-        }
-
-        .zuqen-chat-title {
-          overflow: hidden;
-          white-space: nowrap;
-          text-overflow: ellipsis;
-          color: var(--zuqen-text);
-          font-size: 13px;
-          font-weight: 600;
-        }
-
-        .zuqen-chat-date {
-          margin-top: 4px;
-          color: var(--zuqen-soft);
-          font-size: 10px;
-        }
-
-        .zuqen-chat-more {
-          width: 29px;
-          height: 29px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          border-radius: 8px;
-          background: transparent;
-          color: var(--zuqen-soft);
-          opacity: 0;
-        }
-
-        .zuqen-chat-item:hover
-          .zuqen-chat-more,
-        .zuqen-chat-more:focus {
-          opacity: 1;
-        }
-
-        .zuqen-chat-more:hover {
-          color: var(--zuqen-text);
-          background: var(--zuqen-hover);
-        }
-
-        .zuqen-chat-menu {
-          position: absolute;
-          z-index: 80;
-          right: 8px;
-          top: 49px;
-          width: 165px;
-          padding: 6px;
-          border: 1px solid var(--zuqen-border-strong);
-          border-radius: 12px;
-          background: var(--zuqen-panel);
-          box-shadow: var(--zuqen-shadow);
-        }
-
-        .zuqen-chat-menu button {
-          width: 100%;
-          height: 36px;
-          display: flex;
-          align-items: center;
-          gap: 9px;
-          padding: 0 10px;
-          border-radius: 8px;
-          color: var(--zuqen-muted);
-          background: transparent;
-          text-align: left;
-          font-size: 12px;
-        }
-
-        .zuqen-chat-menu button:hover {
-          color: var(--zuqen-text);
-          background: var(--zuqen-hover);
-        }
-
-        .zuqen-chat-menu button.danger:hover {
-          color: var(--zuqen-danger);
-        }
-
-        .zuqen-empty-history {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          text-align: center;
-          padding: 45px 18px;
-          color: var(--zuqen-soft);
-        }
-
-        .empty-history-icon {
-          width: 48px;
-          height: 48px;
-          border: 1px solid var(--zuqen-border);
-          border-radius: 14px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          margin-bottom: 13px;
-          background: var(--zuqen-panel);
-        }
-
-        .zuqen-empty-history strong {
-          color: var(--zuqen-muted);
-          font-size: 13px;
-        }
-
-        .zuqen-empty-history span {
-          margin-top: 7px;
-          line-height: 1.5;
-          font-size: 11px;
-        }
-
-        .zuqen-sidebar-bottom {
-          padding: 12px;
-          border-top: 1px solid var(--zuqen-border);
-        }
-
-        .zuqen-account {
-          height: 57px;
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          padding: 7px;
-          border-radius: 13px;
-          background: var(--zuqen-panel);
-          border: 1px solid var(--zuqen-border);
-        }
-
-        .zuqen-account-avatar {
-          width: 37px;
-          height: 37px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          border-radius: 11px;
-          background: var(--zuqen-panel-2);
-          color: var(--zuqen-muted);
-        }
-
-        .zuqen-account-info {
-          min-width: 0;
-          flex: 1;
-          display: flex;
-          flex-direction: column;
-        }
-
-        .zuqen-account-info strong {
-          color: var(--zuqen-text);
-          font-size: 12px;
-        }
-
-        .zuqen-account-info span {
-          margin-top: 3px;
-          color: var(--zuqen-soft);
-          font-size: 10px;
-        }
-
-        .zuqen-account-more {
-          display: flex;
-          color: var(--zuqen-soft);
-          background: transparent;
-        }
-
-        /* =====================================================
-           MAIN / TOPBAR
-        ===================================================== */
-
-        .zuqen-main {
-          min-width: 0;
-          flex: 1;
-          height: 100vh;
-          display: flex;
-          flex-direction: column;
-        }
-
-        .zuqen-topbar {
-          height: 78px;
-          min-height: 78px;
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 20px;
-          padding: 0 25px;
-          border-bottom: 1px solid var(--zuqen-border);
-          background: color-mix(
-            in srgb,
-            var(--zuqen-bg) 88%,
-            transparent
-          );
-          backdrop-filter: blur(22px);
-          z-index: 40;
-        }
-
-        .zuqen-topbar-left,
-        .zuqen-topbar-actions {
-          display: flex;
-          align-items: center;
-        }
-
-        .zuqen-topbar-left {
-          gap: 13px;
-          min-width: 0;
-        }
-
-        .zuqen-topbar-actions {
-          gap: 8px;
-        }
-
-        .zuqen-icon-button {
-          width: 40px;
-          height: 40px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          border-radius: 11px;
-          background: transparent;
-          color: var(--zuqen-muted);
-          transition: 0.18s ease;
-        }
-
-        .zuqen-icon-button:hover {
-          color: var(--zuqen-text);
-          background: var(--zuqen-hover);
-        }
-
-        .zuqen-top-title {
-          min-width: 0;
-        }
-
-        .top-title-main {
-          max-width: 420px;
-          overflow: hidden;
-          white-space: nowrap;
-          text-overflow: ellipsis;
-          font-size: 16px;
-          font-weight: 750;
-        }
-
-        .top-title-sub {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          margin-top: 4px;
-          color: var(--zuqen-soft);
-          font-size: 10px;
-        }
-
-        .online-dot {
-          width: 6px;
-          height: 6px;
-          border-radius: 50%;
-          background: var(--zuqen-green);
-          box-shadow: 0 0 10px
-            rgba(72, 213, 151, 0.65);
-        }
-
-        .zuqen-dropdown-wrap {
-          position: relative;
-        }
-
-        .zuqen-credit-button,
-        .zuqen-agent-button {
-          height: 40px;
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          padding: 0 11px;
-          border: 1px solid var(--zuqen-border);
-          border-radius: 11px;
-          color: var(--zuqen-muted);
-          background: var(--zuqen-panel);
-          transition: 0.18s ease;
-        }
-
-        .zuqen-credit-button:hover,
-        .zuqen-credit-button.active,
-        .zuqen-agent-button:hover,
-        .zuqen-agent-button.active {
-          color: var(--zuqen-text);
-          border-color: var(--zuqen-border-strong);
-          background: var(--zuqen-hover);
-        }
-
-        .credit-icon {
-          width: 25px;
-          height: 25px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          border-radius: 8px;
-          background: var(--zuqen-accent);
-          color: var(--zuqen-accent-text);
-        }
-
-        .zuqen-credit-button strong {
-          color: var(--zuqen-text);
-          font-size: 12px;
-        }
-
-        .credit-button-label,
-        .zuqen-agent-button span {
-          font-size: 12px;
-          font-weight: 650;
-        }
-
-        /* =====================================================
-           CREDITS
-        ===================================================== */
-
-        .zuqen-credits-panel {
-          position: absolute;
-          top: calc(100% + 10px);
-          right: 0;
-          width: 360px;
-          padding: 18px;
-          border: 1px solid var(--zuqen-border-strong);
-          border-radius: 18px;
-          background: var(--zuqen-panel);
-          box-shadow: var(--zuqen-shadow);
-          z-index: 100;
-          animation: zuqenDrop 0.18s ease;
-        }
-
-        @keyframes zuqenDrop {
-          from {
-            opacity: 0;
-            transform: translateY(-5px);
-          }
-
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-
-        .credits-panel-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          padding: 3px 3px 17px;
-        }
-
-        .credits-panel-header span {
-          color: var(--zuqen-soft);
-          font-size: 9px;
-          font-weight: 800;
-          letter-spacing: 1.5px;
-        }
-
-        .credits-panel-header h3 {
-          margin: 5px 0 0;
-          font-size: 29px;
-          letter-spacing: -1px;
-        }
-
-        .credits-large-icon {
-          width: 48px;
-          height: 48px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          border-radius: 14px;
-          background: var(--zuqen-panel-2);
-          color: var(--zuqen-text);
-        }
-
-        .credits-stat-row {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 8px;
-        }
-
-        .credits-stat-row > div {
-          padding: 11px;
-          border: 1px solid var(--zuqen-border);
-          border-radius: 11px;
-          background: var(--zuqen-bg);
-        }
-
-        .credits-stat-row span {
-          display: block;
-          color: var(--zuqen-soft);
-          font-size: 10px;
-        }
-
-        .credits-stat-row strong {
-          display: block;
-          margin-top: 4px;
-          font-size: 14px;
-        }
-
-        .credits-progress {
-          height: 5px;
-          margin: 13px 1px 18px;
-          border-radius: 99px;
-          overflow: hidden;
-          background: var(--zuqen-panel-2);
-        }
-
-        .credits-progress > div {
-          height: 100%;
-          border-radius: inherit;
-          background: var(--zuqen-accent);
-          transition: width 0.3s ease;
-        }
-
-        .credits-section-title {
-          margin: 4px 3px 9px;
-          color: var(--zuqen-soft);
-          font-size: 9px;
-          font-weight: 800;
-          letter-spacing: 1.4px;
-        }
-
-        .credits-features {
-          display: flex;
-          flex-direction: column;
-          gap: 6px;
-        }
-
-        .credit-feature {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          padding: 8px;
-          border-radius: 10px;
-        }
-
-        .credit-feature:hover {
-          background: var(--zuqen-hover);
-        }
-
-        .credit-feature-icon {
-          width: 31px;
-          height: 31px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          border-radius: 9px;
-          background: var(--zuqen-panel-2);
-          color: var(--zuqen-muted);
-        }
-
-        .credit-feature-main {
-          flex: 1;
-          min-width: 0;
-        }
-
-        .credit-feature-main > div:first-child {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 10px;
-        }
-
-        .credit-feature-main span {
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-          color: var(--zuqen-muted);
-          font-size: 11px;
-        }
-
-        .credit-feature-main strong {
-          color: var(--zuqen-text);
-          font-size: 11px;
-        }
-
-        .credit-feature-bar {
-          height: 3px;
-          margin-top: 6px;
-          overflow: hidden;
-          border-radius: 99px;
-          background: var(--zuqen-panel-2);
-        }
-
-        .credit-feature-bar div {
-          height: 100%;
-          border-radius: inherit;
-          background: var(--zuqen-text);
-        }
-
-        .credit-warning {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          margin-top: 13px;
-          padding: 10px;
-          border-radius: 10px;
-          color: #ffbdc5;
-          background: rgba(255, 107, 122, 0.08);
-          border: 1px solid
-            rgba(255, 107, 122, 0.15);
-          font-size: 11px;
-        }
-
-        .get-credit-button {
-          width: 100%;
-          height: 43px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 8px;
-          margin-top: 13px;
-          border-radius: 11px;
-          background: var(--zuqen-accent);
-          color: var(--zuqen-accent-text);
-          font-size: 12px;
-          font-weight: 750;
-          transition: 0.18s ease;
-        }
-
-        .get-credit-button:hover {
-          transform: translateY(-1px);
-          box-shadow: 0 10px 25px
-            rgba(255, 255, 255, 0.08);
-        }
-
-        /* =====================================================
-           AGENT DROPDOWN
-        ===================================================== */
-
-        .zuqen-agent-dropdown {
-          position: absolute;
-          top: calc(100% + 10px);
-          right: 0;
-          width: 245px;
-          padding: 6px;
-          border: 1px solid var(--zuqen-border-strong);
-          border-radius: 14px;
-          background: var(--zuqen-panel);
-          box-shadow: var(--zuqen-shadow);
-          z-index: 100;
-          animation: zuqenDrop 0.18s ease;
-        }
-
-        .zuqen-agent-dropdown button {
-          width: 100%;
-          height: 43px;
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          padding: 0 9px;
-          border-radius: 9px;
-          background: transparent;
-          color: var(--zuqen-muted);
-          text-align: left;
-          font-size: 12px;
-        }
-
-        .zuqen-agent-dropdown button:hover,
-        .zuqen-agent-dropdown button.selected {
-          color: var(--zuqen-text);
-          background: var(--zuqen-hover);
-        }
-
-        .zuqen-agent-dropdown button > span:nth-child(2) {
-          flex: 1;
-        }
-
-        .agent-option-icon {
-          width: 29px;
-          height: 29px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          border-radius: 8px;
-          background: var(--zuqen-panel-2);
-        }
-
-        /* =====================================================
-           CHAT
-        ===================================================== */
-
-        .zuqen-chat-area {
-          min-height: 0;
-          flex: 1;
-          display: flex;
-          flex-direction: column;
-        }
-
-        .zuqen-chat-scroll {
-          min-height: 0;
-          flex: 1;
-          overflow-y: auto;
-          scroll-behavior: smooth;
-        }
-
-        .zuqen-chat-scroll::-webkit-scrollbar {
-          width: 6px;
-        }
-
-        .zuqen-chat-scroll::-webkit-scrollbar-thumb {
-          background: var(--zuqen-border-strong);
-          border-radius: 99px;
-        }
-
-        /* =====================================================
-           WELCOME
-        ===================================================== */
-
-        .zuqen-welcome {
-          position: relative;
-          width: min(980px, calc(100% - 60px));
-          min-height: calc(100% - 20px);
-          margin: auto;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          text-align: center;
-          padding: 80px 20px;
-        }
-
-        .welcome-glow {
-          position: absolute;
-          width: 500px;
-          height: 300px;
-          top: 15%;
-          left: 50%;
-          transform: translateX(-50%);
-          background: radial-gradient(
-            ellipse,
-            rgba(255, 255, 255, 0.045),
-            transparent 65%
-          );
-          pointer-events: none;
-        }
-
-        .welcome-logo {
-          position: relative;
-          margin-bottom: 24px;
-        }
-
-        .welcome-logo .zuqen-logo-mark {
-          width: 72px;
-          height: 72px;
-          border-radius: 21px;
-          font-size: 34px;
-          box-shadow:
-            0 25px 60px
-              rgba(255, 255, 255, 0.08),
-            inset 0 1px 0
-              rgba(255, 255, 255, 0.9);
-        }
-
-        .welcome-eyebrow {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          color: var(--zuqen-soft);
-          font-size: 9px;
-          font-weight: 800;
-          letter-spacing: 2.5px;
-        }
-
-        .welcome-line {
-          width: 28px;
-          height: 1px;
-          background: var(--zuqen-border-strong);
-        }
-
-        .zuqen-welcome h1 {
-          margin: 18px 0 15px;
-          font-size: clamp(45px, 6vw, 72px);
-          line-height: 0.98;
-          letter-spacing: -4px;
-          font-weight: 820;
-        }
-
-        .zuqen-welcome h1 em {
-          font-style: normal;
-          color: var(--zuqen-muted);
-        }
-
-        .zuqen-welcome > p {
-          width: min(620px, 100%);
-          margin: 0;
-          color: var(--zuqen-muted);
-          font-size: 15px;
-          line-height: 1.75;
-        }
-
-        .welcome-suggestions {
-          width: min(840px, 100%);
-          display: grid;
-          grid-template-columns: repeat(3, 1fr);
-          gap: 10px;
-          margin-top: 38px;
-        }
-
-        .welcome-suggestions button {
-          min-height: 88px;
-          display: flex;
-          align-items: flex-start;
-          gap: 11px;
-          padding: 16px;
-          border: 1px solid var(--zuqen-border);
-          border-radius: 14px;
-          background: var(--zuqen-panel);
-          color: var(--zuqen-muted);
-          text-align: left;
-          transition: 0.2s ease;
-        }
-
-        .welcome-suggestions button:hover {
-          color: var(--zuqen-text);
-          border-color: var(--zuqen-border-strong);
-          transform: translateY(-2px);
-          box-shadow: var(--zuqen-shadow);
-        }
-
-        .welcome-suggestions button span {
-          flex: 1;
-          color: var(--zuqen-text);
-          font-size: 12px;
-          font-weight: 650;
-          line-height: 1.45;
-        }
-
-        .welcome-suggestions small {
-          color: var(--zuqen-soft);
-          font-size: 17px;
-        }
-
-        /* =====================================================
-           MESSAGES
-        ===================================================== */
-
-        .zuqen-messages {
-          width: min(1120px, calc(100% - 70px));
-          margin: 0 auto;
-          padding: 46px 0 165px;
-        }
-
-        .zuqen-message-row {
-          width: 100%;
-          display: flex;
-          margin-bottom: 34px;
-        }
-
-        .zuqen-message-row.user-message {
-          justify-content: flex-start;
-        }
-
-        .zuqen-message-row.ai-message {
-          justify-content: flex-end;
-        }
-
-        .zuqen-message-wrapper {
-          width: min(82%, 850px);
-          display: flex;
-          flex-direction: column;
-        }
-
-        .user-message .zuqen-message-wrapper {
-          align-items: flex-start;
-        }
-
-        .ai-message .zuqen-message-wrapper {
-          align-items: flex-end;
-        }
-
-        .message-author {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          margin: 0 5px 8px;
-          color: var(--zuqen-muted);
-          font-size: 11px;
-          font-weight: 750;
-        }
-
-        .ai-message .message-author {
-          justify-content: flex-end;
-        }
-
-        .author-avatar {
-          width: 28px;
-          height: 28px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          border-radius: 9px;
-        }
-
-        .user-avatar {
-          background: var(--zuqen-panel-2);
-          color: var(--zuqen-text);
-          font-size: 10px;
-          font-weight: 850;
-        }
-
-        .ai-avatar {
-          background: var(--zuqen-accent);
-          color: var(--zuqen-accent-text);
-        }
-
-        .mini-z-logo {
-          position: relative;
-          width: 22px;
-          height: 22px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-weight: 950;
-          font-size: 12px;
-          letter-spacing: -1px;
-        }
-
-        .mini-z-logo i {
-          position: absolute;
-          width: 4px;
-          height: 4px;
-          right: 1px;
-          top: 2px;
-          border-radius: 50%;
-          background: currentColor;
-        }
-
-        .ai-status {
-          padding: 3px 6px;
-          border-radius: 5px;
-          color: var(--zuqen-soft);
-          background: var(--zuqen-panel-2);
-          font-size: 8px;
-          letter-spacing: 0.5px;
-        }
-
-        .zuqen-message-card {
-          position: relative;
-          padding: 17px 19px;
-          border-radius: 18px;
-          border: 1px solid var(--zuqen-border);
-          box-shadow: 0 8px 30px
-            rgba(0, 0, 0, 0.08);
-        }
-
-        .user-card {
-          max-width: 82%;
-          color: var(--zuqen-text);
-          background:
-            linear-gradient(
-              135deg,
-              rgba(255, 255, 255, 0.075),
-              rgba(255, 255, 255, 0.035)
-            );
-          border-top-left-radius: 6px;
-        }
-
-        .ai-card {
-          width: 100%;
-          color: var(--zuqen-text);
-          background: var(--zuqen-panel);
-          border-top-right-radius: 6px;
-        }
-
-        .message-content {
-          white-space: pre-wrap;
-          word-break: break-word;
-          font-size: 15px;
-          line-height: 1.75;
-        }
-
-        .ai-card .message-content {
-          font-size: 15px;
-          line-height: 1.8;
-        }
-
-        .message-attachments {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 7px;
-          margin-top: 13px;
-        }
-
-        .message-attachment {
-          display: flex;
-          align-items: center;
-          gap: 7px;
-          padding: 7px 9px;
-          border-radius: 9px;
-          background: var(--zuqen-panel-2);
-          color: var(--zuqen-muted);
-          font-size: 10px;
-        }
-
-        .message-attachment span {
-          max-width: 180px;
-          overflow: hidden;
-          white-space: nowrap;
-          text-overflow: ellipsis;
-        }
-
-        .message-attachment small {
-          color: var(--zuqen-soft);
-        }
-
-        .message-actions {
-          display: flex;
-          gap: 3px;
-          margin-top: 7px;
-          opacity: 0;
-          transition: 0.18s ease;
-        }
-
-        .zuqen-message-wrapper:hover
-          .message-actions {
-          opacity: 1;
-        }
-
-        .message-actions button {
-          min-height: 29px;
-          display: flex;
-          align-items: center;
-          gap: 5px;
-          padding: 0 8px;
-          border-radius: 7px;
-          color: var(--zuqen-soft);
-          background: transparent;
-          font-size: 10px;
-        }
-
-        .message-actions button:hover {
-          color: var(--zuqen-text);
-          background: var(--zuqen-hover);
-        }
-
-        .message-actions button:disabled {
-          opacity: 0.4;
-          cursor: not-allowed;
-        }
-
-        /* =====================================================
-           THINKING
-        ===================================================== */
-
-        .ai-thinking {
-          display: flex;
-          align-items: center;
-          gap: 13px;
-          min-height: 62px;
-        }
-
-        .thinking-orb {
-          position: relative;
-          width: 40px;
-          height: 40px;
-          flex: 0 0 40px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 3px;
-          border-radius: 13px;
-          background: var(--zuqen-panel-2);
-          overflow: hidden;
-        }
-
-        .thinking-orb::before {
-          content: "";
-          position: absolute;
-          inset: -20px;
-          background: conic-gradient(
-            transparent,
-            rgba(255, 255, 255, 0.8),
-            transparent
-          );
-          animation: zuqenSpin 1.5s linear infinite;
-        }
-
-        .thinking-orb span {
-          position: relative;
-          z-index: 2;
-          width: 4px;
-          height: 4px;
-          border-radius: 50%;
-          background: var(--zuqen-text);
-          animation: zuqenThinking 1s
-            infinite ease-in-out;
-        }
-
-        .thinking-orb span:nth-child(2) {
-          animation-delay: 0.15s;
-        }
-
-        .thinking-orb span:nth-child(3) {
-          animation-delay: 0.3s;
-        }
-
-        @keyframes zuqenSpin {
-          to {
-            transform: rotate(360deg);
-          }
-        }
-
-        @keyframes zuqenThinking {
-          0%,
-          100% {
-            transform: translateY(2px);
-            opacity: 0.35;
-          }
-
-          50% {
-            transform: translateY(-3px);
-            opacity: 1;
-          }
-        }
-
-        .ai-thinking strong {
-          display: block;
-          font-size: 12px;
-        }
-
-        .ai-thinking p {
-          margin: 4px 0 0;
-          color: var(--zuqen-muted);
-          font-size: 11px;
-        }
-
-        .zuqen-ai-typing {
-          display: flex;
-          justify-content: flex-end;
-          align-items: center;
-          gap: 9px;
-          margin-top: 10px;
-        }
-
-        .typing-avatar {
-          width: 30px;
-          height: 30px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          border-radius: 9px;
-          background: var(--zuqen-accent);
-          color: var(--zuqen-accent-text);
-          animation: zuqenFloat 1.2s
-            infinite ease-in-out;
-        }
-
-        @keyframes zuqenFloat {
-          0%,
-          100% {
-            transform: translateY(0);
-          }
-
-          50% {
-            transform: translateY(-4px);
-          }
-        }
-
-        .typing-content {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          color: var(--zuqen-muted);
-          font-size: 11px;
-        }
-
-        /* =====================================================
-           COMPOSER
-        ===================================================== */
-
-        .zuqen-composer-area {
-          position: absolute;
-          left: 318px;
-          right: 0;
-          bottom: 0;
-          z-index: 30;
-          padding: 0 24px 18px;
-          pointer-events: none;
-        }
-
-        .zuqen-sidebar.closed
-          ~ .zuqen-main
-          .zuqen-composer-area {
-          left: 0;
-        }
-
-        .zuqen-composer-container {
-          width: min(980px, 100%);
-          margin: auto;
-          pointer-events: auto;
-        }
-
-        .editing-banner {
-          height: 39px;
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          padding: 0 11px;
-          margin-bottom: 6px;
-          border: 1px solid var(--zuqen-border);
-          border-radius: 10px 10px 0 0;
-          background: var(--zuqen-panel);
-          color: var(--zuqen-muted);
-          font-size: 11px;
-        }
-
-        .editing-banner > div {
-          display: flex;
-          align-items: center;
-          gap: 7px;
-        }
-
-        .editing-banner button {
-          display: flex;
-          align-items: center;
-          gap: 5px;
-          color: var(--zuqen-soft);
-          background: transparent;
-          font-size: 10px;
-        }
-
-        .attachment-preview-row {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 7px;
-          margin-bottom: 7px;
-        }
-
-        .attachment-preview {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          padding: 7px 9px;
-          border: 1px solid var(--zuqen-border);
-          border-radius: 10px;
-          background: var(--zuqen-panel);
-          box-shadow: var(--zuqen-shadow);
-        }
-
-        .attachment-preview-icon {
-          width: 28px;
-          height: 28px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          border-radius: 8px;
-          background: var(--zuqen-panel-2);
-          color: var(--zuqen-muted);
-        }
-
-        .attachment-preview div:nth-child(2) {
-          display: flex;
-          flex-direction: column;
-          min-width: 0;
-        }
-
-        .attachment-preview strong {
-          max-width: 150px;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-          color: var(--zuqen-text);
-          font-size: 10px;
-        }
-
-        .attachment-preview small {
-          margin-top: 2px;
-          color: var(--zuqen-soft);
-          font-size: 9px;
-        }
-
-        .attachment-preview button {
-          display: flex;
-          color: var(--zuqen-soft);
-          background: transparent;
-        }
-
-        .zuqen-composer {
-          padding: 13px 14px 10px;
-          border: 1px solid var(--zuqen-border-strong);
-          border-radius: 19px;
-          background:
-            linear-gradient(
-              145deg,
-              color-mix(
-                in srgb,
-                var(--zuqen-panel) 94%,
-                transparent
-              ),
-              var(--zuqen-bg-2)
-            );
-          box-shadow:
-            0 20px 55px
-              rgba(0, 0, 0, 0.22),
-            inset 0 1px 0
-              rgba(255, 255, 255, 0.035);
-          backdrop-filter: blur(24px);
-        }
-
-        .zuqen-composer textarea {
-          display: block;
-          width: 100%;
-          min-height: 54px;
-          max-height: 240px;
-          resize: none;
-          border: 0;
-          outline: 0;
-          background: transparent;
-          color: var(--zuqen-text);
-          font-size: 15px;
-          line-height: 1.65;
-          padding: 3px 2px 9px;
-        }
-
-        .zuqen-composer textarea::placeholder {
-          color: var(--zuqen-soft);
-        }
-
-        .zuqen-composer textarea:disabled {
-          opacity: 0.55;
-        }
-
-        .composer-bottom {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 12px;
-        }
-
-        .composer-tools,
-        .composer-right {
-          display: flex;
-          align-items: center;
-        }
-
-        .composer-tools {
-          gap: 2px;
-        }
-
-        .composer-tools button {
-          height: 33px;
-          display: flex;
-          align-items: center;
-          gap: 7px;
-          padding: 0 9px;
-          border-radius: 8px;
-          background: transparent;
-          color: var(--zuqen-muted);
-          font-size: 10px;
-          font-weight: 600;
-        }
-
-        .composer-tools button:hover {
-          color: var(--zuqen-text);
-          background: var(--zuqen-hover);
-        }
-
-        .composer-right {
-          gap: 10px;
-        }
-
-        .composer-hint {
-          color: var(--zuqen-soft);
-          font-size: 9px;
-        }
-
-        .zuqen-send {
-          width: 39px;
-          height: 39px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          border-radius: 11px;
-          background: var(--zuqen-panel-2);
-          color: var(--zuqen-soft);
-          transition: 0.2s ease;
-        }
-
-        .zuqen-send.ready {
-          color: var(--zuqen-accent-text);
-          background: var(--zuqen-accent);
-        }
-
-        .zuqen-send.ready:hover {
-          transform: translateY(-1px);
-          box-shadow: 0 8px 20px
-            rgba(255, 255, 255, 0.09);
-        }
-
-        .zuqen-send:disabled {
-          cursor: not-allowed;
-        }
-
-        .send-spinner {
-          width: 16px;
-          height: 16px;
-          border: 2px solid
-            currentColor;
-          border-right-color: transparent;
-          border-radius: 50%;
-          animation: zuqenSpin 0.7s linear infinite;
-        }
-
-        .composer-footer {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 12px;
-          padding: 8px 4px 0;
-          color: var(--zuqen-soft);
-          font-size: 8px;
-        }
-
-        .composer-security {
-          display: flex;
-          align-items: center;
-          gap: 4px;
-          white-space: nowrap;
-        }
-
-        /* =====================================================
-           MOBILE
-        ===================================================== */
-
-        .zuqen-mobile-overlay {
-          display: none;
-        }
-
-        @media (max-width: 1050px) {
-          .zuqen-sidebar {
-            width: 285px;
-            min-width: 285px;
-          }
-
-          .zuqen-composer-area {
-            left: 285px;
-          }
-
-          .zuqen-message-wrapper {
-            width: min(88%, 850px);
-          }
-        }
-
-        @media (max-width: 780px) {
-          .zuqen-sidebar {
-            position: fixed;
-            left: 0;
-            top: 0;
-            bottom: 0;
-            width: 300px;
-            min-width: 300px;
-            transform: translateX(0);
-            box-shadow: 20px 0 60px
-              rgba(0, 0, 0, 0.35);
-          }
-
-          .zuqen-sidebar.closed {
-            width: 300px;
-            min-width: 300px;
-            transform: translateX(-105%);
-          }
-
-          .zuqen-mobile-overlay {
-            position: fixed;
-            inset: 0;
-            display: block;
-            z-index: 45;
-            background: rgba(0, 0, 0, 0.5);
-            backdrop-filter: blur(3px);
-          }
-
-          .zuqen-topbar {
-            height: 67px;
-            min-height: 67px;
-            padding: 0 13px;
-          }
-
-          .top-title-main {
-            max-width: 170px;
-            font-size: 14px;
-          }
-
-          .zuqen-agent-button span {
-            display: none;
-          }
-
-          .zuqen-agent-button {
-            width: 40px;
-            justify-content: center;
-            padding: 0;
-          }
-
-          .zuqen-agent-button svg:last-child {
-            display: none;
-          }
-
-          .credit-button-label {
-            display: none;
-          }
-
-          .zuqen-credit-button {
-            padding: 0 8px;
-          }
-
-          .zuqen-composer-area,
-          .zuqen-sidebar.closed
-            ~ .zuqen-main
-            .zuqen-composer-area {
-            left: 0;
-            padding: 0 10px 9px;
-          }
-
-          .zuqen-messages {
-            width: calc(100% - 24px);
-            padding-top: 25px;
-            padding-bottom: 155px;
-          }
-
-          .zuqen-message-wrapper {
-            width: 94%;
-          }
-
-          .user-card {
-            max-width: 92%;
-          }
-
-          .message-content,
-          .ai-card .message-content {
-            font-size: 14px;
-          }
-
-          .zuqen-welcome {
-            width: calc(100% - 30px);
-            padding: 50px 10px;
-          }
-
-          .zuqen-welcome h1 {
-            font-size: 45px;
-            letter-spacing: -2.5px;
-          }
-
-          .zuqen-welcome > p {
-            font-size: 13px;
-          }
-
-          .welcome-suggestions {
-            grid-template-columns: 1fr;
-            width: min(430px, 100%);
-          }
-
-          .zuqen-credits-panel {
-            position: fixed;
-            top: 72px;
-            right: 10px;
-            left: 10px;
-            width: auto;
-            max-height: calc(100vh - 90px);
-            overflow-y: auto;
-          }
-
-          .composer-hint {
-            display: none;
-          }
-
-          .composer-footer {
-            font-size: 7px;
-          }
-
-          .composer-security {
-            display: none;
-          }
-        }
-
-        @media (max-width: 480px) {
-          .zuqen-topbar-actions {
-            gap: 2px;
-          }
-
-          .zuqen-topbar-left {
-            gap: 5px;
-          }
-
-          .zuqen-top-title {
-            display: none;
-          }
-
-          .zuqen-message-wrapper {
-            width: 96%;
-          }
-
-          .zuqen-message-row {
-            margin-bottom: 25px;
-          }
-
-          .zuqen-message-card {
-            padding: 14px;
-          }
-
-          .zuqen-welcome h1 {
-            font-size: 39px;
-          }
-
-          .zuqen-welcome > p {
-            font-size: 12px;
-          }
-
-          .composer-tools button span {
-            display: none;
-          }
-
-          .composer-tools button {
-            width: 35px;
-            padding: 0;
-            justify-content: center;
-          }
-
-          .zuqen-composer {
-            border-radius: 16px;
-          }
-        }
-      `}</style>
-    </div>
+        </main>
+      </div>
+    </>
   );
 }
+
+const globalStyles = `
+:root {
+  --bg: #08090c;
+  --panel: #0d0f13;
+  --panel-2: #11141a;
+  --panel-3: #171a21;
+  --border: rgba(255,255,255,.09);
+  --border-strong: rgba(255,255,255,.14);
+  --text: #f4f5f7;
+  --muted: #8d94a3;
+  --muted-2: #666d7b;
+  --accent: #8b7cff;
+  --accent-2: #b49cff;
+  --danger: #ff6868;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+  background: var(--bg);
+}
+
+body {
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+  color: var(--text);
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+.zuqen-app {
+  min-height: 100vh;
+  display: flex;
+  background:
+    radial-gradient(
+      circle at 50% -20%,
+      rgba(112,92,255,.10),
+      transparent 36%
+    ),
+    var(--bg);
+  overflow: hidden;
+}
+
+.zuqen-sidebar {
+  width: 292px;
+  min-width: 292px;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border);
+  background: rgba(11,13,17,.94);
+  backdrop-filter: blur(22px);
+  transition:
+    width .25s ease,
+    min-width .25s ease,
+    transform .25s ease;
+  z-index: 20;
+}
+
+.zuqen-sidebar.closed {
+  width: 0;
+  min-width: 0;
+  overflow: hidden;
+  border: 0;
+}
+
+.sidebar-top {
+  height: 76px;
+  padding: 0 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+
+.brand-mark,
+.zuqen-logo {
+  width: 39px;
+  height: 39px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  font-size: 23px;
+  font-weight: 900;
+  color: white;
+  background:
+    linear-gradient(145deg,#a796ff,#6555e9);
+  box-shadow:
+    0 10px 28px rgba(113,94,255,.28),
+    inset 0 1px 1px rgba(255,255,255,.25);
+}
+
+.brand-text {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+}
+
+.brand-text strong {
+  font-size: 18px;
+  letter-spacing: .06em;
+}
+
+.brand-text span {
+  color: var(--accent-2);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .12em;
+}
+
+.icon-button {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  color: var(--muted);
+  background: transparent;
+  transition: .18s ease;
+}
+
+.icon-button:hover {
+  color: var(--text);
+  background: rgba(255,255,255,.06);
+  border-color: var(--border);
+}
+
+.sidebar-close {
+  width: 34px;
+  height: 34px;
+}
+
+.new-chat-button {
+  margin: 18px;
+  height: 48px;
+  border: 0;
+  border-radius: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  color: white;
+  font-weight: 700;
+  background:
+    linear-gradient(
+      135deg,
+      #8978ff,
+      #6453e7
+    );
+  box-shadow:
+    0 12px 26px rgba(101,83,231,.20);
+  transition: .18s ease;
+}
+
+.new-chat-button:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    0 15px 30px rgba(101,83,231,.28);
+}
+
+.sidebar-search {
+  height: 42px;
+  margin: 0 18px 18px;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  color: var(--muted);
+  background: rgba(255,255,255,.025);
+}
+
+.sidebar-search input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  color: var(--text);
+  background: transparent;
+  font-size: 13px;
+}
+
+.sidebar-search input::placeholder {
+  color: var(--muted-2);
+}
+
+.sidebar-section-title {
+  padding: 0 20px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .12em;
+  font-weight: 800;
+}
+
+.chat-count {
+  min-width: 22px;
+  padding: 2px 6px;
+  text-align: center;
+  border-radius: 20px;
+  background: rgba(255,255,255,.06);
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.chat-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 10px;
+}
+
+.chat-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.chat-list::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,.08);
+  border-radius: 20px;
+}
+
+.chat-item {
+  min-height: 59px;
+  margin-bottom: 3px;
+  padding: 9px 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  position: relative;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  color: var(--muted);
+  transition: .16s ease;
+}
+
+.chat-item:hover {
+  background: rgba(255,255,255,.035);
+  color: var(--text);
+}
+
+.chat-item.active {
+  background: rgba(139,124,255,.10);
+  border-color: rgba(139,124,255,.16);
+  color: var(--text);
+}
+
+.chat-item-icon {
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  background: rgba(255,255,255,.045);
+}
+
+.chat-item.active .chat-item-icon {
+  color: var(--accent-2);
+  background: rgba(139,124,255,.12);
+}
+
+.chat-item-content {
+  min-width: 0;
+  flex: 1;
+}
+
+.chat-item-title {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: inherit;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.chat-item-time {
+  margin-top: 3px;
+  color: var(--muted-2);
+  font-size: 10px;
+}
+
+.chat-more {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  color: var(--muted);
+  background: transparent;
+  opacity: 0;
+  transition: .15s ease;
+}
+
+.chat-item:hover .chat-more,
+.chat-more:focus {
+  opacity: 1;
+}
+
+.chat-more:hover {
+  color: var(--text);
+  background: rgba(255,255,255,.07);
+}
+
+.chat-menu-wrapper {
+  position: relative;
+}
+
+.chat-context-menu {
+  width: 168px;
+  position: absolute;
+  top: 34px;
+  right: 0;
+  z-index: 80;
+  padding: 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: #14171d;
+  box-shadow:
+    0 18px 45px rgba(0,0,0,.42);
+}
+
+.chat-context-menu button {
+  width: 100%;
+  height: 36px;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border: 0;
+  border-radius: 8px;
+  color: #d5d9e1;
+  background: transparent;
+  font-size: 12px;
+  text-align: left;
+}
+
+.chat-context-menu button:hover {
+  background: rgba(255,255,255,.07);
+  color: white;
+}
+
+.chat-context-menu .danger-menu {
+  color: #ff8c8c;
+}
+
+.rename-input {
+  width: 100%;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid rgba(139,124,255,.45);
+  border-radius: 7px;
+  outline: 0;
+  color: white;
+  background: #151821;
+  font-size: 12px;
+}
+
+.empty-chats {
+  min-height: 170px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  color: var(--muted-2);
+  font-size: 12px;
+  text-align: center;
+}
+
+.sidebar-bottom {
+  padding: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.sidebar-option {
+  width: 100%;
+  height: 42px;
+  margin-bottom: 10px;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  border-radius: 9px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 12px;
+  text-align: left;
+}
+
+.sidebar-option:hover,
+.sidebar-option.selected {
+  color: var(--text);
+  background: rgba(255,255,255,.05);
+}
+
+.account-card {
+  padding: 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(255,255,255,.025);
+}
+
+.account-avatar {
+  width: 35px;
+  height: 35px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  border-radius: 10px;
+  color: white;
+  font-weight: 800;
+  background: linear-gradient(
+    135deg,
+    #8575ff,
+    #5443d3
+  );
+}
+
+.account-info {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.account-info strong {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.account-info span {
+  margin-top: 2px;
+  color: var(--muted-2);
+  font-size: 10px;
+}
+
+.zuqen-main {
+  min-width: 0;
+  flex: 1;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  height: 76px;
+  flex-shrink: 0;
+  padding: 0 25px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border);
+  background: rgba(8,9,12,.72);
+  backdrop-filter: blur(20px);
+}
+
+.topbar-left,
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.topbar-title {
+  margin-left: 3px;
+}
+
+.topbar-main-title {
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 750;
+}
+
+.topbar-subtitle {
+  margin-top: 2px;
+  color: var(--muted-2);
+  font-size: 10px;
+}
+
+.credits-wrapper,
+.agent-wrapper {
+  position: relative;
+}
+
+.credits-button,
+.agent-button {
+  height: 38px;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text);
+  background: rgba(255,255,255,.035);
+  font-size: 12px;
+}
+
+.credits-button:hover,
+.agent-button:hover {
+  border-color: var(--border-strong);
+  background: rgba(255,255,255,.06);
+}
+
+.credits-button svg {
+  color: var(--accent-2);
+}
+
+.credits-button small {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.agent-button svg {
+  color: var(--accent-2);
+}
+
+.credits-dropdown,
+.agent-dropdown {
+  width: 315px;
+  position: absolute;
+  top: 47px;
+  right: 0;
+  z-index: 100;
+  padding: 13px;
+  border: 1px solid var(--border-strong);
+  border-radius: 15px;
+  background: #111419;
+  box-shadow:
+    0 25px 70px rgba(0,0,0,.48);
+}
+
+.agent-dropdown {
+  width: 265px;
+}
+
+.dropdown-heading {
+  padding: 5px 5px 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.dropdown-heading div {
+  display: flex;
+  flex-direction: column;
+}
+
+.dropdown-heading strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.dropdown-heading span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.dropdown-heading > svg {
+  color: var(--accent-2);
+}
+
+.credit-total {
+  padding: 13px;
+  border: 1px solid rgba(139,124,255,.16);
+  border-radius: 11px;
+  background: rgba(139,124,255,.07);
+}
+
+.credit-total span {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.credit-total strong {
+  display: block;
+  margin-top: 5px;
+  color: white;
+  font-size: 24px;
+}
+
+.credit-stats {
+  margin: 8px 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.credit-stats div {
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(255,255,255,.025);
+}
+
+.credit-stats span {
+  display: block;
+  color: var(--muted-2);
+  font-size: 9px;
+}
+
+.credit-stats strong {
+  display: block;
+  margin-top: 3px;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.feature-credit-list {
+  max-height: 235px;
+  overflow-y: auto;
+}
+
+.feature-credit-row {
+  min-height: 49px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.feature-credit-icon {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  color: var(--accent-2);
+  background: rgba(139,124,255,.09);
+}
+
+.feature-credit-row > div:nth-child(2) {
+  min-width: 0;
+  flex: 1;
+}
+
+.feature-credit-row strong {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: #e8eaf0;
+  font-size: 11px;
+}
+
+.feature-credit-row span {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted-2);
+  font-size: 9px;
+}
+
+.feature-credit-row b {
+  color: white;
+  font-size: 11px;
+}
+
+.credit-loading {
+  padding: 18px 5px;
+  color: var(--muted);
+  font-size: 11px;
+  text-align: center;
+}
+
+.agent-dropdown > button {
+  width: 100%;
+  padding: 9px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  border-radius: 9px;
+  color: var(--text);
+  background: transparent;
+  text-align: left;
+}
+
+.agent-dropdown > button:hover {
+  background: rgba(255,255,255,.06);
+}
+
+.agent-icon {
+  width: 31px;
+  height: 31px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  border-radius: 9px;
+  color: var(--accent-2);
+  background: rgba(139,124,255,.09);
+}
+
+.agent-dropdown > button > span:last-child {
+  display: flex;
+  flex-direction: column;
+}
+
+.agent-dropdown strong {
+  font-size: 11px;
+}
+
+.agent-dropdown small {
+  margin-top: 2px;
+  color: var(--muted-2);
+  font-size: 9px;
+}
+
+.error-banner {
+  min-height: 42px;
+  padding: 7px 17px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(255,104,104,.16);
+  color: #ffadad;
+  background: rgba(255,75,75,.06);
+}
+
+.error-banner > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+}
+
+.error-banner button {
+  width: 29px;
+  height: 29px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 7px;
+  color: #ffadad;
+  background: transparent;
+}
+
+.chat-area {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.chat-area::-webkit-scrollbar {
+  width: 5px;
+}
+
+.chat-area::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,.08);
+  border-radius: 20px;
+}
+
+.welcome-screen {
+  width: min(900px, calc(100% - 40px));
+  min-height: 100%;
+  margin: auto;
+  padding: 70px 0 45px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.welcome-orb {
+  width: 76px;
+  height: 76px;
+  margin-bottom: 20px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(139,124,255,.28);
+  border-radius: 23px;
+  background:
+    radial-gradient(
+      circle at 30% 20%,
+      rgba(186,169,255,.25),
+      rgba(99,80,220,.08)
+    );
+  box-shadow:
+    0 20px 60px rgba(100,80,220,.18);
+}
+
+.welcome-z {
+  font-size: 38px;
+  font-weight: 900;
+  background: linear-gradient(
+    135deg,
+    #fff,
+    #8d7cff
+  );
+  -webkit-background-clip: text;
+  color: transparent;
+}
+
+.welcome-badge {
+  height: 28px;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid rgba(139,124,255,.18);
+  border-radius: 20px;
+  color: #b5aaff;
+  background: rgba(139,124,255,.06);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .13em;
+}
+
+.welcome-screen h1 {
+  margin: 17px 0 8px;
+  color: white;
+  font-size: clamp(34px, 5vw, 55px);
+  line-height: 1.05;
+  text-align: center;
+  letter-spacing: -.045em;
+}
+
+.welcome-screen h1 span {
+  background: linear-gradient(
+    90deg,
+    #ffffff,
+    #a193ff
+  );
+  -webkit-background-clip: text;
+  color: transparent;
+}
+
+.welcome-screen > p {
+  max-width: 570px;
+  margin: 0 0 30px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.7;
+  text-align: center;
+}
+
+.home-search-card {
+  width: min(720px, 100%);
+  min-height: 82px;
+  padding: 13px;
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  border: 1px solid rgba(255,255,255,.09);
+  border-radius: 17px;
+  background:
+    linear-gradient(
+      135deg,
+      rgba(255,255,255,.045),
+      rgba(255,255,255,.018)
+    );
+  box-shadow:
+    0 15px 55px rgba(0,0,0,.18);
+}
+
+.home-search-icon {
+  width: 50px;
+  height: 50px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  border-radius: 13px;
+  color: var(--accent-2);
+  background: rgba(139,124,255,.09);
+}
+
+.home-search-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.home-search-content strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.home-search-content span {
+  margin-top: 4px;
+  color: var(--muted-2);
+  font-size: 10px;
+}
+
+.home-search-card button {
+  height: 38px;
+  padding: 0 15px;
+  border: 1px solid rgba(139,124,255,.25);
+  border-radius: 10px;
+  color: #d8d3ff;
+  background: rgba(139,124,255,.09);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.home-search-card button:hover {
+  background: rgba(139,124,255,.16);
+}
+
+.suggestion-grid {
+  width: min(720px, 100%);
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 9px;
+}
+
+.suggestion-grid button {
+  min-height: 74px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  color: var(--muted);
+  background: rgba(255,255,255,.02);
+  text-align: left;
+  transition: .16s ease;
+}
+
+.suggestion-grid button:hover {
+  color: var(--text);
+  border-color: rgba(139,124,255,.22);
+  background: rgba(139,124,255,.055);
+  transform: translateY(-1px);
+}
+
+.suggestion-grid svg {
+  color: var(--accent-2);
+}
+
+.suggestion-grid span {
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.messages-container {
+  width: min(1000px, calc(100% - 50px));
+  margin: 0 auto;
+  padding: 35px 0 100px;
+}
+
+.message-row {
+  width: 100%;
+  display: flex;
+  margin-bottom: 30px;
+}
+
+.user-row {
+  justify-content: flex-start;
+}
+
+.assistant-row {
+  justify-content: flex-end;
+}
+
+.message-block {
+  width: min(82%, 820px);
+}
+
+.message-label {
+  margin-bottom: 8px;
+  color: var(--muted-2);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+}
+
+.user-row .message-label {
+  text-align: left;
+}
+
+.assistant-row .message-label {
+  text-align: right;
+  color: #aaa0ff;
+}
+
+.message-box {
+  padding: 18px 20px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow:
+    0 10px 35px rgba(0,0,0,.12);
+}
+
+.user-message {
+  color: #f0f1f5;
+  background: #15181e;
+  border-top-left-radius: 6px;
+}
+
+.assistant-message {
+  min-height: 76px;
+  color: #e5e7ec;
+  background:
+    linear-gradient(
+      145deg,
+      rgba(139,124,255,.065),
+      rgba(255,255,255,.018)
+    );
+  border-color: rgba(139,124,255,.13);
+  border-top-right-radius: 6px;
+}
+
+.message-text {
+  color: inherit;
+  font-size: 15px;
+  line-height: 1.8;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.message-actions {
+  min-height: 29px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  opacity: .6;
+  transition: .16s ease;
+}
+
+.message-block:hover .message-actions {
+  opacity: 1;
+}
+
+.user-row .message-actions {
+  justify-content: flex-start;
+}
+
+.message-actions button {
+  height: 27px;
+  padding: 0 7px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  border-radius: 7px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 9px;
+}
+
+.message-actions button:hover {
+  color: var(--text);
+  background: rgba(255,255,255,.055);
+}
+
+.typing-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 7px;
+  vertical-align: middle;
+}
+
+.typing-indicator i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #a498ff;
+  animation:
+    typing .9s infinite ease-in-out;
+}
+
+.typing-indicator i:nth-child(2) {
+  animation-delay: .15s;
+}
+
+.typing-indicator i:nth-child(3) {
+  animation-delay: .3s;
+}
+
+@keyframes typing {
+  0%,
+  100% {
+    transform: translateY(0);
+    opacity: .35;
+  }
+
+  50% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
+}
+
+.thinking-state {
+  display: flex;
+  align-items: center;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.edit-box textarea {
+  width: 100%;
+  min-height: 110px;
+  resize: vertical;
+  padding: 12px;
+  border: 1px solid rgba(139,124,255,.35);
+  border-radius: 10px;
+  outline: 0;
+  color: white;
+  background: #0d0f13;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.edit-actions {
+  margin-top: 9px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.edit-actions button {
+  height: 32px;
+  padding: 0 11px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 10px;
+}
+
+.edit-actions button:hover {
+  color: white;
+  background: rgba(255,255,255,.05);
+}
+
+.edit-actions .primary-small {
+  border-color: rgba(139,124,255,.28);
+  color: white;
+  background: rgba(139,124,255,.13);
+}
+
+.message-attachments,
+.attachment-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.message-attachments {
+  margin-top: 12px;
+}
+
+.message-attachment,
+.attachment-chip {
+  min-height: 32px;
+  padding: 0 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+  background: rgba(0,0,0,.15);
+  font-size: 10px;
+}
+
+.message-attachment span,
+.attachment-chip span {
+  max-width: 180px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.message-attachment small,
+.attachment-chip small {
+  color: var(--muted-2);
+}
+
+.attachment-chip button {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  color: var(--muted);
+  background: transparent;
+}
+
+.attachment-chip button:hover {
+  color: #ff9a9a;
+  background: rgba(255,100,100,.08);
+}
+
+.composer-area {
+  width: min(1000px, calc(100% - 50px));
+  margin: 0 auto;
+  padding: 0 0 19px;
+}
+
+.attachment-preview {
+  margin-bottom: 8px;
+}
+
+.composer {
+  padding: 9px 10px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 17px;
+  background:
+    linear-gradient(
+      145deg,
+      rgba(255,255,255,.045),
+      rgba(255,255,255,.018)
+    );
+  box-shadow:
+    0 15px 50px rgba(0,0,0,.24);
+}
+
+.composer-top {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.composer-icon {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  border: 0;
+  border-radius: 10px;
+  color: var(--muted);
+  background: transparent;
+}
+
+.composer-icon:hover {
+  color: var(--text);
+  background: rgba(255,255,255,.06);
+}
+
+.composer-top textarea {
+  max-height: 220px;
+  min-height: 40px;
+  flex: 1;
+  resize: none;
+  overflow-y: auto;
+  padding: 10px 4px;
+  border: 0;
+  outline: 0;
+  color: white;
+  background: transparent;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.composer-top textarea::placeholder {
+  color: var(--muted-2);
+}
+
+.send-button {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  border: 0;
+  border-radius: 11px;
+  color: var(--muted-2);
+  background: rgba(255,255,255,.055);
+}
+
+.send-button.ready {
+  color: white;
+  background:
+    linear-gradient(
+      135deg,
+      #8b7cff,
+      #6554e6
+    );
+  box-shadow:
+    0 8px 20px rgba(101,84,230,.22);
+}
+
+.send-button.ready:hover {
+  transform: translateY(-1px);
+}
+
+.send-spinner {
+  width: 17px;
+  height: 17px;
+  border: 2px solid rgba(255,255,255,.28);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin .7s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.composer-bottom {
+  min-height: 19px;
+  padding: 4px 3px 0;
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted-2);
+  font-size: 9px;
+}
+
+.composer-bottom span {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.composer-bottom svg {
+  color: var(--accent-2);
+}
+
+.zuqen-loading-screen {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  background:
+    radial-gradient(
+      circle at 50% 35%,
+      rgba(112,92,255,.14),
+      transparent 30%
+    ),
+    #08090c;
+}
+
+.loading-logo {
+  width: 58px;
+  height: 58px;
+  margin-bottom: 17px;
+  font-size: 31px;
+}
+
+.loading-title {
+  font-size: 18px;
+  font-weight: 850;
+  letter-spacing: .1em;
+}
+
+.loading-subtitle {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.loading-dots {
+  margin-top: 18px;
+  display: flex;
+  gap: 5px;
+}
+
+.loading-dots span {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #9487ff;
+  animation: typing .9s infinite;
+}
+
+.loading-dots span:nth-child(2) {
+  animation-delay: .15s;
+}
+
+.loading-dots span:nth-child(3) {
+  animation-delay: .3s;
+}
+
+.light {
+  --bg: #f5f6fa;
+  --panel: #ffffff;
+  --panel-2: #f8f9fc;
+  --panel-3: #eef0f5;
+  --border: rgba(20,24,32,.10);
+  --border-strong: rgba(20,24,32,.16);
+  --text: #161820;
+  --muted: #656c79;
+  --muted-2: #8a909b;
+}
+
+.light .zuqen-app {
+  background: #f5f6fa;
+}
+
+.light .zuqen-sidebar {
+  background: rgba(250,251,253,.94);
+}
+
+.light .topbar {
+  background: rgba(248,249,252,.82);
+}
+
+.light .credits-dropdown,
+.light .agent-dropdown,
+.light .chat-context-menu {
+  background: white;
+  box-shadow:
+    0 25px 70px rgba(20,24,32,.14);
+}
+
+.light .user-message {
+  color: #242731;
+  background: #ffffff;
+}
+
+.light .assistant-message {
+  color: #252934;
+  background: #faf9ff;
+}
+
+.light .composer,
+.light .home-search-card,
+.light .suggestion-grid button {
+  background: white;
+}
+
+.light .composer-top textarea,
+.light .rename-input,
+.light .edit-box textarea {
+  color: #20232c;
+}
+
+@media (max-width: 900px) {
+  .zuqen-sidebar {
+    position: fixed;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    box-shadow: 20px 0 60px rgba(0,0,0,.30);
+  }
+
+  .zuqen-sidebar.closed {
+    transform: translateX(-100%);
+    width: 292px;
+    min-width: 292px;
+  }
+
+  .topbar {
+    padding: 0 15px;
+  }
+
+  .topbar-subtitle {
+    display: none;
+  }
+
+  .agent-button span {
+    display: none;
+  }
+
+  .credits-button small {
+    display: none;
+  }
+
+  .messages-container,
+  .composer-area {
+    width: calc(100% - 28px);
+  }
+
+  .message-block {
+    width: 90%;
+  }
+
+  .suggestion-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 600px) {
+  .topbar {
+    height: 65px;
+  }
+
+  .topbar-main-title {
+    max-width: 180px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .credits-button {
+    padding: 0 8px;
+  }
+
+  .credits-button span {
+    font-size: 11px;
+  }
+
+  .theme-button {
+    display: none;
+  }
+
+  .welcome-screen {
+    width: calc(100% - 28px);
+    padding: 40px 0 25px;
+  }
+
+  .welcome-screen h1 {
+    font-size: 34px;
+  }
+
+  .welcome-screen > p {
+    font-size: 12px;
+  }
+
+  .home-search-card {
+    padding: 10px;
+  }
+
+  .home-search-content span {
+    display: none;
+  }
+
+  .suggestion-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .suggestion-grid button {
+    min-height: 68px;
+  }
+
+  .message-block {
+    width: 94%;
+  }
+
+  .message-text {
+    font-size: 14px;
+  }
+
+  .composer-bottom span:last-child {
+    display: none;
+  }
+
+  .composer-area {
+    padding-bottom: 9px;
+  }
+}
+`;
