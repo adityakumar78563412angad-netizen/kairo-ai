@@ -1,3 +1,4 @@
+
 import {
   GetObjectCommand,
   S3Client,
@@ -38,7 +39,9 @@ type GroqUsage = {
   total_time?: number;
 };
 
-function isImageAttachment(attachment: Attachment) {
+function isImageAttachment(
+  attachment: Attachment
+) {
   const type =
     typeof attachment.type === "string"
       ? attachment.type.toLowerCase()
@@ -55,7 +58,9 @@ function isImageAttachment(attachment: Attachment) {
   );
 }
 
-async function getB2SignedUrl(key: string) {
+async function getB2SignedUrl(
+  key: string
+) {
   const applicationKeyId =
     process.env.B2_APPLICATION_KEY_ID?.trim();
 
@@ -79,26 +84,32 @@ async function getB2SignedUrl(key: string) {
     );
   }
 
-  const regionMatch = endpoint.match(
-    /s3\.([a-z0-9-]+)\.backblazeb2\.com/i
-  );
+  const regionMatch =
+    endpoint.match(
+      /s3\.([a-z0-9-]+)\.backblazeb2\.com/i
+    );
 
   const region =
-    regionMatch?.[1] || "us-east-005";
+    regionMatch?.[1] ||
+    "us-east-005";
 
-  const s3 = new S3Client({
-    region,
-    endpoint,
-    credentials: {
-      accessKeyId: applicationKeyId,
-      secretAccessKey: applicationKey,
-    },
-  });
+  const s3 =
+    new S3Client({
+      region,
+      endpoint,
+      credentials: {
+        accessKeyId:
+          applicationKeyId,
+        secretAccessKey:
+          applicationKey,
+      },
+    });
 
-  const command = new GetObjectCommand({
-    Bucket: bucketName,
-    Key: key,
-  });
+  const command =
+    new GetObjectCommand({
+      Bucket: bucketName,
+      Key: key,
+    });
 
   return await getSignedUrl(
     s3,
@@ -125,13 +136,14 @@ async function imageToDataUrl(
       attachment.key
     );
 
-  const response = await fetch(
-    signedUrl,
-    {
-      method: "GET",
-      cache: "no-store",
-    }
-  );
+  const response =
+    await fetch(
+      signedUrl,
+      {
+        method: "GET",
+        cache: "no-store",
+      }
+    );
 
   if (!response.ok) {
     throw new Error(
@@ -231,31 +243,6 @@ function toSafeNumber(
   );
 }
 
-/**
- * FINAL ZUQEN CHAT CREDIT RULE
- *
- * 1 ZUQEN Chat Credit = 1,000 Groq tokens
- *
- * 1 - 1,000 tokens   = 1 credit
- * 1,001 - 2,000     = 2 credits
- * 2,001 - 3,000     = 3 credits
- * etc.
- */
-function groqTokensToZuquenCredits(
-  totalTokens: number
-) {
-  if (
-    !Number.isFinite(totalTokens) ||
-    totalTokens <= 0
-  ) {
-    return 0;
-  }
-
-  return Math.ceil(
-    totalTokens / 1000
-  );
-}
-
 function jsonError(
   error: string,
   code: string,
@@ -321,16 +308,12 @@ export async function POST(
     userId =
       user.id;
 
-    console.log(
-      "ZUQEN CHAT USER:",
-      userId
-    );
-
     // =====================================================
-    // 2. CHECK CURRENT CREDIT BALANCE
+    // 2. CHECK CHAT CREDIT BALANCE
     // =====================================================
 
-    let currentChatCredits = 0;
+    let currentChatCredits =
+      0;
 
     try {
       currentChatCredits =
@@ -351,17 +334,9 @@ export async function POST(
       );
     }
 
-    console.log(
-      "ZUQEN CHAT CREDIT BALANCE:",
-      {
-        userId,
-        balance:
-          currentChatCredits,
-      }
-    );
-
+    // One message always requires exactly 1 credit.
     if (
-      currentChatCredits <= 0
+      currentChatCredits < 1
     ) {
       return jsonError(
         "Your ZUQEN Chat credits are 0. Please add Chat credits before sending a message.",
@@ -369,14 +344,14 @@ export async function POST(
         402,
         {
           feature: "chat",
-          provider: "groq",
           creditBalance: 0,
+          creditPerMessage: 1,
         }
       );
     }
 
     // =====================================================
-    // 3. PARSE BODY
+    // 3. PARSE REQUEST
     // =====================================================
 
     let body: any;
@@ -399,7 +374,8 @@ export async function POST(
         ? body.messages
         : [];
 
-    const messages: InputMessage[] =
+    const messages:
+      InputMessage[] =
       rawMessages
         .filter(
           (message: any) =>
@@ -453,7 +429,7 @@ export async function POST(
     }
 
     // =====================================================
-    // 4. IMAGES
+    // 4. IMAGE CHECK
     // =====================================================
 
     const imageAttachments =
@@ -474,29 +450,11 @@ export async function POST(
         ? "qwen/qwen3.6-27b"
         : "openai/gpt-oss-120b";
 
-    // =====================================================
-    // 6. CHAT REFERENCE
-    // =====================================================
-
     chatReferenceId =
       `chat-${crypto.randomUUID()}`;
 
-    console.log(
-      "ZUQEN CHAT REQUEST:",
-      {
-        userId,
-        currentChatCredits,
-        hasImages,
-        model,
-        referenceId:
-          chatReferenceId,
-        creditRule:
-          "1000 Groq tokens = 1 ZUQEN Chat Credit",
-      }
-    );
-
     // =====================================================
-    // 7. GROQ KEY
+    // 6. GROQ API KEY
     // =====================================================
 
     const apiKey =
@@ -511,47 +469,44 @@ export async function POST(
     }
 
     // =====================================================
-    // 8. SYSTEM PROMPT
+    // 7. SYSTEM PROMPT
     // =====================================================
 
     const systemPrompt = `
 You are ZUQEN, a helpful, intelligent, friendly and natural AI assistant.
 
 RESPONSE LENGTH:
-
 - Match the answer length to the user's question.
 - Simple questions should receive short answers.
 - Do not add unnecessary introductions or conclusions.
 - Give detailed answers when the user asks for detail.
-- Be clear and useful.
 
 LANGUAGE:
-
 - Hindi user -> Hindi.
 - Hinglish user -> natural Hinglish.
 - English user -> English.
 - Match the user's tone.
 
 IMAGE UNDERSTANDING:
-
 - When an image is attached, analyze the actual image.
 - Never claim that you cannot see a valid attached image.
 - Do not invent details that are not visible.
 - If something is unclear, say that it is unclear.
-- You may discuss visible objects, text, colors, composition, lighting, quality and mood.
 
 Be accurate, natural and concise.
 `;
 
     // =====================================================
-    // 9. BUILD GROQ MESSAGES
+    // 8. BUILD GROQ MESSAGES
     // =====================================================
 
-    let groqMessages: any[] = [];
+    let groqMessages:
+      any[] = [];
 
     try {
       if (hasImages) {
-        const imageParts: any[] = [];
+        const imageParts:
+          any[] = [];
 
         for (
           const attachment of imageAttachments
@@ -562,9 +517,12 @@ Be accurate, natural and concise.
             );
 
           imageParts.push({
-            type: "image_url",
+            type:
+              "image_url",
+
             image_url: {
-              url: dataUrl,
+              url:
+                dataUrl,
             },
           });
         }
@@ -590,7 +548,8 @@ Be accurate, natural and concise.
 
         groqMessages = [
           {
-            role: "system",
+            role:
+              "system",
             content:
               systemPrompt,
           },
@@ -605,14 +564,19 @@ Be accurate, natural and concise.
           ),
 
           {
-            role: "user",
+            role:
+              "user",
+
             content: [
               {
-                type: "text",
+                type:
+                  "text",
+
                 text:
                   userText ||
                   "Please analyze the attached image.",
               },
+
               ...imageParts,
             ],
           },
@@ -620,7 +584,8 @@ Be accurate, natural and concise.
       } else {
         groqMessages = [
           {
-            role: "system",
+            role:
+              "system",
             content:
               systemPrompt,
           },
@@ -651,17 +616,19 @@ Be accurate, natural and concise.
     }
 
     // =====================================================
-    // 10. GROQ REQUEST
+    // 9. CALL GROQ
     // =====================================================
 
-    let groqResponse: Response;
+    let groqResponse:
+      Response;
 
     try {
       groqResponse =
         await fetch(
           "https://api.groq.com/openai/v1/chat/completions",
           {
-            method: "POST",
+            method:
+              "POST",
 
             headers: {
               "Content-Type":
@@ -671,29 +638,32 @@ Be accurate, natural and concise.
                 `Bearer ${apiKey}`,
             },
 
-            body: JSON.stringify({
-              model,
+            body:
+              JSON.stringify({
+                model,
 
-              messages:
-                groqMessages,
+                messages:
+                  groqMessages,
 
-              temperature:
-                hasImages
-                  ? 0.4
-                  : 0.5,
+                temperature:
+                  hasImages
+                    ? 0.4
+                    : 0.5,
 
-              max_completion_tokens:
-                2048,
+                max_completion_tokens:
+                  2048,
 
-              stream: true,
-
-              stream_options: {
-                include_usage:
+                stream:
                   true,
-              },
-            }),
 
-            cache: "no-store",
+                stream_options: {
+                  include_usage:
+                    true,
+                },
+              }),
+
+            cache:
+              "no-store",
           }
         );
     } catch (error) {
@@ -702,17 +672,15 @@ Be accurate, natural and concise.
         error
       );
 
-      const errorMessage =
+      return jsonError(
         error instanceof Error
           ? error.message
-          : "Unable to connect to Groq.";
-
-      return jsonError(
-        `Unable to connect to the AI provider: ${errorMessage}`,
+          : "Unable to connect to Groq.",
         "GROQ_NETWORK_ERROR",
         502,
         {
-          provider: "groq",
+          provider:
+            "groq",
           creditBalance:
             currentChatCredits,
         }
@@ -720,7 +688,7 @@ Be accurate, natural and concise.
     }
 
     // =====================================================
-    // 11. GROQ QUOTA
+    // 10. GROQ QUOTA
     // =====================================================
 
     const groqQuotaHeaders =
@@ -729,19 +697,9 @@ Be accurate, natural and concise.
       );
 
     try {
-      const quotaSync =
-        await syncGroqQuotaFromHeaders(
-          groqResponse.headers
-        );
-
-      if (
-        !quotaSync.success
-      ) {
-        console.warn(
-          "ZUQEN GROQ QUOTA SYNC FAILED:",
-          quotaSync.error
-        );
-      }
+      await syncGroqQuotaFromHeaders(
+        groqResponse.headers
+      );
     } catch (error) {
       console.warn(
         "ZUQEN GROQ QUOTA SYNC ERROR:",
@@ -750,7 +708,7 @@ Be accurate, natural and concise.
     }
 
     // =====================================================
-    // 12. GROQ HTTP ERROR
+    // 11. GROQ ERROR
     // =====================================================
 
     if (
@@ -784,7 +742,7 @@ Be accurate, natural and concise.
           parsed?.error ||
           message;
       } catch {
-        // Keep original text.
+        // Keep original message.
       }
 
       return jsonError(
@@ -792,19 +750,15 @@ Be accurate, natural and concise.
         "GROQ_REQUEST_FAILED",
         groqResponse.status,
         {
-          feature: "chat",
-          provider: "groq",
-          groqQuota:
-            groqQuotaHeaders,
+          provider:
+            "groq",
           creditBalance:
             currentChatCredits,
+          groqQuota:
+            groqQuotaHeaders,
         }
       );
     }
-
-    // =====================================================
-    // 13. EMPTY BODY
-    // =====================================================
 
     if (
       !groqResponse.body
@@ -814,7 +768,8 @@ Be accurate, natural and concise.
         "GROQ_EMPTY_RESPONSE",
         502,
         {
-          provider: "groq",
+          provider:
+            "groq",
           creditBalance:
             currentChatCredits,
         }
@@ -822,7 +777,7 @@ Be accurate, natural and concise.
     }
 
     // =====================================================
-    // 14. STREAM
+    // 12. STREAM RESPONSE
     // =====================================================
 
     const encoder =
@@ -839,7 +794,8 @@ Be accurate, natural and concise.
           const reader =
             groqResponse.body!.getReader();
 
-          let buffer = "";
+          let buffer =
+            "";
 
           let groqUsage:
             GroqUsage | null =
@@ -848,9 +804,6 @@ Be accurate, natural and concise.
           let groqRequestId:
             string | null =
             null;
-
-          let streamCompleted =
-            false;
 
           let streamClosed =
             false;
@@ -876,20 +829,9 @@ Be accurate, natural and concise.
             );
           }
 
-          function sendError(
-            message: string,
-            code: string
-          ) {
-            sendEvent({
-              error:
-                message,
-              code,
-            });
-          }
-
           try {
             // =================================================
-            // READ GROQ STREAM
+            // READ STREAM
             // =================================================
 
             while (true) {
@@ -991,20 +933,19 @@ Be accurate, natural and concise.
                       text,
                     });
                   }
-                } catch (error) {
+                } catch (
+                  parseError
+                ) {
                   console.warn(
                     "ZUQEN STREAM JSON PARSE ERROR:",
-                    error
+                    parseError
                   );
                 }
               }
             }
 
-            streamCompleted =
-              true;
-
             // =================================================
-            // 15. FINAL GROQ USAGE
+            // 13. ACTUAL GROQ USAGE
             // =================================================
 
             const inputTokens =
@@ -1022,12 +963,6 @@ Be accurate, natural and concise.
                 groqUsage?.total_tokens
               );
 
-            /*
-             * Safety fallback:
-             *
-             * If Groq does not return total_tokens,
-             * use prompt + completion.
-             */
             if (
               totalTokens <= 0 &&
               (
@@ -1040,27 +975,36 @@ Be accurate, natural and concise.
                 outputTokens;
             }
 
+            // =================================================
+            // IMPORTANT:
+            //
+            // GROQ TOKENS DO NOT DECIDE CHAT CREDITS.
+            //
+            // ONE SUCCESSFUL MESSAGE = ONE CREDIT.
+            // =================================================
+
             const zuqenChatCreditsUsed =
-              groqTokensToZuquenCredits(
-                totalTokens
-              );
+              1;
 
             console.log(
-              "ZUQEN FINAL CHAT USAGE:",
+              "ZUQEN CHAT USAGE:",
               {
                 userId,
                 groqRequestId,
                 inputTokens,
                 outputTokens,
                 totalTokens,
-                zuqenChatCreditsUsed,
-                conversionRate:
-                  "1000 Groq tokens = 1 ZUQEN Chat Credit",
+
+                zuqenChatCreditsUsed:
+                  1,
+
+                creditRule:
+                  "1 Chat Message = 1 ZUQEN Chat Credit",
               }
             );
 
             // =================================================
-            // 16. RECORD PROVIDER USAGE
+            // 14. RECORD PROVIDER USAGE
             // =================================================
 
             let usageRecord:
@@ -1111,13 +1055,11 @@ Be accurate, natural and concise.
                     groqQuota:
                       groqQuotaHeaders,
 
-                    zuqenChatCreditsUsed,
+                    zuqenChatCreditsUsed:
+                      1,
 
-                    conversionRate:
-                      "1000 Groq tokens = 1 ZUQEN Chat Credit",
-
-                    creditCalculation:
-                      `ceil(${totalTokens} / 1000) = ${zuqenChatCreditsUsed}`,
+                    creditRule:
+                      "1 Chat Message = 1 ZUQEN Chat Credit",
                   },
                 });
             } catch (error) {
@@ -1128,151 +1070,101 @@ Be accurate, natural and concise.
             }
 
             // =================================================
-            // 17. CONSUME ACTUAL CREDITS
-            // =================================================
-            //
-            // IMPORTANT:
-            //
-            // NO RESERVATION.
-            // NO ESTIMATION.
-            // NO PRE-CONSUMPTION.
-            //
-            // Only actual Groq tokens are converted.
-            //
-            // Example:
-            // 300 tokens  -> 1 credit
-            // 1000 tokens -> 1 credit
-            // 1001 tokens -> 2 credits
-            // 2000 tokens -> 2 credits
-            // 2001 tokens -> 3 credits
-            //
+            // 15. CONSUME EXACTLY 1 CREDIT
             // =================================================
 
             let creditConsumption:
               any = null;
 
-            if (
-              zuqenChatCreditsUsed >
-              0
-            ) {
-              try {
-                creditConsumption =
-                  await consumeFeatureCredits(
-                    {
-                      userId:
-                        userId!,
-
-                      featureKey:
-                        "chat",
-
-                      amount:
-                        zuqenChatCreditsUsed,
-
-                      providerRequestId:
-                        groqRequestId,
-
-                      description:
-                        "Groq Chat usage converted to ZUQEN Chat Credits",
-
-                      referenceId:
-                        usageRecord?.id ??
-                        chatReferenceId,
-
-                      metadata: {
-                        model,
-
-                        inputTokens,
-
-                        outputTokens,
-
-                        totalTokens,
-
-                        zuqenChatCreditsUsed,
-
-                        conversionRate:
-                          "1000 Groq tokens = 1 ZUQEN Chat Credit",
-
-                        creditCalculation:
-                          `ceil(${totalTokens} / 1000) = ${zuqenChatCreditsUsed}`,
-
-                        hasImages,
-
-                        imageCount:
-                          imageAttachments.length,
-
-                        groqUsage:
-                          groqUsage ??
-                          null,
-
-                        groqQuota:
-                          groqQuotaHeaders,
-                      },
-                    }
-                  );
-              } catch (error) {
-                console.error(
-                  "ZUQEN CREDIT CONSUMPTION EXCEPTION:",
-                  error
-                );
-
-                creditConsumption =
+            try {
+              creditConsumption =
+                await consumeFeatureCredits(
                   {
-                    success:
-                      false,
+                    userId:
+                      userId!,
 
-                    code:
-                      "CONSUME_EXCEPTION",
+                    featureKey:
+                      "chat",
 
-                    message:
-                      error instanceof
-                      Error
-                        ? error.message
-                        : String(
-                            error
-                          ),
-                  };
-              }
+                    amount:
+                      1,
+
+                    providerRequestId:
+                      groqRequestId,
+
+                    description:
+                      "ZUQEN Chat message",
+
+                    referenceId:
+                      usageRecord?.id ??
+                      chatReferenceId,
+
+                    metadata: {
+                      model,
+
+                      inputTokens,
+
+                      outputTokens,
+
+                      totalTokens,
+
+                      messageCredit:
+                        1,
+
+                      creditRule:
+                        "1 Chat Message = 1 ZUQEN Chat Credit",
+
+                      hasImages,
+
+                      imageCount:
+                        imageAttachments.length,
+
+                      groqUsage:
+                        groqUsage ??
+                        null,
+
+                      groqQuota:
+                        groqQuotaHeaders,
+                    },
+                  }
+                );
+            } catch (error) {
+              console.error(
+                "ZUQEN CREDIT CONSUMPTION ERROR:",
+                error
+              );
+
+              creditConsumption =
+                {
+                  success:
+                    false,
+
+                  code:
+                    "CONSUME_EXCEPTION",
+
+                  message:
+                    error instanceof
+                    Error
+                      ? error.message
+                      : String(
+                          error
+                        ),
+                };
             }
 
             // =================================================
-            // 18. CREDIT CONSUMPTION RESULT
+            // 16. CREDIT RESULT
             // =================================================
 
-            const consumptionSuccess =
-              Boolean(
-                creditConsumption?.success
-              );
-
             if (
-              !consumptionSuccess
+              !creditConsumption?.success
             ) {
               console.error(
                 "ZUQEN CREDIT CONSUMPTION FAILED:",
                 creditConsumption
               );
 
-              /*
-               * The provider response has already been generated.
-               *
-               * We do NOT refund anything here because there was
-               * no reservation.
-               *
-               * Tell the client that the response was generated
-               * but credit accounting failed.
-               */
-
-              sendError(
-                "Your AI response was generated, but ZUQEN could not finalize the Chat credit usage.",
-                "CREDIT_CONSUMPTION_FAILED"
-              );
-
               sendEvent({
-                usage: {
-                  inputTokens,
-                  outputTokens,
-                  totalTokens,
-                },
-
                 credits: {
                   feature:
                     "chat",
@@ -1280,24 +1172,24 @@ Be accurate, natural and concise.
                   used:
                     0,
 
-                  providerTokens:
-                    totalTokens,
-
                   remaining:
                     currentChatCredits,
 
                   settled:
                     false,
 
-                  conversionRate:
-                    "1000 Groq tokens = 1 ZUQEN Chat Credit",
-
-                  calculation:
-                    `ceil(${totalTokens} / 1000) = ${zuqenChatCreditsUsed}`,
+                  creditRule:
+                    "1 Chat Message = 1 ZUQEN Chat Credit",
 
                   error:
                     creditConsumption?.message ??
-                    "Unable to consume Chat credits.",
+                    "Unable to consume Chat credit.",
+                },
+
+                usage: {
+                  inputTokens,
+                  outputTokens,
+                  totalTokens,
                 },
 
                 provider:
@@ -1305,6 +1197,13 @@ Be accurate, natural and concise.
 
                 groqQuota:
                   groqQuotaHeaders,
+              });
+
+              sendEvent({
+                error:
+                  "Your AI response was generated, but ZUQEN could not finalize the Chat credit usage.",
+                code:
+                  "CREDIT_CONSUMPTION_FAILED",
               });
 
               sendEvent({
@@ -1325,14 +1224,14 @@ Be accurate, natural and concise.
             }
 
             // =================================================
-            // 19. GET NEW BALANCE
+            // 17. GET LATEST BALANCE
             // =================================================
 
             let remainingCredits =
               Math.max(
                 0,
                 currentChatCredits -
-                  zuqenChatCreditsUsed
+                  1
               );
 
             try {
@@ -1355,7 +1254,7 @@ Be accurate, natural and concise.
             }
 
             // =================================================
-            // 20. SEND FINAL CREDIT RESULT
+            // 18. SEND CREDIT INFORMATION
             // =================================================
 
             sendEvent({
@@ -1370,10 +1269,7 @@ Be accurate, natural and concise.
                   "chat",
 
                 used:
-                  zuqenChatCreditsUsed,
-
-                providerTokens:
-                  totalTokens,
+                  1,
 
                 remaining:
                   remainingCredits,
@@ -1381,11 +1277,11 @@ Be accurate, natural and concise.
                 settled:
                   true,
 
-                conversionRate:
-                  "1000 Groq tokens = 1 ZUQEN Chat Credit",
+                creditRule:
+                  "1 Chat Message = 1 ZUQEN Chat Credit",
 
-                calculation:
-                  `ceil(${totalTokens} / 1000) = ${zuqenChatCreditsUsed}`,
+                messagesRemaining:
+                  remainingCredits,
               },
 
               provider:
@@ -1421,10 +1317,6 @@ Be accurate, natural and concise.
                 : String(
                     error
                   );
-
-            // =================================================
-            // FAILED USAGE RECORD
-            // =================================================
 
             try {
               await recordProviderUsage({
@@ -1463,8 +1355,6 @@ Be accurate, natural and concise.
                   imageCount:
                     imageAttachments.length,
 
-                  streamCompleted,
-
                   error:
                     errorMessage,
 
@@ -1481,18 +1371,17 @@ Be accurate, natural and concise.
               );
             }
 
-            // =================================================
-            // SEND STREAM ERROR
-            // =================================================
-
             if (
               !streamClosed
             ) {
               try {
-                sendError(
-                  `ZUQEN Chat stream failed: ${errorMessage}`,
-                  "STREAM_ERROR"
-                );
+                sendEvent({
+                  error:
+                    `ZUQEN Chat stream failed: ${errorMessage}`,
+
+                  code:
+                    "STREAM_ERROR",
+                });
 
                 sendEvent({
                   credits: {
@@ -1542,14 +1431,14 @@ Be accurate, natural and concise.
             try {
               reader.releaseLock();
             } catch {
-              // Ignore release errors.
+              // Ignore.
             }
           }
         },
       });
 
     // =====================================================
-    // 21. RESPONSE HEADERS
+    // 19. RESPONSE HEADERS
     // =====================================================
 
     const responseHeaders =
@@ -1594,12 +1483,12 @@ Be accurate, natural and concise.
 
     responseHeaders.set(
       "X-Zuquen-Credit-Rate",
-      "1000 Groq tokens = 1 ZUQEN Chat Credit"
+      "1 Chat Message = 1 ZUQEN Chat Credit"
     );
 
     responseHeaders.set(
       "X-Zuquen-Credit-Calculation",
-      "ceil(total Groq tokens / 1000)"
+      "1 successful Chat message = 1 credit"
     );
 
     for (
@@ -1608,7 +1497,8 @@ Be accurate, natural and concise.
         headerValue,
       ] of Object.entries(
         groqQuotaHeaders
-      )) {
+      )
+    ) {
       responseHeaders.set(
         headerName,
         headerValue
@@ -1616,7 +1506,7 @@ Be accurate, natural and concise.
     }
 
     // =====================================================
-    // 22. RETURN
+    // 20. RETURN STREAM
     // =====================================================
 
     return new Response(
@@ -1634,8 +1524,7 @@ Be accurate, natural and concise.
     );
 
     return jsonError(
-      error instanceof
-        Error
+      error instanceof Error
         ? error.message
         : "ZUQEN Chat request failed.",
       "CHAT_ROUTE_ERROR",
