@@ -72,16 +72,26 @@ export default function AuthPage() {
     try {
       if (mode === "signup") {
         /*
-         * If the current visitor is already an anonymous Supabase user,
-         * convert that SAME user into a permanent email/password account.
-         *
-         * This preserves the anonymous user's existing user_id and allows
-         * guest data/credits to remain attached to the same account.
+         * Check whether the visitor is already an anonymous
+         * Supabase user.
          */
         const {
           data: { user: currentUser },
         } = await supabase.auth.getUser();
 
+        /*
+         * ============================================
+         * GUEST -> PERMANENT ACCOUNT
+         * ============================================
+         *
+         * The same Supabase user ID is preserved.
+         *
+         * Guest credits:
+         *     2 Chat Credits
+         *
+         * After conversion:
+         *     4 Chat Credits total
+         */
         if (currentUser?.is_anonymous) {
           const { data, error: updateError } =
             await supabase.auth.updateUser({
@@ -100,28 +110,59 @@ export default function AuthPage() {
             throw new Error("Unable to create your account.");
           }
 
-          setSuccess("Your account has been created successfully.");
+          /*
+           * Replace guest allocation with signup allocation.
+           */
+          const {
+            data: creditData,
+            error: creditError,
+          } = await supabase.rpc(
+            "convert_guest_to_signup_chat_credits"
+          );
+
+          if (creditError) {
+            console.error(
+              "Guest to signup credit conversion error:",
+              creditError
+            );
+
+            throw new Error(
+              "Your account was created, but Chat credits could not be set up. Please refresh and try again."
+            );
+          }
+
+          console.log(
+            "Guest to signup credits:",
+            creditData
+          );
+
+          setSuccess(
+            "Account created successfully. You received 4 Chat Credits."
+          );
 
           setTimeout(() => {
             router.replace("/");
             router.refresh();
-          }, 700);
+          }, 900);
 
           return;
         }
 
         /*
-         * Normal new account creation when there is no anonymous session.
+         * ============================================
+         * NORMAL NEW ACCOUNT
+         * ============================================
          */
-        const { data, error: signUpError } = await supabase.auth.signUp({
-          email: cleanEmail,
-          password,
-          options: {
-            data: {
-              full_name: fullName.trim(),
+        const { data, error: signUpError } =
+          await supabase.auth.signUp({
+            email: cleanEmail,
+            password,
+            options: {
+              data: {
+                full_name: fullName.trim(),
+              },
             },
-          },
-        });
+          });
 
         if (signUpError) {
           throw signUpError;
@@ -131,14 +172,50 @@ export default function AuthPage() {
           throw new Error("Unable to create your account.");
         }
 
+        /*
+         * If Supabase immediately created an active session,
+         * allocate the 4 signup Chat Credits now.
+         */
         if (data.session) {
-          setSuccess("Account created successfully.");
+          const {
+            data: creditData,
+            error: creditError,
+          } = await supabase.rpc(
+            "setup_signup_chat_credits"
+          );
+
+          if (creditError) {
+            console.error(
+              "Signup credit setup error:",
+              creditError
+            );
+
+            throw new Error(
+              "Your account was created, but Chat credits could not be set up. Please refresh and try again."
+            );
+          }
+
+          console.log(
+            "Signup credits:",
+            creditData
+          );
+
+          setSuccess(
+            "Account created successfully. You received 4 Chat Credits."
+          );
 
           setTimeout(() => {
             router.replace("/");
             router.refresh();
-          }, 700);
+          }, 900);
         } else {
+          /*
+           * This branch is mainly for projects where email
+           * confirmation is enabled.
+           *
+           * The credit RPC requires an authenticated session,
+           * so it will be handled after the user verifies/logs in.
+           */
           setSuccess(
             "Account created. Please check your email to verify your account."
           );
@@ -148,7 +225,9 @@ export default function AuthPage() {
       }
 
       /*
-       * Existing permanent account login.
+       * ============================================
+       * EXISTING PERMANENT ACCOUNT LOGIN
+       * ============================================
        */
       const { data, error: signInError } =
         await supabase.auth.signInWithPassword({
@@ -164,6 +243,35 @@ export default function AuthPage() {
         throw new Error("Unable to sign in.");
       }
 
+      /*
+       * Existing users should not receive signup credits
+       * repeatedly. setup_signup_chat_credits() is
+       * idempotent through its signup reference.
+       *
+       * This also makes sure an older account that never
+       * received its initial credits can receive them.
+       */
+      if (!data.user.is_anonymous) {
+        const {
+          data: creditData,
+          error: creditError,
+        } = await supabase.rpc(
+          "setup_signup_chat_credits"
+        );
+
+        if (creditError) {
+          console.error(
+            "Login credit setup error:",
+            creditError
+          );
+        } else {
+          console.log(
+            "Login credit check:",
+            creditData
+          );
+        }
+      }
+
       setSuccess("Signed in successfully.");
 
       setTimeout(() => {
@@ -172,14 +280,20 @@ export default function AuthPage() {
       }, 500);
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : "Something went wrong.";
+        err instanceof Error
+          ? err.message
+          : "Something went wrong.";
 
       if (
-        message.toLowerCase().includes("invalid login credentials")
+        message
+          .toLowerCase()
+          .includes("invalid login credentials")
       ) {
         setError("Incorrect email or password.");
       } else if (
-        message.toLowerCase().includes("user already registered")
+        message
+          .toLowerCase()
+          .includes("user already registered")
       ) {
         setError(
           "An account with this email already exists. Please sign in."
@@ -188,7 +302,9 @@ export default function AuthPage() {
         message.toLowerCase().includes("email") &&
         message.toLowerCase().includes("invalid")
       ) {
-        setError("Please enter a valid email address.");
+        setError(
+          "Please enter a valid email address."
+        );
       } else {
         setError(message);
       }
@@ -204,21 +320,49 @@ export default function AuthPage() {
 
     try {
       /*
-       * First restore an existing browser session.
-       * This prevents creating a new anonymous user on every visit.
+       * Restore an existing browser session first.
        */
       const {
         data: { session },
       } = await supabase.auth.getSession();
 
       if (session?.user) {
+        /*
+         * Existing guest/permanent session.
+         *
+         * If this is a guest, make sure its 2 credits
+         * have been allocated.
+         */
+        if (session.user.is_anonymous) {
+          const {
+            data: creditData,
+            error: creditError,
+          } = await supabase.rpc(
+            "setup_guest_chat_credits"
+          );
+
+          if (creditError) {
+            console.error(
+              "Existing guest credit setup error:",
+              creditError
+            );
+          } else {
+            console.log(
+              "Existing guest credits:",
+              creditData
+            );
+          }
+        }
+
         router.replace("/");
         router.refresh();
         return;
       }
 
       /*
-       * No existing session → create one anonymous guest.
+       * ============================================
+       * CREATE NEW GUEST
+       * ============================================
        */
       const { data, error: guestError } =
         await supabase.auth.signInAnonymously();
@@ -228,8 +372,36 @@ export default function AuthPage() {
       }
 
       if (!data.user) {
-        throw new Error("Unable to start Guest Mode.");
+        throw new Error(
+          "Unable to start Guest Mode."
+        );
       }
+
+      /*
+       * Allocate exactly 2 Chat Credits.
+       */
+      const {
+        data: creditData,
+        error: creditError,
+      } = await supabase.rpc(
+        "setup_guest_chat_credits"
+      );
+
+      if (creditError) {
+        console.error(
+          "New guest credit setup error:",
+          creditError
+        );
+
+        throw new Error(
+          "Guest Mode started, but Chat credits could not be set up. Please refresh and try again."
+        );
+      }
+
+      console.log(
+        "New guest credits:",
+        creditData
+      );
 
       router.replace("/");
       router.refresh();
@@ -351,7 +523,9 @@ export default function AuthPage() {
           <div className="zuqen-auth-tabs">
             <button
               type="button"
-              className={mode === "signin" ? "active" : ""}
+              className={
+                mode === "signin" ? "active" : ""
+              }
               onClick={() => {
                 setMode("signin");
                 setError("");
@@ -363,7 +537,9 @@ export default function AuthPage() {
 
             <button
               type="button"
-              className={mode === "signup" ? "active" : ""}
+              className={
+                mode === "signup" ? "active" : ""
+              }
               onClick={() => {
                 setMode("signup");
                 setError("");
@@ -374,10 +550,15 @@ export default function AuthPage() {
             </button>
           </div>
 
-          <form onSubmit={handleAuth} className="zuqen-auth-form">
+          <form
+            onSubmit={handleAuth}
+            className="zuqen-auth-form"
+          >
             {mode === "signup" && (
               <div className="zuqen-field">
-                <label htmlFor="fullName">Full name</label>
+                <label htmlFor="fullName">
+                  Full name
+                </label>
 
                 <input
                   id="fullName"
@@ -409,7 +590,9 @@ export default function AuthPage() {
             </div>
 
             <div className="zuqen-field">
-              <label htmlFor="password">Password</label>
+              <label htmlFor="password">
+                Password
+              </label>
 
               <input
                 id="password"
@@ -459,7 +642,9 @@ export default function AuthPage() {
             <button
               type="submit"
               className="zuqen-primary-button"
-              disabled={loading || guestLoading}
+              disabled={
+                loading || guestLoading
+              }
             >
               {loading
                 ? mode === "signin"
@@ -479,7 +664,9 @@ export default function AuthPage() {
             type="button"
             className="zuqen-guest-button"
             onClick={continueAsGuest}
-            disabled={loading || guestLoading}
+            disabled={
+              loading || guestLoading
+            }
           >
             {guestLoading
               ? "Starting Guest Mode..."
