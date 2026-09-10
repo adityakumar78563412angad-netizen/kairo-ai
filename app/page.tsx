@@ -457,7 +457,28 @@ export default function HomePage() {
           data,
           error,
         } = await supabase.auth.signInAnonymously();
+if (error) {
+  throw error;
+}
 
+if (data.user) {
+  const { error: creditError } = await supabase.rpc(
+    "setup_guest_chat_credits"
+  );
+
+  if (creditError) {
+    console.error("Guest credit setup error:", creditError);
+  }
+
+  setUser({
+    id: data.user.id,
+    email: data.user.email ?? null,
+    is_anonymous: true,
+  });
+
+  await loadChats(data.user.id);
+  await loadChatCredits(data.user.id);
+}
         if (error || !data.user) {
           console.error("Anonymous sign-in:", error);
 
