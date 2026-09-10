@@ -6,6 +6,6 @@ export default function robots(): MetadataRoute.Robots {
       userAgent: "*",
       allow: "/",
     },
-   sitemap: "https://zuqen-ai.vercel.app/sitemap.xml",
+    sitemap: "https://kairo-ai-alpha.vercel.app/sitemap.xml",
   };
 }
