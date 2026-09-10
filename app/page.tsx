@@ -284,6 +284,23 @@ function Icon({
         </svg>
       );
 
+    case "user":
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="8" r="3.5" />
+          <path d="M5 20a7 7 0 0 1 14 0" />
+        </svg>
+      );
+
+    case "logout":
+      return (
+        <svg {...common}>
+          <path d="M10 17l5-5-5-5" />
+          <path d="M15 12H3" />
+          <path d="M21 3v18" />
+        </svg>
+      );
+
     default:
       return (
         <svg {...common}>
@@ -327,6 +344,7 @@ export default function HomePage() {
   const [errorMessage, setErrorMessage] = useState("");
 
   const [lightMode, setLightMode] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
 
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const streamAbortRef = useRef<AbortController | null>(null);
@@ -398,10 +416,9 @@ export default function HomePage() {
   }, []);
 
   /*
-   * IMPORTANT:
-   * We first try to restore the existing Supabase session.
-   * Anonymous sign-in happens ONLY when there is genuinely no session.
-   * This prevents creating a new anonymous user on every refresh.
+   * Restore an existing session first.
+   * Anonymous sign-in happens only when there is genuinely
+   * no existing Supabase session.
    */
   const initializeAuth = useCallback(async () => {
     try {
@@ -430,9 +447,16 @@ export default function HomePage() {
         }
       }
 
+      /*
+       * Guest mode:
+       * Create anonymous user only when absolutely no
+       * existing session/user exists.
+       */
       if (!currentUser) {
-        const { data, error } =
-          await supabase.auth.signInAnonymously();
+        const {
+          data,
+          error,
+        } = await supabase.auth.signInAnonymously();
 
         if (error || !data.user) {
           console.error("Anonymous sign-in:", error);
@@ -478,6 +502,7 @@ export default function HomePage() {
 
     const start = async () => {
       if (!mounted) return;
+
       await initializeAuth();
     };
 
@@ -485,24 +510,42 @@ export default function HomePage() {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      if (!mounted) return;
+    } = supabase.auth.onAuthStateChange(
+      async (_event, session) => {
+        if (!mounted) return;
 
-      if (session?.user) {
-        const nextUser: User = {
-          id: session.user.id,
-          email: session.user.email,
-          is_anonymous: session.user.is_anonymous,
-        };
+        if (session?.user) {
+          const nextUser: User = {
+            id: session.user.id,
+            email: session.user.email,
+            is_anonymous: session.user.is_anonymous,
+          };
 
-        setUser(nextUser);
+          setUser(nextUser);
 
-        await Promise.all([
-          loadChats(session.user.id),
-          loadChatCredits(session.user.id),
-        ]);
+          await Promise.all([
+            loadChats(session.user.id),
+            loadChatCredits(session.user.id),
+          ]);
+
+          return;
+        }
+
+        /*
+         * When there is no session we don't automatically
+         * create another anonymous user here.
+         *
+         * This is important for explicit sign-out:
+         * the user should go to /auth instead of instantly
+         * receiving a brand-new anonymous account.
+         */
+        setUser(null);
+        setChats([]);
+        setMessages([]);
+        setActiveChatId(null);
+        setChatCredits(null);
       }
-    });
+    );
 
     return () => {
       mounted = false;
@@ -510,6 +553,50 @@ export default function HomePage() {
       streamAbortRef.current?.abort();
     };
   }, [initializeAuth, loadChats, loadChatCredits]);
+
+  const handleAuthNavigation = useCallback(() => {
+    window.location.href = "/auth";
+  }, []);
+
+  const handleSignOut = useCallback(async () => {
+    if (signingOut) return;
+
+    try {
+      setSigningOut(true);
+      setErrorMessage("");
+
+      streamAbortRef.current?.abort();
+
+      const { error } = await supabase.auth.signOut();
+
+      if (error) {
+        console.error("signOut:", error);
+
+        setErrorMessage(
+          error.message || "Unable to sign out."
+        );
+
+        setSigningOut(false);
+        return;
+      }
+
+      /*
+       * Explicitly send the user to authentication page.
+       * We do NOT call signInAnonymously here.
+       */
+      window.location.href = "/auth";
+    } catch (error) {
+      console.error("handleSignOut:", error);
+
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to sign out."
+      );
+
+      setSigningOut(false);
+    }
+  }, [signingOut]);
 
   const selectChat = useCallback((chat: Chat) => {
     setActiveChatId(chat.id);
@@ -579,6 +666,13 @@ export default function HomePage() {
 
   const saveMessages = useCallback(
     async (chatId: string, nextMessages: Message[]) => {
+      if (!user?.id) {
+        setErrorMessage(
+          "Your session is not available."
+        );
+        return false;
+      }
+
       const { error } = await supabase
         .from("chats")
         .update({
@@ -586,7 +680,7 @@ export default function HomePage() {
           updated_at: new Date().toISOString(),
         })
         .eq("id", chatId)
-        .eq("user_id", user?.id);
+        .eq("user_id", user.id);
 
       if (error) {
         console.error("saveMessages:", error);
@@ -631,7 +725,9 @@ export default function HomePage() {
         .eq("user_id", user.id);
 
       if (error) {
-        setErrorMessage(`Unable to rename chat: ${error.message}`);
+        setErrorMessage(
+          `Unable to rename chat: ${error.message}`
+        );
         return;
       }
 
@@ -668,9 +764,9 @@ export default function HomePage() {
 
       if (error) {
         setErrorMessage(
-          `Unable to ${archived ? "archive" : "restore"} chat: ${
-            error.message
-          }`
+          `Unable to ${
+            archived ? "archive" : "restore"
+          } chat: ${error.message}`
         );
         return;
       }
@@ -764,7 +860,8 @@ export default function HomePage() {
 
     if (
       payload.choices?.[0]?.delta &&
-      typeof payload.choices[0].delta.content === "string"
+      typeof payload.choices[0].delta.content ===
+        "string"
     ) {
       return payload.choices[0].delta.content;
     }
@@ -798,6 +895,7 @@ export default function HomePage() {
       setErrorMessage("");
 
       let chatId = activeChatId;
+
       let workingMessages = forcedMessages
         ? [...forcedMessages]
         : [...messages];
@@ -823,7 +921,10 @@ export default function HomePage() {
       };
 
       if (!forcedMessages) {
-        workingMessages = [...workingMessages, userMessage];
+        workingMessages = [
+          ...workingMessages,
+          userMessage,
+        ];
 
         setMessages(workingMessages);
         setInput("");
@@ -857,6 +958,7 @@ export default function HomePage() {
       setMessages(withAssistant);
 
       const controller = new AbortController();
+
       streamAbortRef.current = controller;
 
       try {
@@ -866,10 +968,12 @@ export default function HomePage() {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            messages: workingMessages.map((message) => ({
-              role: message.role,
-              content: message.content,
-            })),
+            messages: workingMessages.map(
+              (message) => ({
+                role: message.role,
+                content: message.content,
+              })
+            ),
           }),
           signal: controller.signal,
         });
@@ -902,7 +1006,8 @@ export default function HomePage() {
         let assistantText = "";
 
         while (true) {
-          const { value, done } = await reader.read();
+          const { value, done } =
+            await reader.read();
 
           if (done) break;
 
@@ -959,7 +1064,10 @@ export default function HomePage() {
 
         setMessages(finalMessages);
 
-        await saveMessages(chatId, finalMessages);
+        await saveMessages(
+          chatId,
+          finalMessages
+        );
 
         await loadChatCredits(user.id);
         await loadChats(user.id);
@@ -982,7 +1090,8 @@ export default function HomePage() {
 
         setMessages((previous) =>
           previous.filter(
-            (message) => message.id !== assistantId
+            (message) =>
+              message.id !== assistantId
           )
         );
       } finally {
@@ -1012,7 +1121,10 @@ export default function HomePage() {
   const handleKeyDown = (
     event: React.KeyboardEvent<HTMLTextAreaElement>
   ) => {
-    if (event.key === "Enter" && !event.shiftKey) {
+    if (
+      event.key === "Enter" &&
+      !event.shiftKey
+    ) {
       event.preventDefault();
       handleSubmit();
     }
@@ -1021,7 +1133,9 @@ export default function HomePage() {
   const handleAttachment = (
     event: React.ChangeEvent<HTMLInputElement>
   ) => {
-    const files = Array.from(event.target.files ?? []);
+    const files = Array.from(
+      event.target.files ?? []
+    );
 
     const mapped = files.map((file) => ({
       id: makeId(),
@@ -1048,11 +1162,15 @@ export default function HomePage() {
     try {
       await navigator.clipboard.writeText(content);
     } catch {
-      setErrorMessage("Unable to copy message.");
+      setErrorMessage(
+        "Unable to copy message."
+      );
     }
   };
 
-  const startEditMessage = (message: Message) => {
+  const startEditMessage = (
+    message: Message
+  ) => {
     setEditingId(message.id);
     setEditingValue(message.content);
   };
@@ -1062,7 +1180,9 @@ export default function HomePage() {
     setEditingValue("");
   };
 
-  const saveEditedMessage = async (messageId: string) => {
+  const saveEditedMessage = async (
+    messageId: string
+  ) => {
     const clean = editingValue.trim();
 
     if (!clean || !activeChatId) return;
@@ -1092,7 +1212,10 @@ export default function HomePage() {
     setEditingId(null);
     setEditingValue("");
 
-    await saveMessages(activeChatId, nextMessages);
+    await saveMessages(
+      activeChatId,
+      nextMessages
+    );
 
     setInput(clean);
 
@@ -1106,7 +1229,11 @@ export default function HomePage() {
 
     let lastUserIndex = -1;
 
-    for (let i = messages.length - 1; i >= 0; i--) {
+    for (
+      let i = messages.length - 1;
+      i >= 0;
+      i--
+    ) {
       if (messages[i].role === "user") {
         lastUserIndex = i;
         break;
@@ -1115,14 +1242,22 @@ export default function HomePage() {
 
     if (lastUserIndex === -1) return;
 
-    const baseMessages = messages.slice(0, lastUserIndex);
+    const baseMessages = messages.slice(
+      0,
+      lastUserIndex
+    );
 
-    const lastUserMessage = messages[lastUserIndex];
+    const lastUserMessage =
+      messages[lastUserIndex];
 
     const text = lastUserMessage.content;
 
     setMessages(baseMessages);
-    await saveMessages(activeChatId, baseMessages);
+
+    await saveMessages(
+      activeChatId,
+      baseMessages
+    );
 
     setInput(text);
 
@@ -1148,7 +1283,9 @@ export default function HomePage() {
     resetTextarea();
   };
 
-  const navigateAgent = (agent: (typeof AGENTS)[number]) => {
+  const navigateAgent = (
+    agent: (typeof AGENTS)[number]
+  ) => {
     setSelectedAgent(agent.name);
     setAgentOpen(false);
 
@@ -1175,7 +1312,8 @@ export default function HomePage() {
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    const savedTheme = localStorage.getItem("zuqen-theme");
+    const savedTheme =
+      localStorage.getItem("zuqen-theme");
 
     if (savedTheme === "light") {
       setLightMode(true);
@@ -1205,8 +1343,24 @@ export default function HomePage() {
     },
   ];
 
+  const accountLabel =
+    user?.is_anonymous
+      ? "Guest User"
+      : user?.email || "ZUQEN Account";
+
+  const accountStatus =
+    user?.is_anonymous
+      ? "Guest mode"
+      : "Signed in";
+
   return (
-    <main className={lightMode ? "zuqen-app light" : "zuqen-app"}>
+    <main
+      className={
+        lightMode
+          ? "zuqen-app light"
+          : "zuqen-app"
+      }
+    >
       <style>{`
         * {
           box-sizing: border-box;
@@ -1578,6 +1732,7 @@ export default function HomePage() {
           height: 30px;
           display: grid;
           place-items: center;
+          flex: 0 0 30px;
           border-radius: 10px;
           background: var(--panel-3);
           color: var(--text);
@@ -1587,17 +1742,60 @@ export default function HomePage() {
 
         .zuqen-user-info {
           min-width: 0;
+          flex: 1;
         }
 
         .zuqen-user-name {
           font-size: 11px;
           font-weight: 700;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
         }
 
         .zuqen-user-status {
           color: var(--muted-2);
           font-size: 9px;
           margin-top: 3px;
+        }
+
+        .zuqen-auth-button {
+          width: 100%;
+          min-height: 36px;
+          margin-top: 8px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 7px;
+          border-radius: 10px;
+          background: var(--panel-2);
+          border: 1px solid var(--border);
+          color: var(--text);
+          cursor: pointer;
+          font-size: 10px;
+          font-weight: 700;
+          transition: .2s ease;
+        }
+
+        .zuqen-auth-button:hover {
+          background: var(--panel-3);
+          border-color: var(--border-strong);
+        }
+
+        .zuqen-auth-button.primary {
+          background: var(--accent);
+          color: var(--accent-text);
+          border-color: transparent;
+        }
+
+        .zuqen-auth-button.primary:hover {
+          opacity: .9;
+          transform: translateY(-1px);
+        }
+
+        .zuqen-auth-button:disabled {
+          opacity: .5;
+          cursor: not-allowed;
         }
 
         .zuqen-main {
@@ -2272,6 +2470,7 @@ export default function HomePage() {
             transform: translateY(0);
             opacity: .4;
           }
+
           30% {
             transform: translateY(-4px);
             opacity: 1;
@@ -2611,7 +2810,9 @@ export default function HomePage() {
       {!sidebarOpen && (
         <div
           className="zuqen-mobile-overlay"
-          onClick={() => setSidebarOpen(true)}
+          onClick={() =>
+            setSidebarOpen(true)
+          }
         />
       )}
 
@@ -2622,8 +2823,12 @@ export default function HomePage() {
       >
         <div className="zuqen-brand">
           <div className="zuqen-logo" />
+
           <div className="zuqen-brand-text">
-            <div className="zuqen-brand-name">ZUQEN AI</div>
+            <div className="zuqen-brand-name">
+              ZUQEN AI
+            </div>
+
             <div className="zuqen-brand-sub">
               Intelligent workspace
             </div>
@@ -2642,17 +2847,25 @@ export default function HomePage() {
           <div className="zuqen-sidebar-section">
             <div className="zuqen-sidebar-heading">
               <span>
-                {archivedOpen ? "Archived" : "Conversations"}
+                {archivedOpen
+                  ? "Archived"
+                  : "Conversations"}
               </span>
 
               <button
                 title="Toggle archived"
                 onClick={() =>
-                  setArchivedOpen((previous) => !previous)
+                  setArchivedOpen(
+                    (previous) => !previous
+                  )
                 }
               >
                 <Icon
-                  name={archivedOpen ? "restore" : "archive"}
+                  name={
+                    archivedOpen
+                      ? "restore"
+                      : "archive"
+                  }
                   size={14}
                 />
               </button>
@@ -2683,7 +2896,9 @@ export default function HomePage() {
                         ? "active"
                         : ""
                     }`}
-                    onClick={() => selectChat(chat)}
+                    onClick={() =>
+                      selectChat(chat)
+                    }
                   >
                     <div className="zuqen-chat-main">
                       {renamingId === chat.id ? (
@@ -2700,16 +2915,25 @@ export default function HomePage() {
                             event.stopPropagation()
                           }
                           onKeyDown={(event) => {
-                            if (event.key === "Enter") {
+                            if (
+                              event.key ===
+                              "Enter"
+                            ) {
                               event.preventDefault();
+
                               renameChat(
                                 chat.id,
                                 renameValue
                               );
                             }
 
-                            if (event.key === "Escape") {
-                              setRenamingId(null);
+                            if (
+                              event.key ===
+                              "Escape"
+                            ) {
+                              setRenamingId(
+                                null
+                              );
                             }
                           }}
                           onBlur={() =>
@@ -2724,8 +2948,11 @@ export default function HomePage() {
                           <div className="zuqen-chat-title">
                             {chat.title}
                           </div>
+
                           <div className="zuqen-chat-date">
-                            {formatDate(chat.updated_at)}
+                            {formatDate(
+                              chat.updated_at
+                            )}
                           </div>
                         </>
                       )}
@@ -2733,18 +2960,25 @@ export default function HomePage() {
 
                     <button
                       className={`zuqen-chat-menu-button ${
-                        menuId === chat.id ? "open" : ""
+                        menuId === chat.id
+                          ? "open"
+                          : ""
                       }`}
                       onClick={(event) => {
                         event.stopPropagation();
-                        setMenuId((previous) =>
-                          previous === chat.id
-                            ? null
-                            : chat.id
+
+                        setMenuId(
+                          (previous) =>
+                            previous === chat.id
+                              ? null
+                              : chat.id
                         );
                       }}
                     >
-                      <Icon name="menu" size={17} />
+                      <Icon
+                        name="menu"
+                        size={17}
+                      />
                     </button>
 
                     {menuId === chat.id && (
@@ -2760,7 +2994,10 @@ export default function HomePage() {
                             startRename(chat)
                           }
                         >
-                          <Icon name="edit" size={14} />
+                          <Icon
+                            name="edit"
+                            size={14}
+                          />
                           Rename
                         </button>
 
@@ -2781,6 +3018,7 @@ export default function HomePage() {
                             }
                             size={14}
                           />
+
                           {chat.archived
                             ? "Restore"
                             : "Archive"}
@@ -2792,7 +3030,10 @@ export default function HomePage() {
                             deleteChat(chat.id)
                           }
                         >
-                          <Icon name="trash" size={14} />
+                          <Icon
+                            name="trash"
+                            size={14}
+                          />
                           Delete
                         </button>
                       </div>
@@ -2806,21 +3047,53 @@ export default function HomePage() {
           <div className="zuqen-sidebar-bottom">
             <div className="zuqen-sidebar-user">
               <div className="zuqen-user-dot">
-                Z
+                {user?.is_anonymous
+                  ? "G"
+                  : user?.email
+                  ? user.email
+                      .charAt(0)
+                      .toUpperCase()
+                  : "Z"}
               </div>
 
               <div className="zuqen-user-info">
                 <div className="zuqen-user-name">
-                  ZUQEN User
+                  {accountLabel}
                 </div>
 
                 <div className="zuqen-user-status">
-                  {user?.is_anonymous
-                    ? "Anonymous account"
-                    : "Authenticated account"}
+                  {accountStatus}
                 </div>
               </div>
             </div>
+
+            {user?.is_anonymous ? (
+              <button
+                className="zuqen-auth-button primary"
+                onClick={handleAuthNavigation}
+              >
+                <Icon
+                  name="user"
+                  size={14}
+                />
+                Sign in / Create account
+              </button>
+            ) : (
+              <button
+                className="zuqen-auth-button"
+                onClick={handleSignOut}
+                disabled={signingOut}
+              >
+                <Icon
+                  name="logout"
+                  size={14}
+                />
+
+                {signingOut
+                  ? "Signing out..."
+                  : "Sign out"}
+              </button>
+            )}
           </div>
         </div>
       </aside>
@@ -2831,28 +3104,40 @@ export default function HomePage() {
             <button
               className="zuqen-icon-button"
               onClick={() =>
-                setSidebarOpen((previous) => !previous)
+                setSidebarOpen(
+                  (previous) => !previous
+                )
               }
               title="Toggle sidebar"
             >
-              <Icon name="menu" size={19} />
+              <Icon
+                name="menu"
+                size={19}
+              />
             </button>
 
             <button
               className="zuqen-icon-button"
               onClick={() =>
-                setSearchOpen((previous) => !previous)
+                setSearchOpen(
+                  (previous) => !previous
+                )
               }
               title="Search conversations"
             >
-              <Icon name="search" size={18} />
+              <Icon
+                name="search"
+                size={18}
+              />
             </button>
 
             <div className="zuqen-agent-selector">
               <button
                 className="zuqen-agent-button"
                 onClick={() =>
-                  setAgentOpen((previous) => !previous)
+                  setAgentOpen(
+                    (previous) => !previous
+                  )
                 }
               >
                 <span className="zuqen-agent-button-icon">
@@ -2863,12 +3148,16 @@ export default function HomePage() {
                   <div className="zuqen-agent-button-name">
                     {selectedAgent}
                   </div>
+
                   <div className="zuqen-agent-button-sub">
                     Active agent
                   </div>
                 </span>
 
-                <Icon name="chevron" size={13} />
+                <Icon
+                  name="chevron"
+                  size={13}
+                />
               </button>
 
               {agentOpen && (
@@ -2877,7 +3166,8 @@ export default function HomePage() {
                     <button
                       key={agent.name}
                       className={`zuqen-agent-option ${
-                        selectedAgent === agent.name
+                        selectedAgent ===
+                        agent.name
                           ? "selected"
                           : ""
                       }`}
@@ -2899,9 +3189,13 @@ export default function HomePage() {
                         </div>
                       </span>
 
-                      {selectedAgent === agent.name && (
+                      {selectedAgent ===
+                        agent.name && (
                         <span className="zuqen-agent-check">
-                          <Icon name="check" size={14} />
+                          <Icon
+                            name="check"
+                            size={14}
+                          />
                         </span>
                       )}
                     </button>
@@ -2916,7 +3210,9 @@ export default function HomePage() {
               <button
                 className="zuqen-credit-button"
                 onClick={() =>
-                  setCreditsOpen((previous) => !previous)
+                  setCreditsOpen(
+                    (previous) => !previous
+                  )
                 }
               >
                 <span className="zuqen-credit-icon">
@@ -2954,6 +3250,7 @@ export default function HomePage() {
 
                   <div className="zuqen-credit-row">
                     <span>Status</span>
+
                     <strong>
                       {chatCredits === null
                         ? "Loading"
@@ -2982,7 +3279,11 @@ export default function HomePage() {
               title="Toggle theme"
             >
               <Icon
-                name={lightMode ? "moon" : "sun"}
+                name={
+                  lightMode
+                    ? "moon"
+                    : "sun"
+                }
                 size={18}
               />
             </button>
@@ -2992,27 +3293,40 @@ export default function HomePage() {
         {searchOpen && (
           <div className="zuqen-search-overlay">
             <div className="zuqen-search-input-wrap">
-              <Icon name="search" size={15} />
+              <Icon
+                name="search"
+                size={15}
+              />
 
               <input
                 autoFocus
                 value={search}
                 onChange={(event) =>
-                  setSearch(event.target.value)
+                  setSearch(
+                    event.target.value
+                  )
                 }
                 placeholder="Search conversations..."
               />
 
               {search && (
                 <button
-                  onClick={() => setSearch("")}
+                  onClick={() =>
+                    setSearch("")
+                  }
                   style={{
-                    background: "transparent",
-                    color: "var(--muted)",
-                    cursor: "pointer",
+                    background:
+                      "transparent",
+                    color:
+                      "var(--muted)",
+                    cursor:
+                      "pointer",
                   }}
                 >
-                  <Icon name="close" size={14} />
+                  <Icon
+                    name="close"
+                    size={14}
+                  />
                 </button>
               )}
             </div>
@@ -3026,17 +3340,30 @@ export default function HomePage() {
               role="alert"
             >
               <span>!</span>
-              <span>{errorMessage}</span>
+
+              <span>
+                {errorMessage}
+              </span>
+
               <button
-                onClick={() => setErrorMessage("")}
+                onClick={() =>
+                  setErrorMessage("")
+                }
                 style={{
-                  marginLeft: "auto",
-                  background: "transparent",
-                  color: "inherit",
-                  cursor: "pointer",
+                  marginLeft:
+                    "auto",
+                  background:
+                    "transparent",
+                  color:
+                    "inherit",
+                  cursor:
+                    "pointer",
                 }}
               >
-                <Icon name="close" size={13} />
+                <Icon
+                  name="close"
+                  size={13}
+                />
               </button>
             </div>
           )}
@@ -3045,22 +3372,29 @@ export default function HomePage() {
             <div className="zuqen-empty-chat">
               <div className="zuqen-empty-chat-inner">
                 <div className="zuqen-empty-chat-icon">
-                  <Icon name="spark" size={22} />
+                  <Icon
+                    name="spark"
+                    size={22}
+                  />
                 </div>
 
-                <h2>Starting ZUQEN AI</h2>
+                <h2>
+                  Starting ZUQEN AI
+                </h2>
 
                 <p>
-                  Restoring your secure session and
-                  workspace...
+                  Restoring your secure
+                  session and workspace...
                 </p>
               </div>
             </div>
-          ) : activeChatId && activeChat ? (
+          ) : activeChatId &&
+            activeChat ? (
             <div className="zuqen-chat-view">
               <div className="zuqen-messages">
                 <div className="zuqen-message-list">
-                  {messages.length === 0 ? (
+                  {messages.length ===
+                  0 ? (
                     <div className="zuqen-empty-chat">
                       <div className="zuqen-empty-chat-inner">
                         <div className="zuqen-empty-chat-icon">
@@ -3075,212 +3409,248 @@ export default function HomePage() {
                         </h2>
 
                         <p>
-                          Start the conversation below.
+                          Start the
+                          conversation below.
                         </p>
                       </div>
                     </div>
                   ) : (
-                    messages.map((message) => {
-                      const isEditing =
-                        editingId === message.id;
+                    messages.map(
+                      (message) => {
+                        const isEditing =
+                          editingId ===
+                          message.id;
 
-                      return (
-                        <div
-                          key={message.id}
-                          className={`zuqen-message-row ${message.role}`}
-                        >
-                          <div className="zuqen-message-block">
-                            <div className="zuqen-message-label">
-                              {message.role ===
-                              "assistant" ? (
-                                <>
-                                  <span>
-                                    ZUQEN AI
-                                  </span>
+                        return (
+                          <div
+                            key={
+                              message.id
+                            }
+                            className={`zuqen-message-row ${message.role}`}
+                          >
+                            <div className="zuqen-message-block">
+                              <div className="zuqen-message-label">
+                                {message.role ===
+                                "assistant" ? (
+                                  <>
+                                    <span>
+                                      ZUQEN AI
+                                    </span>
 
-                                  <span className="zuqen-message-label-mark">
-                                    ✦
-                                  </span>
-                                </>
+                                    <span className="zuqen-message-label-mark">
+                                      ✦
+                                    </span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <span className="zuqen-message-label-mark">
+                                      You
+                                    </span>
+
+                                    <span>
+                                      You
+                                    </span>
+                                  </>
+                                )}
+                              </div>
+
+                              {isEditing ? (
+                                <div className="zuqen-edit-box">
+                                  <textarea
+                                    value={
+                                      editingValue
+                                    }
+                                    onChange={(
+                                      event
+                                    ) =>
+                                      setEditingValue(
+                                        event
+                                          .target
+                                          .value
+                                      )
+                                    }
+                                    autoFocus
+                                  />
+
+                                  <div className="zuqen-edit-actions">
+                                    <button
+                                      className="zuqen-small-button"
+                                      onClick={
+                                        cancelEdit
+                                      }
+                                    >
+                                      Cancel
+                                    </button>
+
+                                    <button
+                                      className="zuqen-small-button primary"
+                                      onClick={() =>
+                                        saveEditedMessage(
+                                          message.id
+                                        )
+                                      }
+                                    >
+                                      Save &
+                                      regenerate
+                                    </button>
+                                  </div>
+                                </div>
                               ) : (
                                 <>
-                                  <span className="zuqen-message-label-mark">
-                                    You
-                                  </span>
-
-                                  <span>You</span>
-                                </>
-                              )}
-                            </div>
-
-                            {isEditing ? (
-                              <div className="zuqen-edit-box">
-                                <textarea
-                                  value={editingValue}
-                                  onChange={(event) =>
-                                    setEditingValue(
-                                      event.target.value
-                                    )
-                                  }
-                                  autoFocus
-                                />
-
-                                <div className="zuqen-edit-actions">
-                                  <button
-                                    className="zuqen-small-button"
-                                    onClick={cancelEdit}
-                                  >
-                                    Cancel
-                                  </button>
-
-                                  <button
-                                    className="zuqen-small-button primary"
-                                    onClick={() =>
-                                      saveEditedMessage(
-                                        message.id
-                                      )
-                                    }
-                                  >
-                                    Save & regenerate
-                                  </button>
-                                </div>
-                              </div>
-                            ) : (
-                              <>
-                                <div className="zuqen-message-bubble">
-                                  {message.content || (
-                                    <div className="zuqen-typing">
-                                      <span />
-                                      <span />
-                                      <span />
-                                    </div>
-                                  )}
-
-                                  {message.attachments &&
-                                    message.attachments.length >
-                                      0 && (
-                                      <div className="zuqen-attachment-list">
-                                        {message.attachments.map(
-                                          (file) => (
-                                            <div
-                                              className="zuqen-attachment-chip"
-                                              key={file.id}
-                                            >
-                                              <span>
-                                                ◇
-                                              </span>
-
-                                              <span className="zuqen-attachment-chip-name">
-                                                {file.name}
-                                              </span>
-
-                                              <span>
-                                                {formatFileSize(
-                                                  file.size
-                                                )}
-                                              </span>
-                                            </div>
-                                          )
-                                        )}
+                                  <div className="zuqen-message-bubble">
+                                    {message.content || (
+                                      <div className="zuqen-typing">
+                                        <span />
+                                        <span />
+                                        <span />
                                       </div>
                                     )}
-                                </div>
 
-                                <div className="zuqen-message-actions">
-                                  <button
-                                    className="zuqen-action"
-                                    title="Copy"
-                                    onClick={() =>
-                                      copyMessage(
-                                        message.content
-                                      )
-                                    }
-                                  >
-                                    <Icon
-                                      name="copy"
-                                      size={14}
-                                    />
-                                  </button>
+                                    {message.attachments &&
+                                      message
+                                        .attachments
+                                        .length >
+                                        0 && (
+                                        <div className="zuqen-attachment-list">
+                                          {message.attachments.map(
+                                            (
+                                              file
+                                            ) => (
+                                              <div
+                                                className="zuqen-attachment-chip"
+                                                key={
+                                                  file.id
+                                                }
+                                              >
+                                                <span>
+                                                  ◇
+                                                </span>
 
-                                  {message.role ===
-                                    "user" && (
+                                                <span className="zuqen-attachment-chip-name">
+                                                  {
+                                                    file.name
+                                                  }
+                                                </span>
+
+                                                <span>
+                                                  {formatFileSize(
+                                                    file.size
+                                                  )}
+                                                </span>
+                                              </div>
+                                            )
+                                          )}
+                                        </div>
+                                      )}
+                                  </div>
+
+                                  <div className="zuqen-message-actions">
                                     <button
                                       className="zuqen-action"
-                                      title="Edit"
+                                      title="Copy"
                                       onClick={() =>
-                                        startEditMessage(
-                                          message
+                                        copyMessage(
+                                          message.content
                                         )
                                       }
                                     >
                                       <Icon
-                                        name="edit"
+                                        name="copy"
                                         size={14}
                                       />
                                     </button>
-                                  )}
 
-                                  {message.role ===
-                                    "assistant" &&
-                                    message.content && (
+                                    {message.role ===
+                                      "user" && (
                                       <button
                                         className="zuqen-action"
-                                        title="Regenerate"
-                                        onClick={
-                                          regenerate
+                                        title="Edit"
+                                        onClick={() =>
+                                          startEditMessage(
+                                            message
+                                          )
                                         }
-                                        disabled={loading}
                                       >
                                         <Icon
-                                          name="refresh"
+                                          name="edit"
                                           size={14}
                                         />
                                       </button>
                                     )}
-                                </div>
-                              </>
-                            )}
+
+                                    {message.role ===
+                                      "assistant" &&
+                                      message.content && (
+                                        <button
+                                          className="zuqen-action"
+                                          title="Regenerate"
+                                          onClick={
+                                            regenerate
+                                          }
+                                          disabled={
+                                            loading
+                                          }
+                                        >
+                                          <Icon
+                                            name="refresh"
+                                            size={14}
+                                          />
+                                        </button>
+                                      )}
+                                  </div>
+                                </>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      );
-                    })
+                        );
+                      }
+                    )
                   )}
                 </div>
               </div>
 
               <div className="zuqen-composer-area">
-                {attachments.length > 0 && (
+                {attachments.length >
+                  0 && (
                   <div
                     style={{
-                      width: "min(900px,100%)",
-                      margin: "0 auto 7px",
+                      width:
+                        "min(900px,100%)",
+                      margin:
+                        "0 auto 7px",
                     }}
                   >
                     <div className="zuqen-attachment-list">
-                      {attachments.map((file) => (
-                        <div
-                          className="zuqen-attachment-chip"
-                          key={file.id}
-                        >
-                          <span>◇</span>
-
-                          <span className="zuqen-attachment-chip-name">
-                            {file.name}
-                          </span>
-
-                          <button
-                            className="zuqen-attachment-remove"
-                            onClick={() =>
-                              removeAttachment(file.id)
-                            }
+                      {attachments.map(
+                        (file) => (
+                          <div
+                            className="zuqen-attachment-chip"
+                            key={file.id}
                           >
-                            <Icon
-                              name="close"
-                              size={11}
-                            />
-                          </button>
-                        </div>
-                      ))}
+                            <span>
+                              ◇
+                            </span>
+
+                            <span className="zuqen-attachment-chip-name">
+                              {file.name}
+                            </span>
+
+                            <button
+                              className="zuqen-attachment-remove"
+                              onClick={() =>
+                                removeAttachment(
+                                  file.id
+                                )
+                              }
+                            >
+                              <Icon
+                                name="close"
+                                size={11}
+                              />
+                            </button>
+                          </div>
+                        )
+                      )}
                     </div>
                   </div>
                 )}
@@ -3296,7 +3666,9 @@ export default function HomePage() {
                       <input
                         type="file"
                         multiple
-                        onChange={handleAttachment}
+                        onChange={
+                          handleAttachment
+                        }
                       />
                     </label>
 
@@ -3304,17 +3676,23 @@ export default function HomePage() {
                       ref={textareaRef}
                       value={input}
                       onChange={(event) => {
-                        setInput(event.target.value);
+                        setInput(
+                          event.currentTarget
+                            .value
+                        );
 
                         event.currentTarget.style.height =
                           "auto";
 
                         event.currentTarget.style.height = `${Math.min(
-                          event.currentTarget.scrollHeight,
+                          event.currentTarget
+                            .scrollHeight,
                           220
                         )}px`;
                       }}
-                      onKeyDown={handleKeyDown}
+                      onKeyDown={
+                        handleKeyDown
+                      }
                       placeholder="Message ZUQEN AI..."
                       rows={1}
                       disabled={loading}
@@ -3323,23 +3701,31 @@ export default function HomePage() {
                     <button
                       className="zuqen-send"
                       disabled={
-                        loading || !input.trim()
+                        loading ||
+                        !input.trim()
                       }
-                      onClick={handleSubmit}
+                      onClick={
+                        handleSubmit
+                      }
                       title="Send message"
                     >
-                      <Icon name="send" size={16} />
+                      <Icon
+                        name="send"
+                        size={16}
+                      />
                     </button>
                   </div>
 
                   <div className="zuqen-composer-footer">
                     <span>
-                      ZUQEN AI can make mistakes. Check
+                      ZUQEN AI can make
+                      mistakes. Check
                       important information.
                     </span>
 
                     <span>
-                      Enter to send · Shift + Enter for
+                      Enter to send ·
+                      Shift + Enter for
                       newline
                     </span>
                   </div>
@@ -3355,27 +3741,36 @@ export default function HomePage() {
                   </div>
 
                   <h1>
-                    What can I help you
+                    What can I help
+                    you
                     <br />
                     with today?
                   </h1>
 
                   <p>
-                    Meet ZUQEN AI — your intelligent
-                    workspace for thinking, creating,
-                    building and getting things done.
+                    Meet ZUQEN AI —
+                    your intelligent
+                    workspace for
+                    thinking, creating,
+                    building and
+                    getting things done.
                   </p>
                 </div>
 
                 <div className="zuqen-search-card">
                   <div className="zuqen-search-card-icon">
-                    <Icon name="search" size={18} />
+                    <Icon
+                      name="search"
+                      size={18}
+                    />
                   </div>
 
                   <input
                     value={input}
                     onChange={(event) => {
-                      setInput(event.target.value);
+                      setInput(
+                        event.target.value
+                      );
 
                       if (
                         textareaRef.current
@@ -3386,7 +3781,8 @@ export default function HomePage() {
                     }}
                     onKeyDown={(event) => {
                       if (
-                        event.key === "Enter" &&
+                        event.key ===
+                          "Enter" &&
                         !event.shiftKey
                       ) {
                         event.preventDefault();
@@ -3405,22 +3801,32 @@ export default function HomePage() {
                   {homeSuggestions.map(
                     (suggestion) => (
                       <button
-                        key={suggestion.title}
+                        key={
+                          suggestion.title
+                        }
                         className="zuqen-suggestion"
                         onClick={() =>
-                          setInput(suggestion.text)
+                          setInput(
+                            suggestion.text
+                          )
                         }
                       >
                         <div className="zuqen-suggestion-icon">
-                          {suggestion.icon}
+                          {
+                            suggestion.icon
+                          }
                         </div>
 
                         <div className="zuqen-suggestion-title">
-                          {suggestion.title}
+                          {
+                            suggestion.title
+                          }
                         </div>
 
                         <div className="zuqen-suggestion-text">
-                          {suggestion.text}
+                          {
+                            suggestion.text
+                          }
                         </div>
                       </button>
                     )
@@ -3433,24 +3839,36 @@ export default function HomePage() {
                   </div>
 
                   <div className="zuqen-agent-cards">
-                    {AGENTS.slice(1).map((agent) => (
+                    {AGENTS.slice(
+                      1
+                    ).map((agent) => (
                       <button
-                        key={agent.name}
+                        key={
+                          agent.name
+                        }
                         className="zuqen-mini-agent"
                         onClick={() =>
-                          navigateAgent(agent)
+                          navigateAgent(
+                            agent
+                          )
                         }
                       >
                         <div className="zuqen-mini-agent-icon">
-                          {agent.icon}
+                          {
+                            agent.icon
+                          }
                         </div>
 
                         <div className="zuqen-mini-agent-name">
-                          {agent.name}
+                          {
+                            agent.name
+                          }
                         </div>
 
                         <div className="zuqen-mini-agent-desc">
-                          {agent.description}
+                          {
+                            agent.description
+                          }
                         </div>
                       </button>
                     ))}
@@ -3461,11 +3879,13 @@ export default function HomePage() {
                   style={{
                     marginTop: 38,
                     textAlign: "center",
-                    color: "var(--muted-2)",
+                    color:
+                      "var(--muted-2)",
                     fontSize: 9,
                   }}
                 >
-                  {chatCredits === null
+                  {chatCredits ===
+                  null
                     ? "Loading your Chat Credits..."
                     : `${chatCredits.toLocaleString()} Chat Credits available`}
                 </div>
