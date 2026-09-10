@@ -452,46 +452,47 @@ export default function HomePage() {
        * Create anonymous user only when absolutely no
        * existing session/user exists.
        */
-      if (!currentUser) {
-        const {
-          data,
-          error,
-        } = await supabase.auth.signInAnonymously();
-if (error) {
-  throw error;
-}
+    if (!currentUser) {
+  const {
+    data: anonymousData,
+    error: anonymousError,
+  } = await supabase.auth.signInAnonymously();
 
-if (data.user) {
+  if (anonymousError) {
+    console.error("Anonymous sign-in:", anonymousError);
+
+    setErrorMessage(
+      "Unable to authenticate with Supabase."
+    );
+
+    return;
+  }
+
+  if (!anonymousData.user) {
+    console.error("Anonymous sign-in returned no user.");
+
+    setErrorMessage(
+      "Unable to create a guest account."
+    );
+
+    return;
+  }
+
+  const guestUser = anonymousData.user;
+
   const { error: creditError } = await supabase.rpc(
     "setup_guest_chat_credits"
   );
 
   if (creditError) {
-    console.error("Guest credit setup error:", creditError);
+    console.error(
+      "Guest credit setup error:",
+      creditError
+    );
   }
 
-  setUser({
-    id: data.user.id,
-    email: data.user.email ?? null,
-    is_anonymous: true,
-  });
-
-  await loadChats(data.user.id);
-  await loadChatCredits(data.user.id);
+  currentUser = guestUser;
 }
-        if (error || !data.user) {
-          console.error("Anonymous sign-in:", error);
-
-          setErrorMessage(
-            error?.message ||
-              "Unable to authenticate with Supabase."
-          );
-
-          return;
-        }
-
-        currentUser = data.user;
-      }
 
       const normalizedUser: User = {
         id: currentUser.id,
