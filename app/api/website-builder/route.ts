@@ -48,7 +48,8 @@ function getErrorMessage(error: unknown) {
 }
 
 function getErrorStatus(error: unknown) {
-  const message = getErrorMessage(error).toLowerCase();
+  const message =
+    getErrorMessage(error).toLowerCase();
 
   if (
     message.includes("api key") ||
@@ -80,48 +81,64 @@ function getErrorStatus(error: unknown) {
 /**
  * Read actual Gemini usage metadata.
  */
-function readGeminiUsage(response: any): GeminiUsage {
-  const usage = response?.usageMetadata;
+function readGeminiUsage(
+  response: any
+): GeminiUsage {
+  const usage =
+    response?.usageMetadata;
 
-  const promptTokens = Math.max(
-    0,
-    Math.floor(
-      Number(usage?.promptTokenCount ?? 0)
-    )
-  );
-
-  const outputTokens = Math.max(
-    0,
-    Math.floor(
-      Number(usage?.candidatesTokenCount ?? 0)
-    )
-  );
-
-  const thoughtsTokens = Math.max(
-    0,
-    Math.floor(
-      Number(usage?.thoughtsTokenCount ?? 0)
-    )
-  );
-
-  const cachedTokens = Math.max(
-    0,
-    Math.floor(
-      Number(usage?.cachedContentTokenCount ?? 0)
-    )
-  );
-
-  const totalTokens = Math.max(
-    0,
-    Math.floor(
-      Number(
-        usage?.totalTokenCount ??
-          promptTokens +
-            outputTokens +
-            thoughtsTokens
+  const promptTokens =
+    Math.max(
+      0,
+      Math.floor(
+        Number(
+          usage?.promptTokenCount ?? 0
+        )
       )
-    )
-  );
+    );
+
+  const outputTokens =
+    Math.max(
+      0,
+      Math.floor(
+        Number(
+          usage?.candidatesTokenCount ?? 0
+        )
+      )
+    );
+
+  const thoughtsTokens =
+    Math.max(
+      0,
+      Math.floor(
+        Number(
+          usage?.thoughtsTokenCount ?? 0
+        )
+      )
+    );
+
+  const cachedTokens =
+    Math.max(
+      0,
+      Math.floor(
+        Number(
+          usage?.cachedContentTokenCount ?? 0
+        )
+      )
+    );
+
+  const totalTokens =
+    Math.max(
+      0,
+      Math.floor(
+        Number(
+          usage?.totalTokenCount ??
+            promptTokens +
+              outputTokens +
+              thoughtsTokens
+        )
+      )
+    );
 
   return {
     promptTokens,
@@ -132,26 +149,153 @@ function readGeminiUsage(response: any): GeminiUsage {
   };
 }
 
-function cleanHtml(html: string) {
-  return html
-    .replace(/^```html\s*/i, "")
-    .replace(/^```\s*/i, "")
-    .replace(/\s*```$/i, "")
-    .trim();
+/**
+ * Clean Gemini's response.
+ *
+ * Handles:
+ * - ```html ... ```
+ * - ``` ... ```
+ * - <!DOCTYPE html>
+ * - extra text before HTML
+ * - extra text after </html>
+ */
+function cleanHtml(
+  html: string
+) {
+  let result =
+    typeof html === "string"
+      ? html.trim()
+      : "";
+
+  if (!result) {
+    return "";
+  }
+
+  /**
+   * Remove markdown code fences.
+   */
+  result =
+    result.replace(
+      /^```(?:html|HTML)?\s*/i,
+      ""
+    );
+
+  result =
+    result.replace(
+      /\s*```\s*$/i,
+      ""
+    );
+
+  result =
+    result.trim();
+
+  /**
+   * Find the beginning of the actual HTML document.
+   */
+  const doctypeIndex =
+    result.search(
+      /<!doctype\s+html>/i
+    );
+
+  const htmlIndex =
+    result.search(
+      /<html[\s>]/i
+    );
+
+  let startIndex = -1;
+
+  if (doctypeIndex >= 0) {
+    startIndex =
+      doctypeIndex;
+  } else if (htmlIndex >= 0) {
+    startIndex =
+      htmlIndex;
+  }
+
+  if (startIndex >= 0) {
+    result =
+      result.slice(
+        startIndex
+      );
+  }
+
+  /**
+   * Remove anything after the closing </html>.
+   */
+  const closingHtmlIndex =
+    result.toLowerCase().lastIndexOf(
+      "</html>"
+    );
+
+  if (closingHtmlIndex >= 0) {
+    result =
+      result.slice(
+        0,
+        closingHtmlIndex +
+          "</html>".length
+      );
+  }
+
+  return result.trim();
 }
 
-function isValidHtml(html: string) {
-  if (!html || html.length < 20) {
+/**
+ * Validate HTML in a tolerant way.
+ *
+ * We do NOT require every possible HTML element.
+ * We only require a complete HTML document structure.
+ */
+function isValidHtml(
+  html: string
+) {
+  if (!html) {
     return false;
   }
 
-  const lower = html.toLowerCase();
+  const cleaned =
+    cleanHtml(html);
+
+  if (
+    cleaned.length < 20
+  ) {
+    return false;
+  }
+
+  const lower =
+    cleaned.toLowerCase();
+
+  const hasHtml =
+    /<html[\s>]/i.test(
+      cleaned
+    );
+
+  const hasClosingHtml =
+    /<\/html>/i.test(
+      cleaned
+    );
+
+  const hasHead =
+    /<head[\s>]/i.test(
+      cleaned
+    );
+
+  const hasBody =
+    /<body[\s>]/i.test(
+      cleaned
+    );
+
+  const hasClosingBody =
+    /<\/body>/i.test(
+      cleaned
+    );
 
   return (
-    lower.includes("<html") &&
-    lower.includes("</html>") &&
-    lower.includes("<body") &&
-    lower.includes("</body>")
+    hasHtml &&
+    hasClosingHtml &&
+    hasHead &&
+    hasBody &&
+    hasClosingBody &&
+    lower.includes("<")
   );
 }
 
@@ -162,17 +306,18 @@ Generate a complete, modern and production-quality HTML website.
 
 Rules:
 
-1. Return ONLY HTML.
+1. Return ONLY the complete HTML document.
 2. Do not use markdown code fences.
 3. Include <!DOCTYPE html>.
 4. Include <html>, <head> and <body>.
 5. Use a <style> block or inline CSS.
-6. Make the website responsive.
+6. Make the website fully responsive.
 7. Make the design modern and professional.
 8. Use JavaScript only when necessary.
 9. Do not write explanations outside the HTML.
 10. Do not leave TODO or incomplete placeholders.
 11. Generate the complete website requested by the user.
+12. Make sure the final response ends with </html>.
 `;
 
 const EDIT_SYSTEM_INSTRUCTION = `
@@ -184,7 +329,7 @@ Modify the existing website according to the instruction.
 
 Rules:
 
-1. Return ONLY the complete updated HTML.
+1. Return ONLY the complete updated HTML document.
 2. Do not use markdown code fences.
 3. Preserve existing functionality unless requested otherwise.
 4. Preserve existing design where possible.
@@ -193,37 +338,61 @@ Rules:
 7. Ensure the result is valid HTML.
 8. Include <!DOCTYPE html>.
 9. Include <html>, <head> and <body>.
+10. Make sure the final response ends with </html>.
 `;
 
 /**
- * Generate a complete website with Gemini.
+ * Generate website.
  */
-async function generateWebsite(prompt: string) {
-  const ai = getGemini();
+async function generateWebsite(
+  prompt: string
+) {
+  const ai =
+    getGemini();
 
-  const response = await ai.models.generateContent({
-    model: GEMINI_MODEL,
+  const response =
+    await ai.models.generateContent({
+      model:
+        GEMINI_MODEL,
 
-    contents: `
+      contents: `
 WEBSITE REQUEST:
 
 ${prompt}
 `,
 
-    config: {
-      systemInstruction:
-        GENERATE_SYSTEM_INSTRUCTION,
+      config: {
+        systemInstruction:
+          GENERATE_SYSTEM_INSTRUCTION,
 
-      maxOutputTokens: 16000,
-    },
-  });
+        maxOutputTokens:
+          16000,
+      },
+    });
 
-  const html = cleanHtml(
-    response.text ?? ""
-  );
+  const rawHtml =
+    response.text ?? "";
+
+  const html =
+    cleanHtml(rawHtml);
 
   const usage =
-    readGeminiUsage(response);
+    readGeminiUsage(
+      response
+    );
+
+  console.log(
+    "WEBSITE BUILDER GENERATE RESULT:",
+    {
+      rawLength:
+        rawHtml.length,
+
+      cleanedLength:
+        html.length,
+
+      usage,
+    }
+  );
 
   return {
     html,
@@ -232,18 +401,21 @@ ${prompt}
 }
 
 /**
- * Edit an existing website with Gemini.
+ * Edit website.
  */
 async function editWebsite(
   html: string,
   instruction: string
 ) {
-  const ai = getGemini();
+  const ai =
+    getGemini();
 
-  const response = await ai.models.generateContent({
-    model: GEMINI_MODEL,
+  const response =
+    await ai.models.generateContent({
+      model:
+        GEMINI_MODEL,
 
-    contents: `
+      contents: `
 EXISTING WEBSITE:
 
 ${html}
@@ -253,29 +425,51 @@ EDIT INSTRUCTION:
 ${instruction}
 `,
 
-    config: {
-      systemInstruction:
-        EDIT_SYSTEM_INSTRUCTION,
+      config: {
+        systemInstruction:
+          EDIT_SYSTEM_INSTRUCTION,
 
-      maxOutputTokens: 16000,
-    },
-  });
+        maxOutputTokens:
+          16000,
+      },
+    });
 
-  const updatedHtml = cleanHtml(
-    response.text ?? ""
-  );
+  const rawHtml =
+    response.text ?? "";
+
+  const updatedHtml =
+    cleanHtml(
+      rawHtml
+    );
 
   const usage =
-    readGeminiUsage(response);
+    readGeminiUsage(
+      response
+    );
+
+  console.log(
+    "WEBSITE BUILDER EDIT RESULT:",
+    {
+      rawLength:
+        rawHtml.length,
+
+      cleanedLength:
+        updatedHtml.length,
+
+      usage,
+    }
+  );
 
   return {
-    html: updatedHtml,
+    html:
+      updatedHtml,
+
     usage,
   };
 }
 
 /**
- * Save ONLY actual Gemini provider usage.
+ * Save actual Gemini provider usage.
  *
  * Gemini tokens and ZUQEN credits are separate units.
  *
@@ -283,9 +477,8 @@ ${instruction}
  * No ZUQEN credits are consumed here.
  * No feature_credit_transactions rows are created here.
  *
- * This table is only used to collect real Gemini
- * usage data so the final Website Builder credit
- * conversion can be determined later.
+ * This is only measurement data for determining
+ * the final Website Builder credit conversion.
  */
 async function saveWebsiteUsage({
   userId,
@@ -297,7 +490,9 @@ async function saveWebsiteUsage({
   userId: string;
   operation: WebsiteOperation;
   usage: GeminiUsage;
-  status: "success" | "failed";
+  status:
+    | "success"
+    | "failed";
   outputValid: boolean;
 }) {
   try {
@@ -308,12 +503,14 @@ async function saveWebsiteUsage({
         featureKey:
           "website_builder",
 
-        provider: "gemini",
+        provider:
+          "gemini",
 
         model:
           GEMINI_MODEL,
 
-        requestId: null,
+        requestId:
+          null,
 
         status,
 
@@ -331,6 +528,7 @@ async function saveWebsiteUsage({
 
         metadata: {
           operation,
+
           outputValid,
 
           promptTokens:
@@ -353,15 +551,21 @@ async function saveWebsiteUsage({
         },
       });
 
-    if (!providerResult.success) {
+    if (
+      !providerResult.success
+    ) {
       console.error(
         "PROVIDER USAGE SAVE FAILED:",
         providerResult
       );
 
       return {
-        success: false,
-        providerUsageId: null,
+        success:
+          false,
+
+        providerUsageId:
+          null,
+
         error:
           providerResult.error ??
           "Failed to save provider usage.",
@@ -394,12 +598,14 @@ async function saveWebsiteUsage({
     );
 
     return {
-      success: true,
+      success:
+        true,
 
       providerUsageId:
         providerResult.id,
 
-      error: null,
+      error:
+        null,
     };
   } catch (error) {
     console.error(
@@ -408,12 +614,16 @@ async function saveWebsiteUsage({
     );
 
     return {
-      success: false,
+      success:
+        false,
 
-      providerUsageId: null,
+      providerUsageId:
+        null,
 
       error:
-        getErrorMessage(error),
+        getErrorMessage(
+          error
+        ),
     };
   }
 }
@@ -426,12 +636,17 @@ async function getUser() {
     await createServerSupabaseClient();
 
   const {
-    data: { user },
+    data: {
+      user,
+    },
     error,
   } =
     await supabase.auth.getUser();
 
-  if (error || !user) {
+  if (
+    error ||
+    !user
+  ) {
     return null;
   }
 
@@ -459,13 +674,15 @@ export async function POST(
     ) {
       return NextResponse.json(
         {
-          success: false,
+          success:
+            false,
 
           error:
             "Invalid action. Use generate or edit.",
         },
         {
-          status: 400,
+          status:
+            400,
         }
       );
     }
@@ -481,7 +698,8 @@ export async function POST(
     if (!user) {
       return NextResponse.json(
         {
-          success: false,
+          success:
+            false,
 
           error:
             "Authentication required.",
@@ -490,23 +708,27 @@ export async function POST(
             "UNAUTHENTICATED",
         },
         {
-          status: 401,
+          status:
+            401,
         }
       );
     }
 
     /**
      * ---------------------------------------------
-     * Website Builder is permanently available
-     * to signed-in permanent users.
+     * Permanent-user only.
      *
-     * Anonymous / guest users remain blocked.
+     * Guest / anonymous users cannot use
+     * Website Builder.
      * ---------------------------------------------
      */
-    if (user.is_anonymous) {
+    if (
+      user.is_anonymous
+    ) {
       return NextResponse.json(
         {
-          success: false,
+          success:
+            false,
 
           error:
             "Please sign in to use Website Builder.",
@@ -515,7 +737,8 @@ export async function POST(
             "SIGN_IN_REQUIRED",
         },
         {
-          status: 403,
+          status:
+            403,
         }
       );
     }
@@ -525,7 +748,9 @@ export async function POST(
      * GENERATE WEBSITE
      * =============================================
      */
-    if (action === "generate") {
+    if (
+      action === "generate"
+    ) {
       const prompt =
         typeof body.prompt === "string"
           ? body.prompt.trim()
@@ -534,27 +759,34 @@ export async function POST(
       if (!prompt) {
         return NextResponse.json(
           {
-            success: false,
+            success:
+              false,
 
             error:
               "Website prompt is required.",
           },
           {
-            status: 400,
+            status:
+              400,
           }
         );
       }
 
-      if (prompt.length > 10000) {
+      if (
+        prompt.length >
+        10000
+      ) {
         return NextResponse.json(
           {
-            success: false,
+            success:
+              false,
 
             error:
               "Website prompt is too long. Maximum 10,000 characters.",
           },
           {
-            status: 400,
+            status:
+              400,
           }
         );
       }
@@ -567,22 +799,28 @@ export async function POST(
             prompt
           );
       } catch (error) {
-        /**
-         * Gemini failed before usage metadata
-         * was available.
-         */
         await saveWebsiteUsage({
-          userId: user.id,
+          userId:
+            user.id,
 
           operation:
             "generate",
 
           usage: {
-            promptTokens: 0,
-            outputTokens: 0,
-            totalTokens: 0,
-            thoughtsTokens: 0,
-            cachedTokens: 0,
+            promptTokens:
+              0,
+
+            outputTokens:
+              0,
+
+            totalTokens:
+              0,
+
+            thoughtsTokens:
+              0,
+
+            cachedTokens:
+              0,
           },
 
           status:
@@ -605,7 +843,8 @@ export async function POST(
        */
       const usageSave =
         await saveWebsiteUsage({
-          userId: user.id,
+          userId:
+            user.id,
 
           operation:
             "generate",
@@ -621,13 +860,30 @@ export async function POST(
         });
 
       /**
-       * Gemini returned something that is not
-       * a complete HTML document.
+       * Gemini returned invalid HTML.
+       *
+       * The cleaned response is logged above,
+       * making future debugging easier.
        */
       if (!valid) {
+        console.error(
+          "INVALID WEBSITE HTML:",
+          {
+            length:
+              result.html.length,
+
+            preview:
+              result.html.slice(
+                0,
+                500
+              ),
+          }
+        );
+
         return NextResponse.json(
           {
-            success: false,
+            success:
+              false,
 
             error:
               "Gemini returned invalid website HTML.",
@@ -648,7 +904,8 @@ export async function POST(
               0,
           },
           {
-            status: 502,
+            status:
+              502,
 
             headers: {
               "X-Zuquen-Gemini-Model":
@@ -678,7 +935,8 @@ export async function POST(
 
       return NextResponse.json(
         {
-          success: true,
+          success:
+            true,
 
           html:
             result.html,
@@ -699,7 +957,8 @@ export async function POST(
             0,
         },
         {
-          status: 200,
+          status:
+            200,
 
           headers: {
             "X-Zuquen-Gemini-Model":
@@ -748,13 +1007,15 @@ export async function POST(
     if (!html) {
       return NextResponse.json(
         {
-          success: false,
+          success:
+            false,
 
           error:
             "Existing HTML is required.",
         },
         {
-          status: 400,
+          status:
+            400,
         }
       );
     }
@@ -762,41 +1023,53 @@ export async function POST(
     if (!instruction) {
       return NextResponse.json(
         {
-          success: false,
+          success:
+            false,
 
           error:
             "Edit instruction is required.",
         },
         {
-          status: 400,
+          status:
+            400,
         }
       );
     }
 
-    if (instruction.length > 5000) {
+    if (
+      instruction.length >
+      5000
+    ) {
       return NextResponse.json(
         {
-          success: false,
+          success:
+            false,
 
           error:
             "Edit instruction is too long. Maximum 5,000 characters.",
         },
         {
-          status: 400,
+          status:
+            400,
         }
       );
     }
 
-    if (html.length > 500000) {
+    if (
+      html.length >
+      500000
+    ) {
       return NextResponse.json(
         {
-          success: false,
+          success:
+            false,
 
           error:
             "HTML is too large. Maximum 500,000 characters.",
         },
         {
-          status: 400,
+          status:
+            400,
         }
       );
     }
@@ -810,22 +1083,28 @@ export async function POST(
           instruction
         );
     } catch (error) {
-      /**
-       * Gemini failed before usage metadata
-       * was available.
-       */
       await saveWebsiteUsage({
-        userId: user.id,
+        userId:
+          user.id,
 
         operation:
           "edit",
 
         usage: {
-          promptTokens: 0,
-          outputTokens: 0,
-          totalTokens: 0,
-          thoughtsTokens: 0,
-          cachedTokens: 0,
+          promptTokens:
+            0,
+
+          outputTokens:
+            0,
+
+          totalTokens:
+            0,
+
+          thoughtsTokens:
+            0,
+
+          cachedTokens:
+            0,
         },
 
         status:
@@ -848,7 +1127,8 @@ export async function POST(
      */
     const usageSave =
       await saveWebsiteUsage({
-        userId: user.id,
+        userId:
+          user.id,
 
         operation:
           "edit",
@@ -863,13 +1143,25 @@ export async function POST(
           valid,
       });
 
-    /**
-     * Gemini returned invalid HTML.
-     */
     if (!valid) {
+      console.error(
+        "INVALID EDITED WEBSITE HTML:",
+        {
+          length:
+            result.html.length,
+
+          preview:
+            result.html.slice(
+              0,
+              500
+            ),
+        }
+      );
+
       return NextResponse.json(
         {
-          success: false,
+          success:
+            false,
 
           error:
             "Gemini returned invalid edited HTML.",
@@ -890,7 +1182,8 @@ export async function POST(
             0,
         },
         {
-          status: 502,
+          status:
+            502,
 
           headers: {
             "X-Zuquen-Gemini-Model":
@@ -920,7 +1213,8 @@ export async function POST(
 
     return NextResponse.json(
       {
-        success: true,
+        success:
+          true,
 
         html:
           result.html,
@@ -941,7 +1235,8 @@ export async function POST(
           0,
       },
       {
-        status: 200,
+        status:
+          200,
 
         headers: {
           "X-Zuquen-Gemini-Model":
@@ -975,10 +1270,13 @@ export async function POST(
 
     return NextResponse.json(
       {
-        success: false,
+        success:
+          false,
 
         error:
-          getErrorMessage(error),
+          getErrorMessage(
+            error
+          ),
 
         provider:
           "gemini",
@@ -988,7 +1286,9 @@ export async function POST(
       },
       {
         status:
-          getErrorStatus(error),
+          getErrorStatus(
+            error
+          ),
       }
     );
   }
