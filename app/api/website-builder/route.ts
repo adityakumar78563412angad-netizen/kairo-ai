@@ -6,6 +6,10 @@ import { recordProviderUsage } from "@/lib/provider-usage";
 
 const GEMINI_MODEL = "gemini-3.6-flash";
 
+// Measurement/testing mode:
+// Website Builder credits are NOT deducted yet.
+// We only record actual Gemini token usage.
+
 type WebsiteOperation = "generate" | "edit";
 
 type GeminiUsage = {
@@ -19,50 +23,56 @@ type GeminiUsage = {
 const GENERATE_SYSTEM_INSTRUCTION = `
 You are an expert professional web designer and frontend developer.
 
-Generate a complete, production-quality responsive website as a SINGLE HTML DOCUMENT.
+Generate a complete, production-quality, responsive website as ONE SINGLE HTML DOCUMENT.
 
-IMPORTANT:
+CRITICAL OUTPUT REQUIREMENTS:
 - Return ONLY the complete HTML document.
-- Do not return Markdown.
-- Do not wrap the HTML in code fences.
-- Do not add explanations before or after the HTML.
-- Start with <!DOCTYPE html>.
-- Include <html>, <head>, and <body>.
-- End with </html>.
-- Put all CSS inside <style> tags.
-- Put all JavaScript inside <script> tags.
-- Do not require a build step.
-- The final HTML must work when opened directly in a browser.
-- Make the design modern, polished, professional and responsive.
+- Do NOT return Markdown.
+- Do NOT use code fences.
+- Do NOT add explanations before or after the HTML.
+- Start the response with <!DOCTYPE html>.
+- Include a complete <html> element.
+- Include a complete <head> element.
+- Include a complete <body> element.
+- End the response with </html>.
+- Put CSS inside <style> tags.
+- Put JavaScript inside <script> tags.
+- The website must work directly when opened in a browser.
+- Do not require React, Next.js, npm, a build process, or external compilation.
 - Use semantic HTML.
-- Make desktop, tablet and mobile layouts work properly.
+- Make the website modern, polished, professional and visually attractive.
+- Make it fully responsive for desktop, tablet and mobile.
+- Implement all requested sections and functionality.
+- Do not stop early.
+- Do not summarize the website.
+- Do not provide commentary.
+- Before finishing your response, ensure that the complete document ends with </html>.
 `;
 
 const EDIT_SYSTEM_INSTRUCTION = `
-You are an expert frontend developer editing an existing website.
+You are an expert professional frontend developer.
 
-You will receive an existing complete HTML document and an edit instruction.
+You will receive an existing complete HTML website and an edit instruction.
 
-Your task is to modify the existing website according to the instruction.
+Modify the existing website according to the instruction.
 
-CRITICAL OUTPUT RULES:
+CRITICAL OUTPUT REQUIREMENTS:
 - Return ONLY the COMPLETE updated HTML document.
-- Do not return Markdown.
-- Do not use code fences.
-- Do not provide explanations.
+- Do NOT return Markdown.
+- Do NOT use code fences.
+- Do NOT provide explanations.
+- Do NOT return a diff.
+- Do NOT return only the changed section.
+- Do NOT omit the existing CSS.
+- Do NOT omit the existing JavaScript.
+- Preserve the existing website content and functionality unless the requested change requires modification.
 - Start with <!DOCTYPE html>.
 - Include the complete <html> element.
-- Include the complete <head>.
-- Include the complete <body>.
+- Include the complete <head> element.
+- Include the complete <body> element.
 - End with </html>.
-- Preserve all existing website content unless the requested change requires modifying it.
-- Do not return only the changed section.
-- Do not return a diff.
-- Do not omit CSS or JavaScript from the original website.
-- Keep the existing design and functionality wherever possible.
-- Make the requested change fully functional.
-- Ensure the final HTML is valid and can be opened directly in a browser.
-- Make sure the response is NOT truncated.
+- Ensure the final response is complete and NOT truncated.
+- The resulting HTML must work directly in a browser.
 `;
 
 function cleanHtml(rawHtml: string): string {
@@ -72,7 +82,7 @@ function cleanHtml(rawHtml: string): string {
     return "";
   }
 
-  // Remove accidental Markdown code fences.
+  // Remove accidental Markdown fences.
   html = html.replace(/^```html\s*/i, "");
   html = html.replace(/^```HTML\s*/i, "");
   html = html.replace(/^```\s*/i, "");
@@ -80,7 +90,7 @@ function cleanHtml(rawHtml: string): string {
 
   html = html.trim();
 
-  // Find the actual HTML document start.
+  // Find the beginning of the actual HTML document.
   const doctypeIndex = html.search(/<!doctype\s+html/i);
   const htmlTagIndex = html.search(/<html\b/i);
 
@@ -96,8 +106,7 @@ function cleanHtml(rawHtml: string): string {
     html = html.slice(startIndex);
   }
 
-  // Only trim content after </html> when a complete
-  // closing tag actually exists.
+  // If a complete closing </html> exists, remove anything after it.
   const closingHtmlMatch = html.match(/<\/html\s*>/i);
 
   if (
@@ -119,12 +128,23 @@ function isValidHtml(html: string): boolean {
     return false;
   }
 
-  const hasDoctype = /<!doctype\s+html/i.test(html);
-  const hasHtmlOpen = /<html\b/i.test(html);
-  const hasHtmlClose = /<\/html\s*>/i.test(html);
-  const hasHeadOpen = /<head\b/i.test(html);
-  const hasBodyOpen = /<body\b/i.test(html);
-  const hasBodyClose = /<\/body\s*>/i.test(html);
+  const hasDoctype =
+    /<!doctype\s+html/i.test(html);
+
+  const hasHtmlOpen =
+    /<html\b/i.test(html);
+
+  const hasHtmlClose =
+    /<\/html\s*>/i.test(html);
+
+  const hasHeadOpen =
+    /<head\b/i.test(html);
+
+  const hasBodyOpen =
+    /<body\b/i.test(html);
+
+  const hasBodyClose =
+    /<\/body\s*>/i.test(html);
 
   return (
     hasDoctype &&
@@ -136,8 +156,39 @@ function isValidHtml(html: string): boolean {
   );
 }
 
-function readGeminiUsage(response: any): GeminiUsage {
-  const usage = response?.usageMetadata || {};
+function isTruncatedHtml(
+  rawHtml: string,
+  cleanedHtml: string
+): boolean {
+  if (!rawHtml.trim()) {
+    return true;
+  }
+
+  // Missing </html> is the strongest indication
+  // that Gemini stopped before completing the document.
+  if (!/<\/html\s*>/i.test(cleanedHtml)) {
+    return true;
+  }
+
+  // Also check whether the cleaned document actually
+  // ends with the closing HTML tag.
+  if (
+    !cleanedHtml
+      .trim()
+      .toLowerCase()
+      .endsWith("</html>")
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+function readGeminiUsage(
+  response: any
+): GeminiUsage {
+  const usage =
+    response?.usageMetadata || {};
 
   const promptTokens = Number(
     usage.promptTokenCount || 0
@@ -171,7 +222,9 @@ function readGeminiUsage(response: any): GeminiUsage {
   };
 }
 
-function getResponseText(response: any): string {
+function getResponseText(
+  response: any
+): string {
   if (typeof response?.text === "string") {
     return response.text;
   }
@@ -184,15 +237,17 @@ function getResponseText(response: any): string {
         return text;
       }
     } catch {
-      // Continue to candidates.
+      // Continue with candidates.
     }
   }
 
-  const candidates = response?.candidates;
+  const candidates =
+    response?.candidates;
 
   if (Array.isArray(candidates)) {
     for (const candidate of candidates) {
-      const parts = candidate?.content?.parts;
+      const parts =
+        candidate?.content?.parts;
 
       if (!Array.isArray(parts)) {
         continue;
@@ -215,36 +270,10 @@ function getResponseText(response: any): string {
   return "";
 }
 
-function isLikelyTruncated(
-  rawHtml: string,
-  cleanedHtml: string
-): boolean {
-  if (!rawHtml.trim()) {
-    return true;
-  }
-
-  if (!/<\/html\s*>/i.test(cleanedHtml)) {
-    return true;
-  }
-
-  if (
-    rawHtml.trim().length > 100 &&
-    !cleanedHtml
-      .trim()
-      .toLowerCase()
-      .endsWith("</html>")
-  ) {
-    return true;
-  }
-
-  return false;
-}
-
 async function saveProviderUsage(params: {
   userId: string;
   operation: WebsiteOperation;
   usage: GeminiUsage;
-  status: "success";
   outputValid: boolean;
 }) {
   try {
@@ -255,24 +284,41 @@ async function saveProviderUsage(params: {
       model: GEMINI_MODEL,
       requestId: null,
 
-      // provider-usage.ts does not allow "error".
-      // We therefore use the supported "success" status
-      // for measurement records as well.
-      status: params.status,
+      // provider-usage.ts currently supports
+      // "success" here, so we keep the record compatible.
+      status: "success",
 
-      inputUnits: params.usage.promptTokens,
-      outputUnits: params.usage.outputTokens,
-      totalUnits: params.usage.totalTokens,
+      inputUnits:
+        params.usage.promptTokens,
+
+      outputUnits:
+        params.usage.outputTokens,
+
+      totalUnits:
+        params.usage.totalTokens,
+
       unitType: "tokens",
 
       metadata: {
-     operation: params.operation,
-        outputValid: params.outputValid,
-        promptTokens: params.usage.promptTokens,
-        outputTokens: params.usage.outputTokens,
-        totalTokens: params.usage.totalTokens,
-        thoughtsTokens: params.usage.thoughtsTokens,
-        cachedTokens: params.usage.cachedTokens,
+        operation: params.operation,
+        outputValid:
+          params.outputValid,
+
+        promptTokens:
+          params.usage.promptTokens,
+
+        outputTokens:
+          params.usage.outputTokens,
+
+        totalTokens:
+          params.usage.totalTokens,
+
+        thoughtsTokens:
+          params.usage.thoughtsTokens,
+
+        cachedTokens:
+          params.usage.cachedTokens,
+
         usageAvailable:
           params.usage.totalTokens > 0,
       },
@@ -293,12 +339,17 @@ async function saveProviderUsage(params: {
   }
 }
 
-export async function POST(request: Request) {
-  let operation: WebsiteOperation = "generate";
+export async function POST(
+  request: Request
+) {
+  let operation: WebsiteOperation =
+    "generate";
+
   let userId = "";
 
   try {
-    const body = await request.json();
+    const body =
+      await request.json();
 
     operation =
       body?.action === "edit"
@@ -311,7 +362,8 @@ export async function POST(request: Request) {
     const {
       data: { user },
       error: authError,
-    } = await supabase.auth.getUser();
+    } =
+      await supabase.auth.getUser();
 
     if (authError || !user) {
       return NextResponse.json(
@@ -327,8 +379,8 @@ export async function POST(request: Request) {
 
     userId = user.id;
 
-    // Website Builder is permanently available
-    // only to permanent signed-in users.
+    // Website Builder is permanently restricted
+    // to permanent signed-in accounts.
     if (user.is_anonymous) {
       return NextResponse.json(
         {
@@ -355,12 +407,13 @@ export async function POST(request: Request) {
       );
     }
 
-    const ai = new GoogleGenAI({
-      apiKey,
-    });
+    const ai =
+      new GoogleGenAI({
+        apiKey,
+      });
 
     // ========================================================
-    // GENERATE
+    // GENERATE WEBSITE
     // ========================================================
 
     if (operation === "generate") {
@@ -395,20 +448,27 @@ export async function POST(request: Request) {
         "[Website Builder] Starting generation:",
         {
           userId,
-          promptLength: prompt.length,
-          model: GEMINI_MODEL,
+          promptLength:
+            prompt.length,
+          model:
+            GEMINI_MODEL,
         }
       );
 
       const response =
         await ai.models.generateContent({
           model: GEMINI_MODEL,
+
           contents: prompt,
+
           config: {
             systemInstruction:
               GENERATE_SYSTEM_INSTRUCTION,
 
-            maxOutputTokens: 16000,
+            // Increased from 16,000 to 32,000.
+            // This gives Gemini much more room to
+            // finish a complete website.
+            maxOutputTokens: 32000,
 
             temperature: 0.7,
           },
@@ -423,52 +483,85 @@ export async function POST(request: Request) {
       const html =
         cleanHtml(rawHtml);
 
+      const truncated =
+        isTruncatedHtml(
+          rawHtml,
+          html
+        );
+
+      const outputValid =
+        isValidHtml(html);
+
       console.log(
         "[Website Builder] Generation result:",
         {
-          rawLength: rawHtml.length,
-          cleanedLength: html.length,
+          rawLength:
+            rawHtml.length,
+
+          cleanedLength:
+            html.length,
+
+          truncated,
+
+          outputValid,
+
           promptTokens:
             usage.promptTokens,
+
           outputTokens:
             usage.outputTokens,
+
+          thoughtsTokens:
+            usage.thoughtsTokens,
+
           totalTokens:
             usage.totalTokens,
         }
       );
 
-      const outputValid =
-        isValidHtml(html);
-
-      if (!outputValid) {
-        // Keep usage record for measurement,
-        // but mark the metadata as invalid.
+      if (!outputValid || truncated) {
         await saveProviderUsage({
           userId,
           operation,
           usage,
-          status: "success",
           outputValid: false,
         });
 
         console.error(
-          "[Website Builder] Invalid generated HTML.",
+          "[Website Builder] Generation output invalid or truncated:",
           {
-            rawLength: rawHtml.length,
-            cleanedLength: html.length,
+            rawLength:
+              rawHtml.length,
+
+            cleanedLength:
+              html.length,
+
+            truncated,
+
+            outputValid,
+
             usage,
+
             preview:
               rawHtml.slice(0, 500),
+
+            ending:
+              rawHtml.slice(-500),
           }
         );
 
         return NextResponse.json(
           {
             success: false,
-            message:
-              "Gemini returned invalid website HTML.",
-            errorCode:
-              "INVALID_HTML",
+
+            message: truncated
+              ? "Gemini generation output was truncated before the complete HTML document was finished. Please try generating again."
+              : "Gemini returned invalid website HTML.",
+
+            errorCode: truncated
+              ? "GENERATE_OUTPUT_TRUNCATED"
+              : "INVALID_HTML",
+
             usage,
           },
           { status: 502 }
@@ -480,27 +573,32 @@ export async function POST(request: Request) {
           userId,
           operation,
           usage,
-          status: "success",
           outputValid: true,
         });
 
       return NextResponse.json({
         success: true,
+
         html,
+
         provider: "gemini",
-        feature: "website-builder",
+
+        feature:
+          "website-builder",
+
         usage,
+
         providerUsageSaved:
           usageSave.success,
 
         // Measurement mode:
-        // no ZUQEN credits are deducted.
+        // No ZUQEN credits are deducted.
         creditsConsumed: 0,
       });
     }
 
     // ========================================================
-    // EDIT
+    // EDIT WEBSITE
     // ========================================================
 
     const htmlInput =
@@ -559,47 +657,60 @@ export async function POST(request: Request) {
 
     const editPrompt = `
 EXISTING WEBSITE HTML:
---------------------------------------------------
+==================================================
 ${htmlInput}
---------------------------------------------------
+==================================================
 
 EDIT INSTRUCTION:
---------------------------------------------------
+==================================================
 ${instruction}
---------------------------------------------------
+==================================================
+
+Now modify the existing website.
 
 Return the COMPLETE updated HTML document.
 
-Do not return only the changed part.
 Do not return a diff.
+Do not return only the changed section.
 Do not return Markdown.
 Do not use code fences.
-Start with <!DOCTYPE html>.
-End with </html>.
+
+Start with:
+<!DOCTYPE html>
+
+Finish with:
+</html>
+
+Preserve all existing content, styling and functionality that is not related to the requested edit.
 `;
 
     console.log(
       "[Website Builder] Starting edit:",
       {
         userId,
+
         htmlLength:
           htmlInput.length,
+
         instructionLength:
           instruction.length,
-        model: GEMINI_MODEL,
+
+        model:
+          GEMINI_MODEL,
       }
     );
 
     const response =
       await ai.models.generateContent({
         model: GEMINI_MODEL,
+
         contents: editPrompt,
+
         config: {
           systemInstruction:
             EDIT_SYSTEM_INSTRUCTION,
 
-          // Increased from 16,000 to 32,000
-          // to reduce HTML truncation.
+          // Keep the increased edit limit as well.
           maxOutputTokens: 32000,
 
           temperature: 0.4,
@@ -616,7 +727,7 @@ End with </html>.
       cleanHtml(rawHtml);
 
     const truncated =
-      isLikelyTruncated(
+      isTruncatedHtml(
         rawHtml,
         html
       );
@@ -629,41 +740,54 @@ End with </html>.
       {
         rawLength:
           rawHtml.length,
+
         cleanedLength:
           html.length,
+
         truncated,
+
         outputValid,
+
         promptTokens:
           usage.promptTokens,
+
         outputTokens:
           usage.outputTokens,
+
+        thoughtsTokens:
+          usage.thoughtsTokens,
+
         totalTokens:
           usage.totalTokens,
       }
     );
 
     if (!outputValid || truncated) {
-      // We still record the Gemini usage because
-      // tokens were actually consumed.
       await saveProviderUsage({
         userId,
         operation,
         usage,
-        status: "success",
         outputValid: false,
       });
 
       console.error(
-        "[Website Builder] Invalid or truncated edited HTML.",
+        "[Website Builder] Edit output invalid or truncated:",
         {
           rawLength:
             rawHtml.length,
+
           cleanedLength:
             html.length,
+
           truncated,
+
+          outputValid,
+
           usage,
+
           preview:
             rawHtml.slice(0, 500),
+
           ending:
             rawHtml.slice(-500),
         }
@@ -672,12 +796,15 @@ End with </html>.
       return NextResponse.json(
         {
           success: false,
+
           message: truncated
-            ? "Gemini edit output was truncated. The generated website is too large for the current edit output limit."
+            ? "Gemini edit output was truncated before the complete HTML document was finished. Please try the edit again."
             : "Gemini returned invalid edited HTML.",
+
           errorCode: truncated
             ? "EDIT_OUTPUT_TRUNCATED"
             : "INVALID_EDITED_HTML",
+
           usage,
         },
         { status: 502 }
@@ -689,21 +816,26 @@ End with </html>.
         userId,
         operation,
         usage,
-        status: "success",
         outputValid: true,
       });
 
     return NextResponse.json({
       success: true,
+
       html,
+
       provider: "gemini",
-      feature: "website-builder",
+
+      feature:
+        "website-builder",
+
       usage,
+
       providerUsageSaved:
         usageSave.success,
 
       // Measurement mode:
-      // no ZUQEN credits are deducted.
+      // No ZUQEN credits are deducted.
       creditsConsumed: 0,
     });
   } catch (error: any) {
