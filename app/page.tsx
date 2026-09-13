@@ -425,6 +425,9 @@ export default function HomePage() {
       setAuthReady(false);
       setErrorMessage("");
 
+      /*
+       * Restore an existing Supabase session first.
+       */
       const {
         data: { session },
         error: sessionError,
@@ -436,6 +439,9 @@ export default function HomePage() {
 
       let currentUser = session?.user ?? null;
 
+      /*
+       * If getSession() did not return a user, try getUser().
+       */
       if (!currentUser) {
         const {
           data: { user: existingUser },
@@ -448,52 +454,116 @@ export default function HomePage() {
       }
 
       /*
-       * Guest mode:
-       * Create anonymous user only when absolutely no
-       * existing session/user exists.
+       * No existing session: create a new anonymous Guest account.
        */
-    if (!currentUser) {
-  const {
-    data: anonymousData,
-    error: anonymousError,
-  } = await supabase.auth.signInAnonymously();
+      if (!currentUser) {
+        const {
+          data: anonymousData,
+          error: anonymousError,
+        } = await supabase.auth.signInAnonymously();
 
-  if (anonymousError) {
-    console.error("Anonymous sign-in:", anonymousError);
+        if (anonymousError) {
+          console.error("Anonymous sign-in:", anonymousError);
 
-    setErrorMessage(
-      "Unable to authenticate with Supabase."
-    );
+          setErrorMessage(
+            "Unable to authenticate with Supabase."
+          );
 
-    return;
-  }
+          return;
+        }
 
-  if (!anonymousData.user) {
-    console.error("Anonymous sign-in returned no user.");
+        if (!anonymousData.user) {
+          console.error(
+            "Anonymous sign-in returned no user."
+          );
 
-    setErrorMessage(
-      "Unable to create a guest account."
-    );
+          setErrorMessage(
+            "Unable to create a guest account."
+          );
 
-    return;
-  }
+          return;
+        }
 
-  const guestUser = anonymousData.user;
+        /*
+         * Explicitly make sure the returned anonymous session is
+         * installed in the browser client before calling the RPC.
+         * This prevents the RPC from running without auth context.
+         */
+        if (anonymousData.session) {
+          const { error: setSessionError } =
+            await supabase.auth.setSession({
+              access_token: anonymousData.session.access_token,
+              refresh_token: anonymousData.session.refresh_token,
+            });
 
-  const { error: creditError } = await supabase.rpc(
-    "setup_guest_chat_credits"
-  );
+          if (setSessionError) {
+            console.error(
+              "Guest setSession:",
+              setSessionError
+            );
 
-  if (creditError) {
-    console.error(
-      "Guest credit setup error:",
-      creditError
-    );
-  }
+            setErrorMessage(
+              "Guest authentication could not be established."
+            );
 
-  currentUser = guestUser;
-}
+            return;
+          }
+        }
 
+        /*
+         * Verify the authenticated session after anonymous sign-in.
+         */
+        const {
+          data: { session: verifiedSession },
+          error: verifiedSessionError,
+        } = await supabase.auth.getSession();
+
+        if (
+          verifiedSessionError ||
+          !verifiedSession?.user
+        ) {
+          console.error(
+            "Guest session verification failed:",
+            verifiedSessionError
+          );
+
+          setErrorMessage(
+            "Guest authentication could not be verified."
+          );
+
+          return;
+        }
+
+        currentUser = verifiedSession.user;
+      }
+
+      /*
+       * Guest users receive/setup the Guest Chat credit wallet.
+       * Permanent signed-in users never call this RPC.
+       */
+      if (currentUser.is_anonymous) {
+        const { error: creditError } =
+          await supabase.rpc(
+            "setup_guest_chat_credits"
+          );
+
+        if (creditError) {
+          console.error(
+            "Guest credit setup error:",
+            creditError
+          );
+
+          setErrorMessage(
+            "Guest Mode started, but Chat credits could not be set up. Please refresh and try again."
+          );
+
+          return;
+        }
+      }
+
+      /*
+       * Convert the Supabase user into the User type used by ZUQEN.
+       */
       const normalizedUser: User = {
         id: currentUser.id,
         email: currentUser.email,
@@ -502,6 +572,9 @@ export default function HomePage() {
 
       setUser(normalizedUser);
 
+      /*
+       * Load conversations and Chat credits together.
+       */
       await Promise.all([
         loadChats(currentUser.id),
         loadChatCredits(currentUser.id),
