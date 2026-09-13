@@ -1,11 +1,8 @@
-
 import { NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
 
 import { createServerSupabaseClient } from "@/lib/supabase-server";
 import { recordProviderUsage } from "@/lib/provider-usage";
-
-export const maxDuration = 300;
 
 const GEMINI_MODEL = "gemini-3.6-flash";
 
@@ -19,126 +16,134 @@ type GeminiUsage = {
   cachedTokens: number;
 };
 
-function getGemini() {
-  const apiKey = process.env.GEMINI_API_KEY;
+const GENERATE_SYSTEM_INSTRUCTION = `
+You are an expert professional web designer and frontend developer.
 
-  if (!apiKey) {
-    throw new Error("GEMINI_API_KEY is missing.");
+Generate a complete, production-quality responsive website as a SINGLE HTML DOCUMENT.
+
+IMPORTANT:
+- Return ONLY the complete HTML document.
+- Do not return Markdown.
+- Do not wrap the HTML in code fences.
+- Do not add explanations before or after the HTML.
+- Start with <!DOCTYPE html>.
+- Include <html>, <head>, and <body>.
+- End with </html>.
+- Put all CSS inside <style> tags.
+- Put all JavaScript inside <script> tags.
+- Do not require a build step.
+- The final HTML must work when opened directly in a browser.
+- Make the design modern, polished, professional and responsive.
+- Use semantic HTML.
+- Make desktop, tablet and mobile layouts work properly.
+`;
+
+const EDIT_SYSTEM_INSTRUCTION = `
+You are an expert frontend developer editing an existing website.
+
+You will receive an existing complete HTML document and an edit instruction.
+
+Your task is to modify the existing website according to the instruction.
+
+CRITICAL OUTPUT RULES:
+- Return ONLY the COMPLETE updated HTML document.
+- Do not return Markdown.
+- Do not use code fences.
+- Do not provide explanations.
+- Start with <!DOCTYPE html>.
+- Include the complete <html> element.
+- Include the complete <head>.
+- Include the complete <body>.
+- End with </html>.
+- Preserve all existing website content unless the requested change requires modifying it.
+- Do not return only the changed section.
+- Do not return a diff.
+- Do not omit CSS or JavaScript from the original website.
+- Keep the existing design and functionality wherever possible.
+- Make the requested change fully functional.
+- Ensure the final HTML is valid and can be opened directly in a browser.
+- Make sure the response is NOT truncated.
+`;
+
+function cleanHtml(rawHtml: string): string {
+  let html = String(rawHtml || "").trim();
+
+  if (!html) {
+    return "";
   }
 
-  return new GoogleGenAI({
-    apiKey,
-  });
+  // Remove Markdown code fences if Gemini accidentally adds them.
+  html = html.replace(/^```html\s*/i, "");
+  html = html.replace(/^```HTML\s*/i, "");
+  html = html.replace(/^```\s*/i, "");
+  html = html.replace(/\s*```$/i, "");
+
+  html = html.trim();
+
+  // Find the real HTML document start.
+  const doctypeIndex = html.search(/<!doctype\s+html/i);
+  const htmlTagIndex = html.search(/<html\b/i);
+
+  let startIndex = -1;
+
+  if (doctypeIndex >= 0) {
+    startIndex = doctypeIndex;
+  } else if (htmlTagIndex >= 0) {
+    startIndex = htmlTagIndex;
+  }
+
+  if (startIndex >= 0) {
+    html = html.slice(startIndex);
+  }
+
+  // Only trim after </html> if a complete closing tag exists.
+  const closingHtmlMatch = html.match(/<\/html\s*>/i);
+
+  if (closingHtmlMatch && closingHtmlMatch.index !== undefined) {
+    const endIndex =
+      closingHtmlMatch.index + closingHtmlMatch[0].length;
+
+    html = html.slice(0, endIndex);
+  }
+
+  return html.trim();
 }
 
-function getErrorMessage(error: unknown) {
-  if (error instanceof Error) {
-    return error.message;
+function isValidHtml(html: string): boolean {
+  if (!html || html.length < 20) {
+    return false;
   }
 
-  if (typeof error === "string") {
-    return error;
-  }
+  const hasDoctype = /<!doctype\s+html/i.test(html);
+  const hasHtmlOpen = /<html\b/i.test(html);
+  const hasHtmlClose = /<\/html\s*>/i.test(html);
+  const hasHeadOpen = /<head\b/i.test(html);
+  const hasBodyOpen = /<body\b/i.test(html);
+  const hasBodyClose = /<\/body\s*>/i.test(html);
 
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return "Unknown error";
-  }
+  return (
+    hasDoctype &&
+    hasHtmlOpen &&
+    hasHtmlClose &&
+    hasHeadOpen &&
+    hasBodyOpen &&
+    hasBodyClose
+  );
 }
 
-function getErrorStatus(error: unknown) {
-  const message =
-    getErrorMessage(error).toLowerCase();
+function readGeminiUsage(response: any): GeminiUsage {
+  const usage = response?.usageMetadata || {};
 
-  if (
-    message.includes("api key") ||
-    message.includes("authentication") ||
-    message.includes("unauthorized") ||
-    message.includes("permission")
-  ) {
-    return 401;
-  }
-
-  if (
-    message.includes("quota") ||
-    message.includes("rate limit") ||
-    message.includes("resource exhausted")
-  ) {
-    return 429;
-  }
-
-  if (
-    message.includes("timeout") ||
-    message.includes("timed out")
-  ) {
-    return 504;
-  }
-
-  return 500;
-}
-
-/**
- * Read actual Gemini usage metadata.
- */
-function readGeminiUsage(
-  response: any
-): GeminiUsage {
-  const usage =
-    response?.usageMetadata;
-
-  const promptTokens =
-    Math.max(
-      0,
-      Math.floor(
-        Number(
-          usage?.promptTokenCount ?? 0
-        )
-      )
-    );
-
-  const outputTokens =
-    Math.max(
-      0,
-      Math.floor(
-        Number(
-          usage?.candidatesTokenCount ?? 0
-        )
-      )
-    );
-
-  const thoughtsTokens =
-    Math.max(
-      0,
-      Math.floor(
-        Number(
-          usage?.thoughtsTokenCount ?? 0
-        )
-      )
-    );
-
-  const cachedTokens =
-    Math.max(
-      0,
-      Math.floor(
-        Number(
-          usage?.cachedContentTokenCount ?? 0
-        )
-      )
-    );
-
-  const totalTokens =
-    Math.max(
-      0,
-      Math.floor(
-        Number(
-          usage?.totalTokenCount ??
-            promptTokens +
-              outputTokens +
-              thoughtsTokens
-        )
-      )
-    );
+  const promptTokens = Number(usage.promptTokenCount || 0);
+  const outputTokens = Number(usage.candidatesTokenCount || 0);
+  const thoughtsTokens = Number(usage.thoughtsTokenCount || 0);
+  const cachedTokens = Number(usage.cachedContentTokenCount || 0);
+  const totalTokens = Number(
+    usage.totalTokenCount ||
+      promptTokens +
+        outputTokens +
+        thoughtsTokens
+  );
 
   return {
     promptTokens,
@@ -149,1148 +154,485 @@ function readGeminiUsage(
   };
 }
 
-/**
- * Clean Gemini's response.
- *
- * Handles:
- * - ```html ... ```
- * - ``` ... ```
- * - <!DOCTYPE html>
- * - extra text before HTML
- * - extra text after </html>
- */
-function cleanHtml(
-  html: string
-) {
-  let result =
-    typeof html === "string"
-      ? html.trim()
-      : "";
-
-  if (!result) {
-    return "";
+function getResponseText(response: any): string {
+  if (typeof response?.text === "string") {
+    return response.text;
   }
 
-  /**
-   * Remove markdown code fences.
-   */
-  result =
-    result.replace(
-      /^```(?:html|HTML)?\s*/i,
-      ""
-    );
-
-  result =
-    result.replace(
-      /\s*```\s*$/i,
-      ""
-    );
-
-  result =
-    result.trim();
-
-  /**
-   * Find the beginning of the actual HTML document.
-   */
-  const doctypeIndex =
-    result.search(
-      /<!doctype\s+html>/i
-    );
-
-  const htmlIndex =
-    result.search(
-      /<html[\s>]/i
-    );
-
-  let startIndex = -1;
-
-  if (doctypeIndex >= 0) {
-    startIndex =
-      doctypeIndex;
-  } else if (htmlIndex >= 0) {
-    startIndex =
-      htmlIndex;
+  if (typeof response?.text === "function") {
+    try {
+      const text = response.text();
+      if (typeof text === "string") {
+        return text;
+      }
+    } catch {
+      // Ignore and try candidates below.
+    }
   }
 
-  if (startIndex >= 0) {
-    result =
-      result.slice(
-        startIndex
-      );
+  const candidates = response?.candidates;
+
+  if (Array.isArray(candidates)) {
+    for (const candidate of candidates) {
+      const parts = candidate?.content?.parts;
+
+      if (!Array.isArray(parts)) {
+        continue;
+      }
+
+      const text = parts
+        .map((part: any) =>
+          typeof part?.text === "string" ? part.text : ""
+        )
+        .join("");
+
+      if (text.trim()) {
+        return text;
+      }
+    }
   }
 
-  /**
-   * Remove anything after the closing </html>.
-   */
-  const closingHtmlIndex =
-    result.toLowerCase().lastIndexOf(
-      "</html>"
-    );
-
-  if (closingHtmlIndex >= 0) {
-    result =
-      result.slice(
-        0,
-        closingHtmlIndex +
-          "</html>".length
-      );
-  }
-
-  return result.trim();
+  return "";
 }
 
-/**
- * Validate HTML in a tolerant way.
- *
- * We do NOT require every possible HTML element.
- * We only require a complete HTML document structure.
- */
-function isValidHtml(
-  html: string
-) {
-  if (!html) {
-    return false;
+function isLikelyTruncated(rawHtml: string, cleanedHtml: string): boolean {
+  if (!rawHtml.trim()) {
+    return true;
   }
 
-  const cleaned =
-    cleanHtml(html);
+  if (!/<\/html\s*>/i.test(cleanedHtml)) {
+    return true;
+  }
 
   if (
-    cleaned.length < 20
+    rawHtml.trim().length > 100 &&
+    !cleanedHtml.trim().toLowerCase().endsWith("</html>")
   ) {
-    return false;
+    return true;
   }
 
-  const lower =
-    cleaned.toLowerCase();
-
-  const hasHtml =
-    /<html[\s>]/i.test(
-      cleaned
-    );
-
-  const hasClosingHtml =
-    /<\/html>/i.test(
-      cleaned
-    );
-
-  const hasHead =
-    /<head[\s>]/i.test(
-      cleaned
-    );
-
-  const hasBody =
-    /<body[\s>]/i.test(
-      cleaned
-    );
-
-  const hasClosingBody =
-    /<\/body>/i.test(
-      cleaned
-    );
-
-  return (
-    hasHtml &&
-    hasClosingHtml &&
-    hasHead &&
-    hasBody &&
-    hasClosingBody &&
-    lower.includes("<")
-  );
+  return false;
 }
 
-const GENERATE_SYSTEM_INSTRUCTION = `
-You are ZUQEN AI Website Builder.
-
-Generate a complete, modern and production-quality HTML website.
-
-Rules:
-
-1. Return ONLY the complete HTML document.
-2. Do not use markdown code fences.
-3. Include <!DOCTYPE html>.
-4. Include <html>, <head> and <body>.
-5. Use a <style> block or inline CSS.
-6. Make the website fully responsive.
-7. Make the design modern and professional.
-8. Use JavaScript only when necessary.
-9. Do not write explanations outside the HTML.
-10. Do not leave TODO or incomplete placeholders.
-11. Generate the complete website requested by the user.
-12. Make sure the final response ends with </html>.
-`;
-
-const EDIT_SYSTEM_INSTRUCTION = `
-You are ZUQEN AI Website Editor.
-
-You will receive an existing HTML website and an edit instruction.
-
-Modify the existing website according to the instruction.
-
-Rules:
-
-1. Return ONLY the complete updated HTML document.
-2. Do not use markdown code fences.
-3. Preserve existing functionality unless requested otherwise.
-4. Preserve existing design where possible.
-5. Make only the requested changes.
-6. Keep the result responsive.
-7. Ensure the result is valid HTML.
-8. Include <!DOCTYPE html>.
-9. Include <html>, <head> and <body>.
-10. Make sure the final response ends with </html>.
-`;
-
-/**
- * Generate website.
- */
-async function generateWebsite(
-  prompt: string
-) {
-  const ai =
-    getGemini();
-
-  const response =
-    await ai.models.generateContent({
-      model:
-        GEMINI_MODEL,
-
-      contents: `
-WEBSITE REQUEST:
-
-${prompt}
-`,
-
-      config: {
-        systemInstruction:
-          GENERATE_SYSTEM_INSTRUCTION,
-
-        maxOutputTokens:
-          16000,
-      },
-    });
-
-  const rawHtml =
-    response.text ?? "";
-
-  const html =
-    cleanHtml(rawHtml);
-
-  const usage =
-    readGeminiUsage(
-      response
-    );
-
-  console.log(
-    "WEBSITE BUILDER GENERATE RESULT:",
-    {
-      rawLength:
-        rawHtml.length,
-
-      cleanedLength:
-        html.length,
-
-      usage,
-    }
-  );
-
-  return {
-    html,
-    usage,
-  };
-}
-
-/**
- * Edit website.
- */
-async function editWebsite(
-  html: string,
-  instruction: string
-) {
-  const ai =
-    getGemini();
-
-  const response =
-    await ai.models.generateContent({
-      model:
-        GEMINI_MODEL,
-
-      contents: `
-EXISTING WEBSITE:
-
-${html}
-
-EDIT INSTRUCTION:
-
-${instruction}
-`,
-
-      config: {
-        systemInstruction:
-          EDIT_SYSTEM_INSTRUCTION,
-
-        maxOutputTokens:
-          16000,
-      },
-    });
-
-  const rawHtml =
-    response.text ?? "";
-
-  const updatedHtml =
-    cleanHtml(
-      rawHtml
-    );
-
-  const usage =
-    readGeminiUsage(
-      response
-    );
-
-  console.log(
-    "WEBSITE BUILDER EDIT RESULT:",
-    {
-      rawLength:
-        rawHtml.length,
-
-      cleanedLength:
-        updatedHtml.length,
-
-      usage,
-    }
-  );
-
-  return {
-    html:
-      updatedHtml,
-
-    usage,
-  };
-}
-
-/**
- * Save actual Gemini provider usage.
- *
- * Gemini tokens and ZUQEN credits are separate units.
- *
- * IMPORTANT:
- * No ZUQEN credits are consumed here.
- * No feature_credit_transactions rows are created here.
- *
- * This is only measurement data for determining
- * the final Website Builder credit conversion.
- */
-async function saveWebsiteUsage({
-  userId,
-  operation,
-  usage,
-  status,
-  outputValid,
-}: {
+async function saveProviderUsage(params: {
   userId: string;
   operation: WebsiteOperation;
   usage: GeminiUsage;
-  status:
-    | "success"
-    | "failed";
+  status: "success" | "error";
   outputValid: boolean;
 }) {
   try {
-    const providerResult =
-      await recordProviderUsage({
-        userId,
-
-        featureKey:
-          "website_builder",
-
-        provider:
-          "gemini",
-
-        model:
-          GEMINI_MODEL,
-
-        requestId:
-          null,
-
-        status,
-
-        inputUnits:
-          usage.promptTokens,
-
-        outputUnits:
-          usage.outputTokens,
-
-        totalUnits:
-          usage.totalTokens,
-
-        unitType:
-          "tokens",
-
-        metadata: {
-          operation,
-
-          outputValid,
-
-          promptTokens:
-            usage.promptTokens,
-
-          outputTokens:
-            usage.outputTokens,
-
-          totalTokens:
-            usage.totalTokens,
-
-          thoughtsTokens:
-            usage.thoughtsTokens,
-
-          cachedTokens:
-            usage.cachedTokens,
-
-          usageAvailable:
-            usage.totalTokens > 0,
-        },
-      });
-
-    if (
-      !providerResult.success
-    ) {
-      console.error(
-        "PROVIDER USAGE SAVE FAILED:",
-        providerResult
-      );
-
-      return {
-        success:
-          false,
-
-        providerUsageId:
-          null,
-
-        error:
-          providerResult.error ??
-          "Failed to save provider usage.",
-      };
-    }
-
-    console.log(
-      "WEBSITE BUILDER PROVIDER USAGE SAVED:",
-      {
-        providerUsageId:
-          providerResult.id,
-
-        operation,
-
-        inputTokens:
-          usage.promptTokens,
-
-        outputTokens:
-          usage.outputTokens,
-
-        thoughtsTokens:
-          usage.thoughtsTokens,
-
-        cachedTokens:
-          usage.cachedTokens,
-
-        totalTokens:
-          usage.totalTokens,
-      }
-    );
-
-    return {
-      success:
-        true,
-
-      providerUsageId:
-        providerResult.id,
-
-      error:
-        null,
-    };
+    return await recordProviderUsage({
+      userId: params.userId,
+      featureKey: "website_builder",
+      provider: "gemini",
+      model: GEMINI_MODEL,
+      requestId: null,
+      status: params.status,
+      inputUnits: params.usage.promptTokens,
+      outputUnits: params.usage.outputTokens,
+      totalUnits: params.usage.totalTokens,
+      unitType: "tokens",
+      metadata: {
+        operation: params.operation,
+        outputValid: params.outputValid,
+        promptTokens: params.usage.promptTokens,
+        outputTokens: params.usage.outputTokens,
+        totalTokens: params.usage.totalTokens,
+        thoughtsTokens: params.usage.thoughtsTokens,
+        cachedTokens: params.usage.cachedTokens,
+        usageAvailable: params.usage.totalTokens > 0,
+      },
+    });
   } catch (error) {
     console.error(
-      "PROVIDER USAGE SAVE ERROR:",
+      "[Website Builder] Failed to save provider usage:",
       error
     );
 
     return {
-      success:
-        false,
-
-      providerUsageId:
-        null,
-
+      success: false,
       error:
-        getErrorMessage(
-          error
-        ),
+        error instanceof Error
+          ? error.message
+          : "Failed to save provider usage",
     };
   }
 }
 
-/**
- * Get authenticated user.
- */
-async function getUser() {
-  const supabase =
-    await createServerSupabaseClient();
+export async function POST(request: Request) {
+  let operation: WebsiteOperation = "generate";
+  let userId = "";
 
-  const {
-    data: {
-      user,
-    },
-    error,
-  } =
-    await supabase.auth.getUser();
-
-  if (
-    error ||
-    !user
-  ) {
-    return null;
-  }
-
-  return user;
-}
-
-export async function POST(
-  request: Request
-) {
   try {
-    const body =
-      await request.json();
+    const body = await request.json();
 
-    const action =
-      body?.action;
+    operation =
+      body?.action === "edit"
+        ? "edit"
+        : "generate";
 
-    /**
-     * ---------------------------------------------
-     * Validate action
-     * ---------------------------------------------
-     */
-    if (
-      action !== "generate" &&
-      action !== "edit"
-    ) {
+    const supabase = await createServerSupabaseClient();
+
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
+
+    if (authError || !user) {
       return NextResponse.json(
         {
-          success:
-            false,
-
-          error:
-            "Invalid action. Use generate or edit.",
+          success: false,
+          code: "UNAUTHORIZED",
+          message: "Please sign in to use Website Builder.",
         },
-        {
-          status:
-            400,
-        }
+        { status: 401 }
       );
     }
 
-    /**
-     * ---------------------------------------------
-     * Authentication
-     * ---------------------------------------------
-     */
-    const user =
-      await getUser();
+    userId = user.id;
 
-    if (!user) {
+    // Website Builder is permanently restricted to permanent accounts.
+    if (user.is_anonymous) {
       return NextResponse.json(
         {
-          success:
-            false,
-
-          error:
-            "Authentication required.",
-
-          code:
-            "UNAUTHENTICATED",
+          success: false,
+          code: "SIGN_IN_REQUIRED",
+          message: "Please sign in to use Website Builder.",
         },
-        {
-          status:
-            401,
-        }
+        { status: 403 }
       );
     }
 
-    /**
-     * ---------------------------------------------
-     * Permanent-user only.
-     *
-     * Guest / anonymous users cannot use
-     * Website Builder.
-     * ---------------------------------------------
-     */
-    if (
-      user.is_anonymous
-    ) {
+    const apiKey = process.env.GEMINI_API_KEY;
+
+    if (!apiKey) {
       return NextResponse.json(
         {
-          success:
-            false,
-
-          error:
-            "Please sign in to use Website Builder.",
-
-          code:
-            "SIGN_IN_REQUIRED",
+          success: false,
+          message: "Gemini API key is not configured.",
         },
-        {
-          status:
-            403,
-        }
+        { status: 500 }
       );
     }
 
-    /**
-     * =============================================
-     * GENERATE WEBSITE
-     * =============================================
-     */
-    if (
-      action === "generate"
-    ) {
+    const ai = new GoogleGenAI({
+      apiKey,
+    });
+
+    if (operation === "generate") {
       const prompt =
-        typeof body.prompt === "string"
+        typeof body?.prompt === "string"
           ? body.prompt.trim()
           : "";
 
       if (!prompt) {
         return NextResponse.json(
           {
-            success:
-              false,
-
-            error:
-              "Website prompt is required.",
+            success: false,
+            message: "Website prompt is required.",
           },
-          {
-            status:
-              400,
-          }
+          { status: 400 }
         );
       }
 
-      if (
-        prompt.length >
-        10000
-      ) {
+      if (prompt.length > 10000) {
         return NextResponse.json(
           {
-            success:
-              false,
-
-            error:
-              "Website prompt is too long. Maximum 10,000 characters.",
+            success: false,
+            message:
+              "Website prompt is too long. Please keep it under 10,000 characters.",
           },
-          {
-            status:
-              400,
-          }
+          { status: 400 }
         );
       }
 
-      let result;
-
-      try {
-        result =
-          await generateWebsite(
-            prompt
-          );
-      } catch (error) {
-        await saveWebsiteUsage({
-          userId:
-            user.id,
-
-          operation:
-            "generate",
-
-          usage: {
-            promptTokens:
-              0,
-
-            outputTokens:
-              0,
-
-            totalTokens:
-              0,
-
-            thoughtsTokens:
-              0,
-
-            cachedTokens:
-              0,
-          },
-
-          status:
-            "failed",
-
-          outputValid:
-            false,
-        });
-
-        throw error;
-      }
-
-      const valid =
-        isValidHtml(
-          result.html
-        );
-
-      /**
-       * Save actual Gemini usage.
-       */
-      const usageSave =
-        await saveWebsiteUsage({
-          userId:
-            user.id,
-
-          operation:
-            "generate",
-
-          usage:
-            result.usage,
-
-          status:
-            "success",
-
-          outputValid:
-            valid,
-        });
-
-      /**
-       * Gemini returned invalid HTML.
-       *
-       * The cleaned response is logged above,
-       * making future debugging easier.
-       */
-      if (!valid) {
-        console.error(
-          "INVALID WEBSITE HTML:",
-          {
-            length:
-              result.html.length,
-
-            preview:
-              result.html.slice(
-                0,
-                500
-              ),
-          }
-        );
-
-        return NextResponse.json(
-          {
-            success:
-              false,
-
-            error:
-              "Gemini returned invalid website HTML.",
-
-            provider:
-              "gemini",
-
-            feature:
-              "website-builder",
-
-            usage:
-              result.usage,
-
-            providerUsageSaved:
-              usageSave.success,
-
-            creditsConsumed:
-              0,
-          },
-          {
-            status:
-              502,
-
-            headers: {
-              "X-Zuquen-Gemini-Model":
-                GEMINI_MODEL,
-
-              "X-Zuquen-Gemini-Input-Tokens":
-                String(
-                  result.usage
-                    .promptTokens
-                ),
-
-              "X-Zuquen-Gemini-Output-Tokens":
-                String(
-                  result.usage
-                    .outputTokens
-                ),
-
-              "X-Zuquen-Gemini-Total-Tokens":
-                String(
-                  result.usage
-                    .totalTokens
-                ),
-            },
-          }
-        );
-      }
-
-      return NextResponse.json(
+      console.log(
+        "[Website Builder] Starting generation:",
         {
-          success:
-            true,
-
-          html:
-            result.html,
-
-          provider:
-            "gemini",
-
-          feature:
-            "website-builder",
-
-          usage:
-            result.usage,
-
-          providerUsageSaved:
-            usageSave.success,
-
-          creditsConsumed:
-            0,
-        },
-        {
-          status:
-            200,
-
-          headers: {
-            "X-Zuquen-Gemini-Model":
-              GEMINI_MODEL,
-
-            "X-Zuquen-Gemini-Input-Tokens":
-              String(
-                result.usage
-                  .promptTokens
-              ),
-
-            "X-Zuquen-Gemini-Output-Tokens":
-              String(
-                result.usage
-                  .outputTokens
-              ),
-
-            "X-Zuquen-Gemini-Total-Tokens":
-              String(
-                result.usage
-                  .totalTokens
-              ),
-          },
+          userId,
+          promptLength: prompt.length,
+          model: GEMINI_MODEL,
         }
       );
+
+      const response = await ai.models.generateContent({
+        model: GEMINI_MODEL,
+        contents: prompt,
+        config: {
+          systemInstruction:
+            GENERATE_SYSTEM_INSTRUCTION,
+
+          // Generation is already working around this range.
+          maxOutputTokens: 16000,
+
+          temperature: 0.7,
+        },
+      });
+
+      const usage = readGeminiUsage(response);
+      const rawHtml = getResponseText(response);
+      const html = cleanHtml(rawHtml);
+
+      console.log(
+        "[Website Builder] Generation result:",
+        {
+          rawLength: rawHtml.length,
+          cleanedLength: html.length,
+          promptTokens: usage.promptTokens,
+          outputTokens: usage.outputTokens,
+          totalTokens: usage.totalTokens,
+        }
+      );
+
+      const outputValid = isValidHtml(html);
+
+      if (!outputValid) {
+        await saveProviderUsage({
+          userId,
+          operation,
+          usage,
+          status: "error",
+          outputValid: false,
+        });
+
+        console.error(
+          "[Website Builder] Invalid generated HTML.",
+          {
+            rawLength: rawHtml.length,
+            cleanedLength: html.length,
+            usage,
+            preview: rawHtml.slice(0, 500),
+          }
+        );
+
+        return NextResponse.json(
+          {
+            success: false,
+            message:
+              "Gemini returned invalid website HTML.",
+            errorCode: "INVALID_HTML",
+            usage,
+          },
+          { status: 502 }
+        );
+      }
+
+      const usageSave = await saveProviderUsage({
+        userId,
+        operation,
+        usage,
+        status: "success",
+        outputValid: true,
+      });
+
+      return NextResponse.json({
+        success: true,
+        html,
+        provider: "gemini",
+        feature: "website-builder",
+        usage,
+        providerUsageSaved: usageSave.success,
+        creditsConsumed: 0,
+      });
     }
 
-    /**
-     * =============================================
-     * EDIT WEBSITE
-     * =============================================
-     */
+    // ---------------------------------------------------------
+    // EDIT
+    // ---------------------------------------------------------
 
-    const html =
-      typeof body.html === "string"
+    const htmlInput =
+      typeof body?.html === "string"
         ? body.html.trim()
         : "";
 
     const instruction =
-      typeof body.prompt === "string"
-        ? body.prompt.trim()
-        : typeof body.instruction === "string"
-          ? body.instruction.trim()
-          : "";
+      typeof body?.instruction === "string"
+        ? body.instruction.trim()
+        : "";
 
-    if (!html) {
+    if (!htmlInput) {
       return NextResponse.json(
         {
-          success:
-            false,
-
-          error:
-            "Existing HTML is required.",
+          success: false,
+          message: "Existing website HTML is required.",
         },
-        {
-          status:
-            400,
-        }
+        { status: 400 }
       );
     }
 
     if (!instruction) {
       return NextResponse.json(
         {
-          success:
-            false,
-
-          error:
-            "Edit instruction is required.",
+          success: false,
+          message: "Edit instruction is required.",
         },
-        {
-          status:
-            400,
-        }
+        { status: 400 }
       );
     }
 
-    if (
-      instruction.length >
-      5000
-    ) {
+    if (htmlInput.length > 500000) {
       return NextResponse.json(
         {
-          success:
-            false,
-
-          error:
-            "Edit instruction is too long. Maximum 5,000 characters.",
+          success: false,
+          message:
+            "Website HTML is too large to edit.",
         },
-        {
-          status:
-            400,
-        }
+        { status: 400 }
       );
     }
 
-    if (
-      html.length >
-      500000
-    ) {
+    if (instruction.length > 5000) {
       return NextResponse.json(
         {
-          success:
-            false,
-
-          error:
-            "HTML is too large. Maximum 500,000 characters.",
+          success: false,
+          message:
+            "Edit instruction is too long. Please keep it under 5,000 characters.",
         },
-        {
-          status:
-            400,
-        }
+        { status: 400 }
       );
     }
 
-    let result;
+    const editPrompt = `
+EXISTING WEBSITE HTML:
+--------------------------------------------------
+${htmlInput}
+--------------------------------------------------
 
-    try {
-      result =
-        await editWebsite(
-          html,
-          instruction
-        );
-    } catch (error) {
-      await saveWebsiteUsage({
-        userId:
-          user.id,
+EDIT INSTRUCTION:
+--------------------------------------------------
+${instruction}
+--------------------------------------------------
 
-        operation:
-          "edit",
+Return the COMPLETE updated HTML document.
 
-        usage: {
-          promptTokens:
-            0,
+Do not return only the changed part.
+Do not return a diff.
+Do not return Markdown.
+Do not use code fences.
+Start with <!DOCTYPE html>.
+End with </html>.
+`;
 
-          outputTokens:
-            0,
-
-          totalTokens:
-            0,
-
-          thoughtsTokens:
-            0,
-
-          cachedTokens:
-            0,
-        },
-
-        status:
-          "failed",
-
-        outputValid:
-          false,
-      });
-
-      throw error;
-    }
-
-    const valid =
-      isValidHtml(
-        result.html
-      );
-
-    /**
-     * Save actual Gemini usage.
-     */
-    const usageSave =
-      await saveWebsiteUsage({
-        userId:
-          user.id,
-
-        operation:
-          "edit",
-
-        usage:
-          result.usage,
-
-        status:
-          "success",
-
-        outputValid:
-          valid,
-      });
-
-    if (!valid) {
-      console.error(
-        "INVALID EDITED WEBSITE HTML:",
-        {
-          length:
-            result.html.length,
-
-          preview:
-            result.html.slice(
-              0,
-              500
-            ),
-        }
-      );
-
-      return NextResponse.json(
-        {
-          success:
-            false,
-
-          error:
-            "Gemini returned invalid edited HTML.",
-
-          provider:
-            "gemini",
-
-          feature:
-            "website-builder",
-
-          usage:
-            result.usage,
-
-          providerUsageSaved:
-            usageSave.success,
-
-          creditsConsumed:
-            0,
-        },
-        {
-          status:
-            502,
-
-          headers: {
-            "X-Zuquen-Gemini-Model":
-              GEMINI_MODEL,
-
-            "X-Zuquen-Gemini-Input-Tokens":
-              String(
-                result.usage
-                  .promptTokens
-              ),
-
-            "X-Zuquen-Gemini-Output-Tokens":
-              String(
-                result.usage
-                  .outputTokens
-              ),
-
-            "X-Zuquen-Gemini-Total-Tokens":
-              String(
-                result.usage
-                  .totalTokens
-              ),
-          },
-        }
-      );
-    }
-
-    return NextResponse.json(
+    console.log(
+      "[Website Builder] Starting edit:",
       {
-        success:
-          true,
-
-        html:
-          result.html,
-
-        provider:
-          "gemini",
-
-        feature:
-          "website-builder",
-
-        usage:
-          result.usage,
-
-        providerUsageSaved:
-          usageSave.success,
-
-        creditsConsumed:
-          0,
-      },
-      {
-        status:
-          200,
-
-        headers: {
-          "X-Zuquen-Gemini-Model":
-            GEMINI_MODEL,
-
-          "X-Zuquen-Gemini-Input-Tokens":
-            String(
-              result.usage
-                .promptTokens
-            ),
-
-          "X-Zuquen-Gemini-Output-Tokens":
-            String(
-              result.usage
-                .outputTokens
-            ),
-
-          "X-Zuquen-Gemini-Total-Tokens":
-            String(
-              result.usage
-                .totalTokens
-            ),
-        },
+        userId,
+        htmlLength: htmlInput.length,
+        instructionLength: instruction.length,
+        model: GEMINI_MODEL,
       }
     );
-  } catch (error) {
+
+    const response = await ai.models.generateContent({
+      model: GEMINI_MODEL,
+      contents: editPrompt,
+      config: {
+        systemInstruction:
+          EDIT_SYSTEM_INSTRUCTION,
+
+        // Increased from 16,000 to reduce the chance of
+        // complete HTML being truncated during edits.
+        maxOutputTokens: 32000,
+
+        temperature: 0.4,
+      },
+    });
+
+    const usage = readGeminiUsage(response);
+    const rawHtml = getResponseText(response);
+    const html = cleanHtml(rawHtml);
+
+    const truncated = isLikelyTruncated(
+      rawHtml,
+      html
+    );
+
+    const outputValid = isValidHtml(html);
+
+    console.log(
+      "[Website Builder] Edit result:",
+      {
+        rawLength: rawHtml.length,
+        cleanedLength: html.length,
+        truncated,
+        outputValid,
+        promptTokens: usage.promptTokens,
+        outputTokens: usage.outputTokens,
+        totalTokens: usage.totalTokens,
+      }
+    );
+
+    if (!outputValid || truncated) {
+      await saveProviderUsage({
+        userId,
+        operation,
+        usage,
+        status: "error",
+        outputValid: false,
+      });
+
+      console.error(
+        "[Website Builder] Invalid or truncated edited HTML.",
+        {
+          rawLength: rawHtml.length,
+          cleanedLength: html.length,
+          truncated,
+          usage,
+          preview: rawHtml.slice(0, 500),
+          ending: rawHtml.slice(-500),
+        }
+      );
+
+      return NextResponse.json(
+        {
+          success: false,
+          message: truncated
+            ? "Gemini edit output was truncated. The generated website is too large for the current edit output limit."
+            : "Gemini returned invalid edited HTML.",
+          errorCode: truncated
+            ? "EDIT_OUTPUT_TRUNCATED"
+            : "INVALID_EDITED_HTML",
+          usage,
+        },
+        { status: 502 }
+      );
+    }
+
+    const usageSave = await saveProviderUsage({
+      userId,
+      operation,
+      usage,
+      status: "success",
+      outputValid: true,
+    });
+
+    return NextResponse.json({
+      success: true,
+      html,
+      provider: "gemini",
+      feature: "website-builder",
+      usage,
+      providerUsageSaved: usageSave.success,
+      creditsConsumed: 0,
+    });
+  } catch (error: any) {
     console.error(
-      "WEBSITE BUILDER API ERROR:",
+      "[Website Builder] API error:",
       error
     );
 
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Website Builder request failed.";
+
     return NextResponse.json(
       {
-        success:
-          false,
-
-        error:
-          getErrorMessage(
-            error
-          ),
-
-        provider:
-          "gemini",
-
-        feature:
-          "website-builder",
+        success: false,
+        message,
       },
-      {
-        status:
-          getErrorStatus(
-            error
-          ),
-      }
+      { status: 500 }
     );
   }
 }
-
