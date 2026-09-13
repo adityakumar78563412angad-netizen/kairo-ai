@@ -1,6 +1,6 @@
+
 import { NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
-import { createClient } from "@supabase/supabase-js";
 
 import { createServerSupabaseClient } from "@/lib/supabase-server";
 import { checkFeatureAccess } from "@/lib/feature-access";
@@ -9,6 +9,22 @@ import { recordProviderUsage } from "@/lib/provider-usage";
 export const maxDuration = 300;
 
 const GEMINI_MODEL = "gemini-3.6-flash";
+
+/**
+ * TEMPORARY MEASUREMENT MODE
+ *
+ * Set this environment variable to:
+ *
+ * ZUQEN_WEBSITE_BUILDER_MEASUREMENT_MODE=true
+ *
+ * while we measure actual Gemini usage.
+ *
+ * When false/missing:
+ * normal Website Builder credit/access rules apply.
+ */
+const MEASUREMENT_MODE =
+  process.env.ZUQEN_WEBSITE_BUILDER_MEASUREMENT_MODE ===
+  "true";
 
 type WebsiteOperation = "generate" | "edit";
 
@@ -32,30 +48,6 @@ function getGemini() {
   });
 }
 
-function getAdminSupabase() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!url) {
-    throw new Error(
-      "NEXT_PUBLIC_SUPABASE_URL is missing."
-    );
-  }
-
-  if (!serviceRoleKey) {
-    throw new Error(
-      "SUPABASE_SERVICE_ROLE_KEY is missing."
-    );
-  }
-
-  return createClient(url, serviceRoleKey, {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-    },
-  });
-}
-
 function getErrorMessage(error: unknown) {
   if (error instanceof Error) {
     return error.message;
@@ -73,7 +65,8 @@ function getErrorMessage(error: unknown) {
 }
 
 function getErrorStatus(error: unknown) {
-  const message = getErrorMessage(error).toLowerCase();
+  const message =
+    getErrorMessage(error).toLowerCase();
 
   if (
     message.includes("api key") ||
@@ -102,6 +95,9 @@ function getErrorStatus(error: unknown) {
   return 500;
 }
 
+/**
+ * Read actual Gemini usage metadata.
+ */
 function readGeminiUsage(
   response: any
 ): GeminiUsage {
@@ -110,28 +106,36 @@ function readGeminiUsage(
   const promptTokens = Math.max(
     0,
     Math.floor(
-      Number(usage?.promptTokenCount ?? 0)
+      Number(
+        usage?.promptTokenCount ?? 0
+      )
     )
   );
 
   const outputTokens = Math.max(
     0,
     Math.floor(
-      Number(usage?.candidatesTokenCount ?? 0)
+      Number(
+        usage?.candidatesTokenCount ?? 0
+      )
     )
   );
 
   const thoughtsTokens = Math.max(
     0,
     Math.floor(
-      Number(usage?.thoughtsTokenCount ?? 0)
+      Number(
+        usage?.thoughtsTokenCount ?? 0
+      )
     )
   );
 
   const cachedTokens = Math.max(
     0,
     Math.floor(
-      Number(usage?.cachedContentTokenCount ?? 0)
+      Number(
+        usage?.cachedContentTokenCount ?? 0
+      )
     )
   );
 
@@ -219,26 +223,35 @@ Rules:
 9. Include <html>, <head> and <body>.
 `;
 
-async function generateWebsite(prompt: string) {
+async function generateWebsite(
+  prompt: string
+) {
   const ai = getGemini();
 
-  const response = await ai.models.generateContent({
-    model: GEMINI_MODEL,
+  const response =
+    await ai.models.generateContent({
+      model: GEMINI_MODEL,
 
-    contents: `
+      contents: `
 WEBSITE REQUEST:
 
 ${prompt}
 `,
 
-    config: {
-      systemInstruction: GENERATE_SYSTEM_INSTRUCTION,
-      maxOutputTokens: 16000,
-    },
-  });
+      config: {
+        systemInstruction:
+          GENERATE_SYSTEM_INSTRUCTION,
 
-  const html = cleanHtml(response.text ?? "");
-  const usage = readGeminiUsage(response);
+        maxOutputTokens: 16000,
+      },
+    });
+
+  const html = cleanHtml(
+    response.text ?? ""
+  );
+
+  const usage =
+    readGeminiUsage(response);
 
   return {
     html,
@@ -252,10 +265,11 @@ async function editWebsite(
 ) {
   const ai = getGemini();
 
-  const response = await ai.models.generateContent({
-    model: GEMINI_MODEL,
+  const response =
+    await ai.models.generateContent({
+      model: GEMINI_MODEL,
 
-    contents: `
+      contents: `
 EXISTING WEBSITE:
 
 ${html}
@@ -265,17 +279,21 @@ EDIT INSTRUCTION:
 ${instruction}
 `,
 
-    config: {
-      systemInstruction: EDIT_SYSTEM_INSTRUCTION,
-      maxOutputTokens: 16000,
-    },
-  });
+      config: {
+        systemInstruction:
+          EDIT_SYSTEM_INSTRUCTION,
 
-  const updatedHtml = cleanHtml(
-    response.text ?? ""
-  );
+        maxOutputTokens: 16000,
+      },
+    });
 
-  const usage = readGeminiUsage(response);
+  const updatedHtml =
+    cleanHtml(
+      response.text ?? ""
+    );
+
+  const usage =
+    readGeminiUsage(response);
 
   return {
     html: updatedHtml,
@@ -284,9 +302,17 @@ ${instruction}
 }
 
 /**
- * Save Gemini provider usage and feature credit usage.
+ * Save ONLY actual provider usage.
  *
- * This does NOT use the old generic credit_wallets table.
+ * IMPORTANT:
+ * We intentionally DO NOT write raw Gemini tokens
+ * into feature_credit_transactions.
+ *
+ * Gemini tokens are provider units.
+ * ZUQEN credits are a separate unit.
+ *
+ * We will determine the token -> credit conversion
+ * only after collecting real measurement data.
  */
 async function saveWebsiteUsage({
   userId,
@@ -301,124 +327,121 @@ async function saveWebsiteUsage({
   status: "success" | "failed";
   outputValid: boolean;
 }) {
-  let providerUsageId: string | null = null;
-
-  /**
-   * ---------------------------------------------
-   * 1. provider_usage
-   * ---------------------------------------------
-   */
   try {
-    const providerResult = await recordProviderUsage({
-      userId,
-      featureKey: "website_builder",
-      provider: "gemini",
-      model: GEMINI_MODEL,
-      requestId: null,
+    const providerResult =
+      await recordProviderUsage({
+        userId,
 
-      status,
+        featureKey:
+          "website_builder",
 
-      inputUnits: usage.promptTokens,
-      outputUnits: usage.outputTokens,
-      totalUnits: usage.totalTokens,
+        provider: "gemini",
 
-      unitType: "tokens",
+        model:
+          GEMINI_MODEL,
 
-      metadata: {
+        requestId: null,
+
+        status,
+
+        inputUnits:
+          usage.promptTokens,
+
+        outputUnits:
+          usage.outputTokens,
+
+        totalUnits:
+          usage.totalTokens,
+
+        unitType:
+          "tokens",
+
+        metadata: {
+          operation,
+          outputValid,
+
+          promptTokens:
+            usage.promptTokens,
+
+          outputTokens:
+            usage.outputTokens,
+
+          totalTokens:
+            usage.totalTokens,
+
+          thoughtsTokens:
+            usage.thoughtsTokens,
+
+          cachedTokens:
+            usage.cachedTokens,
+
+          usageAvailable:
+            usage.totalTokens > 0,
+
+          measurementMode:
+            MEASUREMENT_MODE,
+        },
+      });
+
+    if (!providerResult.success) {
+      console.error(
+        "PROVIDER USAGE SAVE FAILED:",
+        providerResult
+      );
+
+      return {
+        success: false,
+        providerUsageId: null,
+        error:
+          providerResult.error ??
+          "Failed to save provider usage.",
+      };
+    }
+
+    console.log(
+      "WEBSITE BUILDER PROVIDER USAGE SAVED:",
+      {
+        providerUsageId:
+          providerResult.id,
+
         operation,
-        outputValid,
-        promptTokens: usage.promptTokens,
-        outputTokens: usage.outputTokens,
-        totalTokens: usage.totalTokens,
-        thoughtsTokens: usage.thoughtsTokens,
-        cachedTokens: usage.cachedTokens,
-        usageAvailable: usage.totalTokens > 0,
-      },
-    });
 
-    providerUsageId = providerResult.id;
+        inputTokens:
+          usage.promptTokens,
+
+        outputTokens:
+          usage.outputTokens,
+
+        thoughtsTokens:
+          usage.thoughtsTokens,
+
+        cachedTokens:
+          usage.cachedTokens,
+
+        totalTokens:
+          usage.totalTokens,
+      }
+    );
+
+    return {
+      success: true,
+      providerUsageId:
+        providerResult.id,
+
+      error: null,
+    };
   } catch (error) {
     console.error(
       "PROVIDER USAGE SAVE ERROR:",
       error
     );
-  }
 
-  /**
-   * ---------------------------------------------
-   * 2. feature_credit_transactions
-   * ---------------------------------------------
-   *
-   * Successful Gemini usage:
-   * actual tokens are recorded as usage.
-   *
-   * Failed request:
-   * zero usage is recorded.
-   */
-  try {
-    const admin = getAdminSupabase();
-
-    const amount =
-      status === "success"
-        ? -Math.max(
-            0,
-            Math.floor(usage.totalTokens)
-          )
-        : 0;
-
-    const transactionType =
-      status === "success"
-        ? "usage"
-        : "adjustment";
-
-    const { error } = await admin
-      .from("feature_credit_transactions")
-      .insert({
-        user_id: userId,
-
-        feature_key: "website_builder",
-
-        amount,
-
-        transaction_type: transactionType,
-
-        provider: "gemini",
-
-        provider_request_id: null,
-
-        description:
-          status === "success"
-            ? `Gemini ${operation} usage`
-            : `Gemini ${operation} failed request`,
-
-        metadata: {
-          provider: "gemini",
-          model: GEMINI_MODEL,
-          operation,
-          status,
-          outputValid,
-
-          inputTokens: usage.promptTokens,
-          outputTokens: usage.outputTokens,
-          totalTokens: usage.totalTokens,
-          thoughtsTokens: usage.thoughtsTokens,
-          cachedTokens: usage.cachedTokens,
-
-          providerUsageId,
-        },
-      });
-
-    if (error) {
-      console.error(
-        "FEATURE CREDIT TRANSACTION ERROR:",
-        error
-      );
-    }
-  } catch (error) {
-    console.error(
-      "FEATURE CREDIT LEDGER ERROR:",
-      error
-    );
+    return {
+      success: false,
+      providerUsageId: null,
+      error:
+        getErrorMessage(error),
+    };
   }
 }
 
@@ -429,7 +452,8 @@ async function getUser() {
   const {
     data: { user },
     error,
-  } = await supabase.auth.getUser();
+  } =
+    await supabase.auth.getUser();
 
   if (error || !user) {
     return null;
@@ -438,11 +462,15 @@ async function getUser() {
   return user;
 }
 
-export async function POST(request: Request) {
+export async function POST(
+  request: Request
+) {
   try {
-    const body = await request.json();
+    const body =
+      await request.json();
 
-    const action = body?.action;
+    const action =
+      body?.action;
 
     /**
      * ---------------------------------------------
@@ -456,10 +484,13 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           success: false,
+
           error:
             "Invalid action. Use generate or edit.",
         },
-        { status: 400 }
+        {
+          status: 400,
+        }
       );
     }
 
@@ -468,16 +499,47 @@ export async function POST(request: Request) {
      * Authentication
      * ---------------------------------------------
      */
-    const user = await getUser();
+    const user =
+      await getUser();
 
     if (!user) {
       return NextResponse.json(
         {
           success: false,
-          error: "Authentication required.",
-          code: "UNAUTHENTICATED",
+
+          error:
+            "Authentication required.",
+
+          code:
+            "UNAUTHENTICATED",
         },
-        { status: 401 }
+        {
+          status: 401,
+        }
+      );
+    }
+
+    /**
+     * ---------------------------------------------
+     * Website Builder is permanent-user only
+     * ---------------------------------------------
+     *
+     * Even measurement mode does NOT allow guests.
+     */
+    if (user.is_anonymous) {
+      return NextResponse.json(
+        {
+          success: false,
+
+          error:
+            "Please sign in to use Website Builder.",
+
+          code:
+            "SIGN_IN_REQUIRED",
+        },
+        {
+          status: 403,
+        }
       );
     }
 
@@ -491,17 +553,54 @@ export async function POST(request: Request) {
         "website_builder"
       );
 
-   if (!access.allowed) {
-  return NextResponse.json(
-    {
-      success: false,
-      error: access.message,
-      code: "FEATURE_ACCESS_DENIED",
-      feature: "website_builder",
-    },
-    { status: 403 }
-  );
-}
+    if (!access.allowed) {
+      return NextResponse.json(
+        {
+          success: false,
+
+          error:
+            access.message,
+
+          code:
+            "FEATURE_ACCESS_DENIED",
+
+          feature:
+            "website_builder",
+        },
+        {
+          status: 403,
+        }
+      );
+    }
+
+    /**
+     * ---------------------------------------------
+     * TEMPORARY MEASUREMENT BYPASS
+     * ---------------------------------------------
+     *
+     * When MEASUREMENT_MODE=true:
+     *
+     * - Do NOT check Website Builder credit balance.
+     * - Do NOT consume ZUQEN credits.
+     * - Do NOT settle any credits.
+     * - Only measure actual Gemini usage.
+     *
+     * When false:
+     * the current route still does not perform
+     * final dynamic credit billing yet.
+     *
+     * This mode exists only so we can collect data.
+     */
+    if (MEASUREMENT_MODE) {
+      console.log(
+        "WEBSITE BUILDER MEASUREMENT MODE ENABLED:",
+        {
+          userId: user.id,
+          action,
+        }
+      );
+    }
+
     /**
      * =============================================
      * GENERATE WEBSITE
@@ -517,10 +616,13 @@ export async function POST(request: Request) {
         return NextResponse.json(
           {
             success: false,
+
             error:
               "Website prompt is required.",
           },
-          { status: 400 }
+          {
+            status: 400,
+          }
         );
       }
 
@@ -528,10 +630,13 @@ export async function POST(request: Request) {
         return NextResponse.json(
           {
             success: false,
+
             error:
               "Website prompt is too long. Maximum 10,000 characters.",
           },
-          { status: 400 }
+          {
+            status: 400,
+          }
         );
       }
 
@@ -539,11 +644,15 @@ export async function POST(request: Request) {
 
       try {
         result =
-          await generateWebsite(prompt);
+          await generateWebsite(
+            prompt
+          );
       } catch (error) {
         await saveWebsiteUsage({
           userId: user.id,
-          operation: "generate",
+
+          operation:
+            "generate",
 
           usage: {
             promptTokens: 0,
@@ -553,38 +662,60 @@ export async function POST(request: Request) {
             cachedTokens: 0,
           },
 
-          status: "failed",
-          outputValid: false,
+          status:
+            "failed",
+
+          outputValid:
+            false,
         });
 
         throw error;
       }
 
-      const valid = isValidHtml(
-        result.html
-      );
+      const valid =
+        isValidHtml(
+          result.html
+        );
 
       /**
-       * Gemini request succeeded.
-       * Save actual provider usage.
+       * Save actual Gemini usage.
        */
-      await saveWebsiteUsage({
-        userId: user.id,
-        operation: "generate",
-        usage: result.usage,
-        status: "success",
-        outputValid: valid,
-      });
+      const usageSave =
+        await saveWebsiteUsage({
+          userId: user.id,
+
+          operation:
+            "generate",
+
+          usage:
+            result.usage,
+
+          status:
+            "success",
+
+          outputValid:
+            valid,
+        });
 
       if (!valid) {
         return NextResponse.json(
           {
             success: false,
+
             error:
               "Gemini returned invalid website HTML.",
-            provider: "gemini",
-            feature: "website-builder",
-            usage: result.usage,
+
+            provider:
+              "gemini",
+
+            feature:
+              "website-builder",
+
+            usage:
+              result.usage,
+
+            providerUsageSaved:
+              usageSave.success,
           },
           {
             status: 502,
@@ -595,17 +726,25 @@ export async function POST(request: Request) {
 
               "X-Zuquen-Gemini-Input-Tokens":
                 String(
-                  result.usage.promptTokens
+                  result.usage
+                    .promptTokens
                 ),
 
               "X-Zuquen-Gemini-Output-Tokens":
                 String(
-                  result.usage.outputTokens
+                  result.usage
+                    .outputTokens
                 ),
 
               "X-Zuquen-Gemini-Total-Tokens":
                 String(
-                  result.usage.totalTokens
+                  result.usage
+                    .totalTokens
+                ),
+
+              "X-Zuquen-Measurement-Mode":
+                String(
+                  MEASUREMENT_MODE
                 ),
             },
           }
@@ -615,10 +754,31 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           success: true,
-          html: result.html,
-          provider: "gemini",
-          feature: "website-builder",
-          usage: result.usage,
+
+          html:
+            result.html,
+
+          provider:
+            "gemini",
+
+          feature:
+            "website-builder",
+
+          usage:
+            result.usage,
+
+          providerUsageSaved:
+            usageSave.success,
+
+          measurementMode:
+            MEASUREMENT_MODE,
+
+          /**
+           * No ZUQEN credits are consumed
+           * during measurement mode.
+           */
+          creditsConsumed:
+            0,
         },
         {
           status: 200,
@@ -629,17 +789,25 @@ export async function POST(request: Request) {
 
             "X-Zuquen-Gemini-Input-Tokens":
               String(
-                result.usage.promptTokens
+                result.usage
+                  .promptTokens
               ),
 
             "X-Zuquen-Gemini-Output-Tokens":
               String(
-                result.usage.outputTokens
+                result.usage
+                  .outputTokens
               ),
 
             "X-Zuquen-Gemini-Total-Tokens":
               String(
-                result.usage.totalTokens
+                result.usage
+                  .totalTokens
+              ),
+
+            "X-Zuquen-Measurement-Mode":
+              String(
+                MEASUREMENT_MODE
               ),
           },
         }
@@ -668,10 +836,13 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           success: false,
+
           error:
             "Existing HTML is required.",
         },
-        { status: 400 }
+        {
+          status: 400,
+        }
       );
     }
 
@@ -679,10 +850,13 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           success: false,
+
           error:
             "Edit instruction is required.",
         },
-        { status: 400 }
+        {
+          status: 400,
+        }
       );
     }
 
@@ -690,10 +864,13 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           success: false,
+
           error:
             "Edit instruction is too long. Maximum 5,000 characters.",
         },
-        { status: 400 }
+        {
+          status: 400,
+        }
       );
     }
 
@@ -701,10 +878,13 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           success: false,
+
           error:
             "HTML is too large. Maximum 500,000 characters.",
         },
-        { status: 400 }
+        {
+          status: 400,
+        }
       );
     }
 
@@ -719,7 +899,9 @@ export async function POST(request: Request) {
     } catch (error) {
       await saveWebsiteUsage({
         userId: user.id,
-        operation: "edit",
+
+        operation:
+          "edit",
 
         usage: {
           promptTokens: 0,
@@ -729,37 +911,60 @@ export async function POST(request: Request) {
           cachedTokens: 0,
         },
 
-        status: "failed",
-        outputValid: false,
+        status:
+          "failed",
+
+        outputValid:
+          false,
       });
 
       throw error;
     }
 
-    const valid = isValidHtml(
-      result.html
-    );
+    const valid =
+      isValidHtml(
+        result.html
+      );
 
     /**
      * Save actual Gemini usage.
      */
-    await saveWebsiteUsage({
-      userId: user.id,
-      operation: "edit",
-      usage: result.usage,
-      status: "success",
-      outputValid: valid,
-    });
+    const usageSave =
+      await saveWebsiteUsage({
+        userId: user.id,
+
+        operation:
+          "edit",
+
+        usage:
+          result.usage,
+
+        status:
+          "success",
+
+        outputValid:
+          valid,
+      });
 
     if (!valid) {
       return NextResponse.json(
         {
           success: false,
+
           error:
             "Gemini returned invalid edited HTML.",
-          provider: "gemini",
-          feature: "website-builder",
-          usage: result.usage,
+
+          provider:
+            "gemini",
+
+          feature:
+            "website-builder",
+
+          usage:
+            result.usage,
+
+          providerUsageSaved:
+            usageSave.success,
         },
         {
           status: 502,
@@ -770,17 +975,25 @@ export async function POST(request: Request) {
 
             "X-Zuquen-Gemini-Input-Tokens":
               String(
-                result.usage.promptTokens
+                result.usage
+                  .promptTokens
               ),
 
             "X-Zuquen-Gemini-Output-Tokens":
               String(
-                result.usage.outputTokens
+                result.usage
+                  .outputTokens
               ),
 
             "X-Zuquen-Gemini-Total-Tokens":
               String(
-                result.usage.totalTokens
+                result.usage
+                  .totalTokens
+              ),
+
+            "X-Zuquen-Measurement-Mode":
+              String(
+                MEASUREMENT_MODE
               ),
           },
         }
@@ -790,10 +1003,27 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         success: true,
-        html: result.html,
-        provider: "gemini",
-        feature: "website-builder",
-        usage: result.usage,
+
+        html:
+          result.html,
+
+        provider:
+          "gemini",
+
+        feature:
+          "website-builder",
+
+        usage:
+          result.usage,
+
+        providerUsageSaved:
+          usageSave.success,
+
+        measurementMode:
+          MEASUREMENT_MODE,
+
+        creditsConsumed:
+          0,
       },
       {
         status: 200,
@@ -804,17 +1034,25 @@ export async function POST(request: Request) {
 
           "X-Zuquen-Gemini-Input-Tokens":
             String(
-              result.usage.promptTokens
+              result.usage
+                .promptTokens
             ),
 
           "X-Zuquen-Gemini-Output-Tokens":
             String(
-              result.usage.outputTokens
+              result.usage
+                .outputTokens
             ),
 
           "X-Zuquen-Gemini-Total-Tokens":
             String(
-              result.usage.totalTokens
+              result.usage
+                .totalTokens
+            ),
+
+          "X-Zuquen-Measurement-Mode":
+            String(
+              MEASUREMENT_MODE
             ),
         },
       }
@@ -828,13 +1066,21 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         success: false,
-        error: getErrorMessage(error),
-        provider: "gemini",
-        feature: "website-builder",
+
+        error:
+          getErrorMessage(error),
+
+        provider:
+          "gemini",
+
+        feature:
+          "website-builder",
       },
       {
-        status: getErrorStatus(error),
+        status:
+          getErrorStatus(error),
       }
     );
   }
 }
+
