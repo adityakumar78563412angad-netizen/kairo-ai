@@ -1,20 +1,9 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 
 const MAX_PROMPT_LENGTH = 10000;
-
-// Temporary testing cost.
-// Final Website Builder credit cost actual Gemini usage
-// measure karne ke baad decide kiya jayega.
-const ESTIMATED_CREDITS = 100;
-
-type CreditsResponse = {
-  balance?: number;
-  error?: string;
-  code?: string;
-};
 
 export default function WebsiteBuilderPage() {
   const router = useRouter();
@@ -22,84 +11,6 @@ export default function WebsiteBuilderPage() {
   const [prompt, setPrompt] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-
-  const [creditBalance, setCreditBalance] =
-    useState<number | null>(null);
-
-  const [loadingCredits, setLoadingCredits] =
-    useState(true);
-
-  const [refreshingCredits, setRefreshingCredits] =
-    useState(false);
-
-  const remainingCredits =
-    creditBalance === null
-      ? null
-      : creditBalance - ESTIMATED_CREDITS;
-
-  const hasEnoughCredits =
-    creditBalance !== null &&
-    creditBalance >= ESTIMATED_CREDITS;
-
-  const creditsNeeded =
-    creditBalance === null
-      ? 0
-      : Math.max(
-          ESTIMATED_CREDITS - creditBalance,
-          0
-        );
-
-  async function loadCredits(silent = false) {
-    try {
-      if (silent) {
-        setRefreshingCredits(true);
-      } else {
-        setLoadingCredits(true);
-      }
-
-      const response = await fetch(
-        "/api/credits?feature=website_builder",
-        {
-          method: "GET",
-          cache: "no-store",
-        }
-      );
-
-      const data: CreditsResponse =
-        await response.json();
-
-      if (!response.ok) {
-        throw new Error(
-          data.error ||
-            "Credits load nahi ho paaye."
-        );
-      }
-
-      const balance = Number(
-        data.balance ?? 0
-      );
-
-      if (Number.isFinite(balance)) {
-        setCreditBalance(balance);
-      } else {
-        setCreditBalance(0);
-      }
-    } catch (err) {
-      console.error(
-        "Website Builder credits error:",
-        err
-      );
-
-      setCreditBalance(null);
-    } finally {
-      setLoadingCredits(false);
-      setRefreshingCredits(false);
-    }
-  }
-
-  useEffect(() => {
-    loadCredits();
-  }, []);
 
   async function generateWebsite(
     event?: FormEvent
@@ -121,20 +32,6 @@ export default function WebsiteBuilderPage() {
     ) {
       setError(
         `Prompt ${MAX_PROMPT_LENGTH.toLocaleString()} characters se chhota rakho.`
-      );
-      return;
-    }
-
-    if (creditBalance === null) {
-      setError(
-        "Credit balance load nahi hua. Thodi der baad dobara try karo."
-      );
-      return;
-    }
-
-    if (!hasEnoughCredits) {
-      setError(
-        `Not enough ZUQEN credits. Tumhe ${creditsNeeded.toLocaleString()} aur credits chahiye.`
       );
       return;
     }
@@ -163,11 +60,6 @@ export default function WebsiteBuilderPage() {
         error?: string;
         message?: string;
         code?: string;
-        balance?: number;
-        required?: number;
-        missing?: number;
-        measurementMode?: boolean;
-        creditsConsumed?: number;
       } = {};
 
       try {
@@ -179,43 +71,6 @@ export default function WebsiteBuilderPage() {
       }
 
       if (!response.ok || !data.success) {
-        if (
-          data.code ===
-          "insufficient_credits"
-        ) {
-          if (
-            typeof data.balance ===
-            "number"
-          ) {
-            setCreditBalance(
-              data.balance
-            );
-          }
-
-          const required =
-            Number(
-              data.required ??
-                ESTIMATED_CREDITS
-            );
-
-          const balance =
-            Number(
-              data.balance ??
-                creditBalance ??
-                0
-            );
-
-          const missing =
-            Math.max(
-              required - balance,
-              0
-            );
-
-          throw new Error(
-            `Not enough ZUQEN credits. Tumhe ${missing.toLocaleString()} aur credits chahiye.`
-          );
-        }
-
         if (
           data.code ===
           "SIGN_IN_REQUIRED"
@@ -234,8 +89,7 @@ export default function WebsiteBuilderPage() {
 
       if (
         !data.html ||
-        typeof data.html !==
-          "string"
+        typeof data.html !== "string"
       ) {
         throw new Error(
           "AI ne valid website code return nahi kiya."
@@ -257,37 +111,6 @@ export default function WebsiteBuilderPage() {
             new Date().toISOString(),
         })
       );
-
-      // Measurement mode me credits consume nahi hote.
-      // Normal mode me backend remaining balance bhej sakta hai.
-      const remainingHeader =
-        response.headers.get(
-          "X-Zuqen-Credits-Remaining"
-        );
-
-      if (remainingHeader) {
-        const newBalance =
-          Number(remainingHeader);
-
-        if (
-          Number.isFinite(newBalance)
-        ) {
-          setCreditBalance(
-            newBalance
-          );
-        } else {
-          await loadCredits(true);
-        }
-      } else if (
-        typeof data.balance ===
-        "number"
-      ) {
-        setCreditBalance(
-          data.balance
-        );
-      } else {
-        await loadCredits(true);
-      }
 
       router.push(
         "/website-builder/editor"
@@ -472,10 +295,9 @@ export default function WebsiteBuilderPage() {
         .navbar-right {
           display: flex;
           align-items: center;
-          gap: 8px;
         }
 
-        .credit-badge {
+        .testing-badge {
           height: 38px;
           padding: 0 13px;
           display: inline-flex;
@@ -494,27 +316,16 @@ export default function WebsiteBuilderPage() {
           font-size: 10px;
           font-weight: 800;
           white-space: nowrap;
+          margin-right: 8px;
         }
 
-        .credit-icon {
-          color: #a995ff;
-        }
-
-        .refresh-credit {
-          border: 0;
-          background: transparent;
-          color: #777;
-          padding: 0 0 0 4px;
-          font-size: 13px;
-        }
-
-        .refresh-credit:hover {
-          color: white;
-        }
-
-        .refresh-credit:disabled {
-          opacity: 0.4;
-          cursor: not-allowed;
+        .testing-dot {
+          width: 6px;
+          height: 6px;
+          border-radius: 50%;
+          background: #8b7cff;
+          box-shadow: 0 0 10px
+            #8b7cff;
         }
 
         .back-button {
@@ -754,12 +565,12 @@ export default function WebsiteBuilderPage() {
           font-size: 9px;
         }
 
-        .cost-text {
+        .testing-text {
           color: #777;
           font-size: 9px;
         }
 
-        .cost-text strong {
+        .testing-text strong {
           color: #a995ff;
         }
 
@@ -813,81 +624,6 @@ export default function WebsiteBuilderPage() {
           opacity: 0.45;
           cursor: not-allowed;
           box-shadow: none;
-        }
-
-        .credit-summary {
-          width: min(820px, 100%);
-          margin: 12px auto 0;
-          padding: 13px 15px;
-          border-radius: 12px;
-          border: 1px solid
-            rgba(124, 92, 255, 0.13);
-          background: rgba(
-            124,
-            92,
-            255,
-            0.045
-          );
-          display: grid;
-          grid-template-columns:
-            1fr 1fr 1fr;
-          gap: 1px;
-          text-align: left;
-        }
-
-        .credit-item {
-          padding: 3px 13px;
-          display: flex;
-          flex-direction: column;
-          gap: 4px;
-        }
-
-        .credit-item + .credit-item {
-          border-left: 1px solid
-            rgba(255, 255, 255, 0.06);
-        }
-
-        .credit-label {
-          color: #555;
-          font-size: 8px;
-          letter-spacing: 0.12em;
-          font-weight: 800;
-        }
-
-        .credit-value {
-          color: #bbb;
-          font-size: 13px;
-          font-weight: 800;
-        }
-
-        .credit-value.highlight {
-          color: #a995ff;
-        }
-
-        .credit-value.danger {
-          color: #ff858f;
-        }
-
-        .credit-warning {
-          width: min(820px, 100%);
-          margin: 10px auto 0;
-          padding: 11px 13px;
-          border-radius: 10px;
-          border: 1px solid
-            rgba(255, 80, 100, 0.2);
-          background: rgba(
-            255,
-            80,
-            100,
-            0.06
-          );
-          color: #ff9ba8;
-          text-align: left;
-          font-size: 10px;
-        }
-
-        .credit-warning strong {
-          color: #ff8d9b;
         }
 
         .examples {
@@ -1087,21 +823,6 @@ export default function WebsiteBuilderPage() {
             width: 100%;
           }
 
-          .credit-summary {
-            grid-template-columns: 1fr;
-            gap: 8px;
-          }
-
-          .credit-item {
-            padding: 8px;
-          }
-
-          .credit-item + .credit-item {
-            border-left: 0;
-            border-top: 1px solid
-              rgba(255, 255, 255, 0.06);
-          }
-
           .builder-features {
             grid-template-columns: 1fr;
             margin-top: 35px;
@@ -1115,7 +836,7 @@ export default function WebsiteBuilderPage() {
             padding: 0 10px;
           }
 
-          .credit-badge {
+          .testing-badge {
             padding: 0 9px;
           }
 
@@ -1125,8 +846,8 @@ export default function WebsiteBuilderPage() {
         }
 
         @media (max-width: 520px) {
-          .credit-badge {
-            font-size: 9px;
+          .testing-badge {
+            display: none;
           }
 
           .builder-brand-name {
@@ -1154,36 +875,9 @@ export default function WebsiteBuilderPage() {
           </div>
 
           <div className="navbar-right">
-            <div className="credit-badge">
-              <span className="credit-icon">
-                ✦
-              </span>
-
-              <span>
-                {loadingCredits
-                  ? "Loading credits..."
-                  : creditBalance ===
-                    null
-                  ? "Credits unavailable"
-                  : `${creditBalance.toLocaleString()} credits`}
-              </span>
-
-              <button
-                type="button"
-                className="refresh-credit"
-                onClick={() =>
-                  loadCredits(true)
-                }
-                disabled={
-                  loadingCredits ||
-                  refreshingCredits
-                }
-                title="Refresh credits"
-              >
-                {refreshingCredits
-                  ? "↻"
-                  : "⟳"}
-              </button>
+            <div className="testing-badge">
+              <span className="testing-dot" />
+              Testing Mode
             </div>
 
             <button
@@ -1269,13 +963,11 @@ export default function WebsiteBuilderPage() {
                         {" characters"}
                       </div>
 
-                      <div className="cost-text">
-                        Estimated cost:{" "}
+                      <div className="testing-text">
                         <strong>
-                          ~
-                          {ESTIMATED_CREDITS.toLocaleString()}
-                          {" credits"}
-                        </strong>
+                          Testing mode
+                        </strong>{" "}
+                        · No credits charged
                       </div>
                     </div>
 
@@ -1284,10 +976,7 @@ export default function WebsiteBuilderPage() {
                       className="generate-button"
                       disabled={
                         loading ||
-                        loadingCredits ||
-                        creditBalance ===
-                          null ||
-                        !hasEnoughCredits
+                        !prompt.trim()
                       }
                     >
                       {loading ? (
@@ -1305,73 +994,6 @@ export default function WebsiteBuilderPage() {
                 </div>
               </div>
             </form>
-
-            <div className="credit-summary">
-              <div className="credit-item">
-                <span className="credit-label">
-                  AVAILABLE CREDITS
-                </span>
-
-                <span className="credit-value">
-                  {loadingCredits
-                    ? "..."
-                    : creditBalance ===
-                      null
-                    ? "—"
-                    : creditBalance.toLocaleString()}
-                </span>
-              </div>
-
-              <div className="credit-item">
-                <span className="credit-label">
-                  THIS GENERATION
-                </span>
-
-                <span className="credit-value highlight">
-                  ~
-                  {ESTIMATED_CREDITS.toLocaleString()}
-                </span>
-              </div>
-
-              <div className="credit-item">
-                <span className="credit-label">
-                  REMAINING AFTER GENERATION
-                </span>
-
-                <span
-                  className={`credit-value ${
-                    remainingCredits !==
-                      null &&
-                    remainingCredits < 0
-                      ? "danger"
-                      : "highlight"
-                  }`}
-                >
-                  {remainingCredits ===
-                  null
-                    ? "—"
-                    : remainingCredits >=
-                      0
-                    ? remainingCredits.toLocaleString()
-                    : `-${Math.abs(
-                        remainingCredits
-                      ).toLocaleString()}`}
-                </span>
-              </div>
-            </div>
-
-            {creditBalance !== null &&
-              !hasEnoughCredits && (
-                <div className="credit-warning">
-                  <strong>
-                    Not enough credits:
-                  </strong>{" "}
-                  Is website generation ke
-                  liye{" "}
-                  {creditsNeeded.toLocaleString()}{" "}
-                  aur credits chahiye.
-                </div>
-              )}
 
             {error && (
               <div className="error-message">
@@ -1486,20 +1108,9 @@ export default function WebsiteBuilderPage() {
         </section>
 
         <footer className="builder-footer">
-          ZUQEN AI Website Builder
+          ZUQEN AI Website Builder · Testing Mode
         </footer>
       </div>
-
-      {loading && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 100,
-            pointerEvents: "none",
-          }}
-        />
-      )}
     </main>
   );
 }
