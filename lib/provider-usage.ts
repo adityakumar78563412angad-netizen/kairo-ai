@@ -4,6 +4,7 @@ export type ProviderUsageStatus = "success" | "failed";
 
 export type RecordProviderUsageParams = {
   userId: string;
+
   featureKey:
     | "chat"
     | "website_builder"
@@ -27,8 +28,11 @@ export type RecordProviderUsageParams = {
 };
 
 function getServiceRoleClient() {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const supabaseUrl =
+    process.env.NEXT_PUBLIC_SUPABASE_URL;
+
+  const serviceRoleKey =
+    process.env.SUPABASE_SERVICE_ROLE_KEY;
 
   if (!supabaseUrl) {
     throw new Error(
@@ -58,64 +62,109 @@ export async function recordProviderUsage(
   params: RecordProviderUsageParams
 ) {
   try {
-    const supabase = getServiceRoleClient();
+    const supabase =
+      getServiceRoleClient();
+
+    const payload = {
+      user_id: params.userId,
+
+      feature_key:
+        params.featureKey,
+
+      provider:
+        params.provider,
+
+      model:
+        params.model ?? null,
+
+      request_id:
+        params.requestId ?? null,
+
+      status:
+        params.status,
+
+      input_units: Math.max(
+        0,
+        Math.floor(
+          params.inputUnits ?? 0
+        )
+      ),
+
+      output_units: Math.max(
+        0,
+        Math.floor(
+          params.outputUnits ?? 0
+        )
+      ),
+
+      total_units: Math.max(
+        0,
+        Math.floor(
+          params.totalUnits ?? 0
+        )
+      ),
+
+      unit_type:
+        params.unitType ?? "unknown",
+
+      metadata:
+        params.metadata ?? {},
+    };
+
+    console.log(
+      "PROVIDER USAGE INSERT PAYLOAD:",
+      payload
+    );
 
     const {
       data,
       error,
     } = await supabase
       .from("provider_usage")
-      .insert({
-        user_id: params.userId,
-        feature_key: params.featureKey,
-        provider: params.provider,
-        model: params.model ?? null,
-        request_id: params.requestId ?? null,
-        status: params.status,
-
-        input_units: Math.max(
-          0,
-          Math.floor(params.inputUnits ?? 0)
-        ),
-
-        output_units: Math.max(
-          0,
-          Math.floor(params.outputUnits ?? 0)
-        ),
-
-        total_units: Math.max(
-          0,
-          Math.floor(params.totalUnits ?? 0)
-        ),
-
-        unit_type:
-          params.unitType ?? "unknown",
-
-        metadata:
-          params.metadata ?? {},
-      })
+      .insert(payload)
       .select("id")
       .single();
 
     if (error) {
       console.error(
         "PROVIDER USAGE INSERT ERROR:",
-        error
+        {
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+          code: error.code,
+        }
       );
 
       return {
         success: false,
         id: null,
         error: error.message,
+        details: error.details ?? null,
+        hint: error.hint ?? null,
+        code: error.code ?? null,
       };
     }
+
+    console.log(
+      "PROVIDER USAGE INSERT SUCCESS:",
+      data?.id
+    );
 
     return {
       success: true,
       id: data?.id ?? null,
       error: null,
+      details: null,
+      hint: null,
+      code: null,
     };
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Failed to record provider usage.";
+
     console.error(
       "PROVIDER USAGE HELPER ERROR:",
       error
@@ -124,9 +173,10 @@ export async function recordProviderUsage(
     return {
       success: false,
       id: null,
-      error:
-        error?.message ||
-        "Failed to record provider usage.",
+      error: message,
+      details: null,
+      hint: null,
+      code: null,
     };
   }
 }
