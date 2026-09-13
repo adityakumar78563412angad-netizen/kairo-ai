@@ -3,28 +3,11 @@ import { NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
 
 import { createServerSupabaseClient } from "@/lib/supabase-server";
-import { checkFeatureAccess } from "@/lib/feature-access";
 import { recordProviderUsage } from "@/lib/provider-usage";
 
 export const maxDuration = 300;
 
 const GEMINI_MODEL = "gemini-3.6-flash";
-
-/**
- * TEMPORARY MEASUREMENT MODE
- *
- * Set this environment variable to:
- *
- * ZUQEN_WEBSITE_BUILDER_MEASUREMENT_MODE=true
- *
- * while we measure actual Gemini usage.
- *
- * When false/missing:
- * normal Website Builder credit/access rules apply.
- */
-const MEASUREMENT_MODE =
-  process.env.ZUQEN_WEBSITE_BUILDER_MEASUREMENT_MODE ===
-  "true";
 
 type WebsiteOperation = "generate" | "edit";
 
@@ -65,8 +48,7 @@ function getErrorMessage(error: unknown) {
 }
 
 function getErrorStatus(error: unknown) {
-  const message =
-    getErrorMessage(error).toLowerCase();
+  const message = getErrorMessage(error).toLowerCase();
 
   if (
     message.includes("api key") ||
@@ -98,44 +80,34 @@ function getErrorStatus(error: unknown) {
 /**
  * Read actual Gemini usage metadata.
  */
-function readGeminiUsage(
-  response: any
-): GeminiUsage {
+function readGeminiUsage(response: any): GeminiUsage {
   const usage = response?.usageMetadata;
 
   const promptTokens = Math.max(
     0,
     Math.floor(
-      Number(
-        usage?.promptTokenCount ?? 0
-      )
+      Number(usage?.promptTokenCount ?? 0)
     )
   );
 
   const outputTokens = Math.max(
     0,
     Math.floor(
-      Number(
-        usage?.candidatesTokenCount ?? 0
-      )
+      Number(usage?.candidatesTokenCount ?? 0)
     )
   );
 
   const thoughtsTokens = Math.max(
     0,
     Math.floor(
-      Number(
-        usage?.thoughtsTokenCount ?? 0
-      )
+      Number(usage?.thoughtsTokenCount ?? 0)
     )
   );
 
   const cachedTokens = Math.max(
     0,
     Math.floor(
-      Number(
-        usage?.cachedContentTokenCount ?? 0
-      )
+      Number(usage?.cachedContentTokenCount ?? 0)
     )
   );
 
@@ -223,28 +195,28 @@ Rules:
 9. Include <html>, <head> and <body>.
 `;
 
-async function generateWebsite(
-  prompt: string
-) {
+/**
+ * Generate a complete website with Gemini.
+ */
+async function generateWebsite(prompt: string) {
   const ai = getGemini();
 
-  const response =
-    await ai.models.generateContent({
-      model: GEMINI_MODEL,
+  const response = await ai.models.generateContent({
+    model: GEMINI_MODEL,
 
-      contents: `
+    contents: `
 WEBSITE REQUEST:
 
 ${prompt}
 `,
 
-      config: {
-        systemInstruction:
-          GENERATE_SYSTEM_INSTRUCTION,
+    config: {
+      systemInstruction:
+        GENERATE_SYSTEM_INSTRUCTION,
 
-        maxOutputTokens: 16000,
-      },
-    });
+      maxOutputTokens: 16000,
+    },
+  });
 
   const html = cleanHtml(
     response.text ?? ""
@@ -259,17 +231,19 @@ ${prompt}
   };
 }
 
+/**
+ * Edit an existing website with Gemini.
+ */
 async function editWebsite(
   html: string,
   instruction: string
 ) {
   const ai = getGemini();
 
-  const response =
-    await ai.models.generateContent({
-      model: GEMINI_MODEL,
+  const response = await ai.models.generateContent({
+    model: GEMINI_MODEL,
 
-      contents: `
+    contents: `
 EXISTING WEBSITE:
 
 ${html}
@@ -279,18 +253,17 @@ EDIT INSTRUCTION:
 ${instruction}
 `,
 
-      config: {
-        systemInstruction:
-          EDIT_SYSTEM_INSTRUCTION,
+    config: {
+      systemInstruction:
+        EDIT_SYSTEM_INSTRUCTION,
 
-        maxOutputTokens: 16000,
-      },
-    });
+      maxOutputTokens: 16000,
+    },
+  });
 
-  const updatedHtml =
-    cleanHtml(
-      response.text ?? ""
-    );
+  const updatedHtml = cleanHtml(
+    response.text ?? ""
+  );
 
   const usage =
     readGeminiUsage(response);
@@ -302,17 +275,17 @@ ${instruction}
 }
 
 /**
- * Save ONLY actual provider usage.
+ * Save ONLY actual Gemini provider usage.
+ *
+ * Gemini tokens and ZUQEN credits are separate units.
  *
  * IMPORTANT:
- * We intentionally DO NOT write raw Gemini tokens
- * into feature_credit_transactions.
+ * No ZUQEN credits are consumed here.
+ * No feature_credit_transactions rows are created here.
  *
- * Gemini tokens are provider units.
- * ZUQEN credits are a separate unit.
- *
- * We will determine the token -> credit conversion
- * only after collecting real measurement data.
+ * This table is only used to collect real Gemini
+ * usage data so the final Website Builder credit
+ * conversion can be determined later.
  */
 async function saveWebsiteUsage({
   userId,
@@ -377,9 +350,6 @@ async function saveWebsiteUsage({
 
           usageAvailable:
             usage.totalTokens > 0,
-
-          measurementMode:
-            MEASUREMENT_MODE,
         },
       });
 
@@ -425,6 +395,7 @@ async function saveWebsiteUsage({
 
     return {
       success: true,
+
       providerUsageId:
         providerResult.id,
 
@@ -438,13 +409,18 @@ async function saveWebsiteUsage({
 
     return {
       success: false,
+
       providerUsageId: null,
+
       error:
         getErrorMessage(error),
     };
   }
 }
 
+/**
+ * Get authenticated user.
+ */
 async function getUser() {
   const supabase =
     await createServerSupabaseClient();
@@ -521,10 +497,11 @@ export async function POST(
 
     /**
      * ---------------------------------------------
-     * Website Builder is permanent-user only
-     * ---------------------------------------------
+     * Website Builder is permanently available
+     * to signed-in permanent users.
      *
-     * Even measurement mode does NOT allow guests.
+     * Anonymous / guest users remain blocked.
+     * ---------------------------------------------
      */
     if (user.is_anonymous) {
       return NextResponse.json(
@@ -539,64 +516,6 @@ export async function POST(
         },
         {
           status: 403,
-        }
-      );
-    }
-
-    /**
-     * ---------------------------------------------
-     * Website Builder feature access
-     * ---------------------------------------------
-     */
-    const access =
-      await checkFeatureAccess(
-        "website_builder"
-      );
-
-    if (!access.allowed) {
-      return NextResponse.json(
-        {
-          success: false,
-
-          error:
-            access.message,
-
-          code:
-            "FEATURE_ACCESS_DENIED",
-
-          feature:
-            "website_builder",
-        },
-        {
-          status: 403,
-        }
-      );
-    }
-
-    /**
-     * ---------------------------------------------
-     * TEMPORARY MEASUREMENT BYPASS
-     * ---------------------------------------------
-     *
-     * When MEASUREMENT_MODE=true:
-     *
-     * - Do NOT check Website Builder credit balance.
-     * - Do NOT consume ZUQEN credits.
-     * - Do NOT settle any credits.
-     * - Only measure actual Gemini usage.
-     *
-     * When false:
-     * the current route still does not perform
-     * final dynamic credit billing yet.
-     *
-     * This mode exists only so we can collect data.
-     */
-    if (MEASUREMENT_MODE) {
-      console.log(
-        "WEBSITE BUILDER MEASUREMENT MODE ENABLED:",
-        {
-          userId: user.id,
-          action,
         }
       );
     }
@@ -648,6 +567,10 @@ export async function POST(
             prompt
           );
       } catch (error) {
+        /**
+         * Gemini failed before usage metadata
+         * was available.
+         */
         await saveWebsiteUsage({
           userId: user.id,
 
@@ -697,6 +620,10 @@ export async function POST(
             valid,
         });
 
+      /**
+       * Gemini returned something that is not
+       * a complete HTML document.
+       */
       if (!valid) {
         return NextResponse.json(
           {
@@ -716,6 +643,9 @@ export async function POST(
 
             providerUsageSaved:
               usageSave.success,
+
+            creditsConsumed:
+              0,
           },
           {
             status: 502,
@@ -741,11 +671,6 @@ export async function POST(
                   result.usage
                     .totalTokens
                 ),
-
-              "X-Zuquen-Measurement-Mode":
-                String(
-                  MEASUREMENT_MODE
-                ),
             },
           }
         );
@@ -770,13 +695,6 @@ export async function POST(
           providerUsageSaved:
             usageSave.success,
 
-          measurementMode:
-            MEASUREMENT_MODE,
-
-          /**
-           * No ZUQEN credits are consumed
-           * during measurement mode.
-           */
           creditsConsumed:
             0,
         },
@@ -803,11 +721,6 @@ export async function POST(
               String(
                 result.usage
                   .totalTokens
-              ),
-
-            "X-Zuquen-Measurement-Mode":
-              String(
-                MEASUREMENT_MODE
               ),
           },
         }
@@ -897,6 +810,10 @@ export async function POST(
           instruction
         );
     } catch (error) {
+      /**
+       * Gemini failed before usage metadata
+       * was available.
+       */
       await saveWebsiteUsage({
         userId: user.id,
 
@@ -946,6 +863,9 @@ export async function POST(
           valid,
       });
 
+    /**
+     * Gemini returned invalid HTML.
+     */
     if (!valid) {
       return NextResponse.json(
         {
@@ -965,6 +885,9 @@ export async function POST(
 
           providerUsageSaved:
             usageSave.success,
+
+          creditsConsumed:
+            0,
         },
         {
           status: 502,
@@ -990,11 +913,6 @@ export async function POST(
                 result.usage
                   .totalTokens
               ),
-
-            "X-Zuquen-Measurement-Mode":
-              String(
-                MEASUREMENT_MODE
-              ),
           },
         }
       );
@@ -1018,9 +936,6 @@ export async function POST(
 
         providerUsageSaved:
           usageSave.success,
-
-        measurementMode:
-          MEASUREMENT_MODE,
 
         creditsConsumed:
           0,
@@ -1048,11 +963,6 @@ export async function POST(
             String(
               result.usage
                 .totalTokens
-            ),
-
-          "X-Zuquen-Measurement-Mode":
-            String(
-              MEASUREMENT_MODE
             ),
         },
       }
