@@ -5,8 +5,9 @@ import { useRouter } from "next/navigation";
 
 const MAX_PROMPT_LENGTH = 10000;
 
-// Website Builder ke liye estimated credit cost.
-// Backend final cost ka authority rahega.
+// Temporary testing cost.
+// Final Website Builder credit cost actual Gemini usage
+// measure karne ke baad decide kiya jayega.
 const ESTIMATED_CREDITS = 100;
 
 type CreditsResponse = {
@@ -56,23 +57,33 @@ export default function WebsiteBuilderPage() {
         setLoadingCredits(true);
       }
 
-      const response = await fetch("/api/credits", {
-        method: "GET",
-        cache: "no-store",
-      });
+      const response = await fetch(
+        "/api/credits?feature=website_builder",
+        {
+          method: "GET",
+          cache: "no-store",
+        }
+      );
 
       const data: CreditsResponse =
         await response.json();
 
       if (!response.ok) {
         throw new Error(
-          data.error || "Credits load nahi ho paaye."
+          data.error ||
+            "Credits load nahi ho paaye."
         );
       }
 
-      setCreditBalance(
-        Number(data.balance ?? 0)
+      const balance = Number(
+        data.balance ?? 0
       );
+
+      if (Number.isFinite(balance)) {
+        setCreditBalance(balance);
+      } else {
+        setCreditBalance(0);
+      }
     } catch (err) {
       console.error(
         "Website Builder credits error:",
@@ -90,7 +101,9 @@ export default function WebsiteBuilderPage() {
     loadCredits();
   }, []);
 
-  async function generateWebsite(event?: FormEvent) {
+  async function generateWebsite(
+    event?: FormEvent
+  ) {
     event?.preventDefault();
 
     const finalPrompt = prompt.trim();
@@ -102,7 +115,10 @@ export default function WebsiteBuilderPage() {
       return;
     }
 
-    if (finalPrompt.length > MAX_PROMPT_LENGTH) {
+    if (
+      finalPrompt.length >
+      MAX_PROMPT_LENGTH
+    ) {
       setError(
         `Prompt ${MAX_PROMPT_LENGTH.toLocaleString()} characters se chhota rakho.`
       );
@@ -150,6 +166,8 @@ export default function WebsiteBuilderPage() {
         balance?: number;
         required?: number;
         missing?: number;
+        measurementMode?: boolean;
+        creditsConsumed?: number;
       } = {};
 
       try {
@@ -162,12 +180,16 @@ export default function WebsiteBuilderPage() {
 
       if (!response.ok || !data.success) {
         if (
-          data.code === "insufficient_credits"
+          data.code ===
+          "insufficient_credits"
         ) {
           if (
-            typeof data.balance === "number"
+            typeof data.balance ===
+            "number"
           ) {
-            setCreditBalance(data.balance);
+            setCreditBalance(
+              data.balance
+            );
           }
 
           const required =
@@ -194,6 +216,15 @@ export default function WebsiteBuilderPage() {
           );
         }
 
+        if (
+          data.code ===
+          "SIGN_IN_REQUIRED"
+        ) {
+          throw new Error(
+            "Please sign in to use Website Builder."
+          );
+        }
+
         throw new Error(
           data.error ||
             data.message ||
@@ -203,7 +234,8 @@ export default function WebsiteBuilderPage() {
 
       if (
         !data.html ||
-        typeof data.html !== "string"
+        typeof data.html !==
+          "string"
       ) {
         throw new Error(
           "AI ne valid website code return nahi kiya."
@@ -211,7 +243,9 @@ export default function WebsiteBuilderPage() {
       }
 
       const websiteName =
-        createWebsiteName(finalPrompt);
+        createWebsiteName(
+          finalPrompt
+        );
 
       sessionStorage.setItem(
         "ZUQEN-website-builder-project",
@@ -224,8 +258,8 @@ export default function WebsiteBuilderPage() {
         })
       );
 
-      // Backend agar remaining balance bheje
-      // to immediately UI update hoga.
+      // Measurement mode me credits consume nahi hote.
+      // Normal mode me backend remaining balance bhej sakta hai.
       const remainingHeader =
         response.headers.get(
           "X-Zuqen-Credits-Remaining"
@@ -238,14 +272,19 @@ export default function WebsiteBuilderPage() {
         if (
           Number.isFinite(newBalance)
         ) {
-          setCreditBalance(newBalance);
+          setCreditBalance(
+            newBalance
+          );
         } else {
           await loadCredits(true);
         }
       } else if (
-        typeof data.balance === "number"
+        typeof data.balance ===
+        "number"
       ) {
-        setCreditBalance(data.balance);
+        setCreditBalance(
+          data.balance
+        );
       } else {
         await loadCredits(true);
       }
@@ -269,7 +308,9 @@ export default function WebsiteBuilderPage() {
     }
   }
 
-  function createWebsiteName(text: string) {
+  function createWebsiteName(
+    text: string
+  ) {
     const cleaned = text
       .replace(
         /create|make|build|design|a|an|the|website|site/gi,
@@ -298,13 +339,17 @@ export default function WebsiteBuilderPage() {
     return `${name} Website`;
   }
 
-  function useExample(text: string) {
+  function useExample(
+    text: string
+  ) {
     setPrompt(text);
     setError("");
 
     window.setTimeout(() => {
       document
-        .getElementById("website-prompt")
+        .getElementById(
+          "website-prompt"
+        )
         ?.focus();
     }, 50);
   }
@@ -1117,7 +1162,8 @@ export default function WebsiteBuilderPage() {
               <span>
                 {loadingCredits
                   ? "Loading credits..."
-                  : creditBalance === null
+                  : creditBalance ===
+                    null
                   ? "Credits unavailable"
                   : `${creditBalance.toLocaleString()} credits`}
               </span>
@@ -1269,7 +1315,8 @@ export default function WebsiteBuilderPage() {
                 <span className="credit-value">
                   {loadingCredits
                     ? "..."
-                    : creditBalance === null
+                    : creditBalance ===
+                      null
                     ? "—"
                     : creditBalance.toLocaleString()}
                 </span>
@@ -1293,15 +1340,18 @@ export default function WebsiteBuilderPage() {
 
                 <span
                   className={`credit-value ${
-                    remainingCredits !== null &&
+                    remainingCredits !==
+                      null &&
                     remainingCredits < 0
                       ? "danger"
                       : "highlight"
                   }`}
                 >
-                  {remainingCredits === null
+                  {remainingCredits ===
+                  null
                     ? "—"
-                    : remainingCredits >= 0
+                    : remainingCredits >=
+                      0
                     ? remainingCredits.toLocaleString()
                     : `-${Math.abs(
                         remainingCredits
