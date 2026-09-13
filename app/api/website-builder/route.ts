@@ -72,7 +72,7 @@ function cleanHtml(rawHtml: string): string {
     return "";
   }
 
-  // Remove Markdown code fences if Gemini accidentally adds them.
+  // Remove accidental Markdown code fences.
   html = html.replace(/^```html\s*/i, "");
   html = html.replace(/^```HTML\s*/i, "");
   html = html.replace(/^```\s*/i, "");
@@ -80,7 +80,7 @@ function cleanHtml(rawHtml: string): string {
 
   html = html.trim();
 
-  // Find the real HTML document start.
+  // Find the actual HTML document start.
   const doctypeIndex = html.search(/<!doctype\s+html/i);
   const htmlTagIndex = html.search(/<html\b/i);
 
@@ -96,12 +96,17 @@ function cleanHtml(rawHtml: string): string {
     html = html.slice(startIndex);
   }
 
-  // Only trim after </html> if a complete closing tag exists.
+  // Only trim content after </html> when a complete
+  // closing tag actually exists.
   const closingHtmlMatch = html.match(/<\/html\s*>/i);
 
-  if (closingHtmlMatch && closingHtmlMatch.index !== undefined) {
+  if (
+    closingHtmlMatch &&
+    closingHtmlMatch.index !== undefined
+  ) {
     const endIndex =
-      closingHtmlMatch.index + closingHtmlMatch[0].length;
+      closingHtmlMatch.index +
+      closingHtmlMatch[0].length;
 
     html = html.slice(0, endIndex);
   }
@@ -134,10 +139,22 @@ function isValidHtml(html: string): boolean {
 function readGeminiUsage(response: any): GeminiUsage {
   const usage = response?.usageMetadata || {};
 
-  const promptTokens = Number(usage.promptTokenCount || 0);
-  const outputTokens = Number(usage.candidatesTokenCount || 0);
-  const thoughtsTokens = Number(usage.thoughtsTokenCount || 0);
-  const cachedTokens = Number(usage.cachedContentTokenCount || 0);
+  const promptTokens = Number(
+    usage.promptTokenCount || 0
+  );
+
+  const outputTokens = Number(
+    usage.candidatesTokenCount || 0
+  );
+
+  const thoughtsTokens = Number(
+    usage.thoughtsTokenCount || 0
+  );
+
+  const cachedTokens = Number(
+    usage.cachedContentTokenCount || 0
+  );
+
   const totalTokens = Number(
     usage.totalTokenCount ||
       promptTokens +
@@ -162,11 +179,12 @@ function getResponseText(response: any): string {
   if (typeof response?.text === "function") {
     try {
       const text = response.text();
+
       if (typeof text === "string") {
         return text;
       }
     } catch {
-      // Ignore and try candidates below.
+      // Continue to candidates.
     }
   }
 
@@ -182,7 +200,9 @@ function getResponseText(response: any): string {
 
       const text = parts
         .map((part: any) =>
-          typeof part?.text === "string" ? part.text : ""
+          typeof part?.text === "string"
+            ? part.text
+            : ""
         )
         .join("");
 
@@ -195,7 +215,10 @@ function getResponseText(response: any): string {
   return "";
 }
 
-function isLikelyTruncated(rawHtml: string, cleanedHtml: string): boolean {
+function isLikelyTruncated(
+  rawHtml: string,
+  cleanedHtml: string
+): boolean {
   if (!rawHtml.trim()) {
     return true;
   }
@@ -206,7 +229,10 @@ function isLikelyTruncated(rawHtml: string, cleanedHtml: string): boolean {
 
   if (
     rawHtml.trim().length > 100 &&
-    !cleanedHtml.trim().toLowerCase().endsWith("</html>")
+    !cleanedHtml
+      .trim()
+      .toLowerCase()
+      .endsWith("</html>")
   ) {
     return true;
   }
@@ -218,7 +244,7 @@ async function saveProviderUsage(params: {
   userId: string;
   operation: WebsiteOperation;
   usage: GeminiUsage;
-  status: "success" | "error";
+  status: "success";
   outputValid: boolean;
 }) {
   try {
@@ -228,20 +254,27 @@ async function saveProviderUsage(params: {
       provider: "gemini",
       model: GEMINI_MODEL,
       requestId: null,
+
+      // provider-usage.ts does not allow "error".
+      // We therefore use the supported "success" status
+      // for measurement records as well.
       status: params.status,
+
       inputUnits: params.usage.promptTokens,
       outputUnits: params.usage.outputTokens,
       totalUnits: params.usage.totalTokens,
       unitType: "tokens",
+
       metadata: {
-        operation: params.operation,
+     operation: params.operation,
         outputValid: params.outputValid,
         promptTokens: params.usage.promptTokens,
         outputTokens: params.usage.outputTokens,
         totalTokens: params.usage.totalTokens,
         thoughtsTokens: params.usage.thoughtsTokens,
         cachedTokens: params.usage.cachedTokens,
-        usageAvailable: params.usage.totalTokens > 0,
+        usageAvailable:
+          params.usage.totalTokens > 0,
       },
     });
   } catch (error) {
@@ -272,7 +305,8 @@ export async function POST(request: Request) {
         ? "edit"
         : "generate";
 
-    const supabase = await createServerSupabaseClient();
+    const supabase =
+      await createServerSupabaseClient();
 
     const {
       data: { user },
@@ -284,7 +318,8 @@ export async function POST(request: Request) {
         {
           success: false,
           code: "UNAUTHORIZED",
-          message: "Please sign in to use Website Builder.",
+          message:
+            "Please sign in to use Website Builder.",
         },
         { status: 401 }
       );
@@ -292,25 +327,29 @@ export async function POST(request: Request) {
 
     userId = user.id;
 
-    // Website Builder is permanently restricted to permanent accounts.
+    // Website Builder is permanently available
+    // only to permanent signed-in users.
     if (user.is_anonymous) {
       return NextResponse.json(
         {
           success: false,
           code: "SIGN_IN_REQUIRED",
-          message: "Please sign in to use Website Builder.",
+          message:
+            "Please sign in to use Website Builder.",
         },
         { status: 403 }
       );
     }
 
-    const apiKey = process.env.GEMINI_API_KEY;
+    const apiKey =
+      process.env.GEMINI_API_KEY;
 
     if (!apiKey) {
       return NextResponse.json(
         {
           success: false,
-          message: "Gemini API key is not configured.",
+          message:
+            "Gemini API key is not configured.",
         },
         { status: 500 }
       );
@@ -319,6 +358,10 @@ export async function POST(request: Request) {
     const ai = new GoogleGenAI({
       apiKey,
     });
+
+    // ========================================================
+    // GENERATE
+    // ========================================================
 
     if (operation === "generate") {
       const prompt =
@@ -330,7 +373,8 @@ export async function POST(request: Request) {
         return NextResponse.json(
           {
             success: false,
-            message: "Website prompt is required.",
+            message:
+              "Website prompt is required.",
           },
           { status: 400 }
         );
@@ -356,43 +400,54 @@ export async function POST(request: Request) {
         }
       );
 
-      const response = await ai.models.generateContent({
-        model: GEMINI_MODEL,
-        contents: prompt,
-        config: {
-          systemInstruction:
-            GENERATE_SYSTEM_INSTRUCTION,
+      const response =
+        await ai.models.generateContent({
+          model: GEMINI_MODEL,
+          contents: prompt,
+          config: {
+            systemInstruction:
+              GENERATE_SYSTEM_INSTRUCTION,
 
-          // Generation is already working around this range.
-          maxOutputTokens: 16000,
+            maxOutputTokens: 16000,
 
-          temperature: 0.7,
-        },
-      });
+            temperature: 0.7,
+          },
+        });
 
-      const usage = readGeminiUsage(response);
-      const rawHtml = getResponseText(response);
-      const html = cleanHtml(rawHtml);
+      const usage =
+        readGeminiUsage(response);
+
+      const rawHtml =
+        getResponseText(response);
+
+      const html =
+        cleanHtml(rawHtml);
 
       console.log(
         "[Website Builder] Generation result:",
         {
           rawLength: rawHtml.length,
           cleanedLength: html.length,
-          promptTokens: usage.promptTokens,
-          outputTokens: usage.outputTokens,
-          totalTokens: usage.totalTokens,
+          promptTokens:
+            usage.promptTokens,
+          outputTokens:
+            usage.outputTokens,
+          totalTokens:
+            usage.totalTokens,
         }
       );
 
-      const outputValid = isValidHtml(html);
+      const outputValid =
+        isValidHtml(html);
 
       if (!outputValid) {
+        // Keep usage record for measurement,
+        // but mark the metadata as invalid.
         await saveProviderUsage({
           userId,
           operation,
           usage,
-          status: "error",
+          status: "success",
           outputValid: false,
         });
 
@@ -402,7 +457,8 @@ export async function POST(request: Request) {
             rawLength: rawHtml.length,
             cleanedLength: html.length,
             usage,
-            preview: rawHtml.slice(0, 500),
+            preview:
+              rawHtml.slice(0, 500),
           }
         );
 
@@ -411,20 +467,22 @@ export async function POST(request: Request) {
             success: false,
             message:
               "Gemini returned invalid website HTML.",
-            errorCode: "INVALID_HTML",
+            errorCode:
+              "INVALID_HTML",
             usage,
           },
           { status: 502 }
         );
       }
 
-      const usageSave = await saveProviderUsage({
-        userId,
-        operation,
-        usage,
-        status: "success",
-        outputValid: true,
-      });
+      const usageSave =
+        await saveProviderUsage({
+          userId,
+          operation,
+          usage,
+          status: "success",
+          outputValid: true,
+        });
 
       return NextResponse.json({
         success: true,
@@ -432,14 +490,18 @@ export async function POST(request: Request) {
         provider: "gemini",
         feature: "website-builder",
         usage,
-        providerUsageSaved: usageSave.success,
+        providerUsageSaved:
+          usageSave.success,
+
+        // Measurement mode:
+        // no ZUQEN credits are deducted.
         creditsConsumed: 0,
       });
     }
 
-    // ---------------------------------------------------------
+    // ========================================================
     // EDIT
-    // ---------------------------------------------------------
+    // ========================================================
 
     const htmlInput =
       typeof body?.html === "string"
@@ -455,7 +517,8 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           success: false,
-          message: "Existing website HTML is required.",
+          message:
+            "Existing website HTML is required.",
         },
         { status: 400 }
       );
@@ -465,7 +528,8 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           success: false,
-          message: "Edit instruction is required.",
+          message:
+            "Edit instruction is required.",
         },
         { status: 400 }
       );
@@ -518,69 +582,90 @@ End with </html>.
       "[Website Builder] Starting edit:",
       {
         userId,
-        htmlLength: htmlInput.length,
-        instructionLength: instruction.length,
+        htmlLength:
+          htmlInput.length,
+        instructionLength:
+          instruction.length,
         model: GEMINI_MODEL,
       }
     );
 
-    const response = await ai.models.generateContent({
-      model: GEMINI_MODEL,
-      contents: editPrompt,
-      config: {
-        systemInstruction:
-          EDIT_SYSTEM_INSTRUCTION,
+    const response =
+      await ai.models.generateContent({
+        model: GEMINI_MODEL,
+        contents: editPrompt,
+        config: {
+          systemInstruction:
+            EDIT_SYSTEM_INSTRUCTION,
 
-        // Increased from 16,000 to reduce the chance of
-        // complete HTML being truncated during edits.
-        maxOutputTokens: 32000,
+          // Increased from 16,000 to 32,000
+          // to reduce HTML truncation.
+          maxOutputTokens: 32000,
 
-        temperature: 0.4,
-      },
-    });
+          temperature: 0.4,
+        },
+      });
 
-    const usage = readGeminiUsage(response);
-    const rawHtml = getResponseText(response);
-    const html = cleanHtml(rawHtml);
+    const usage =
+      readGeminiUsage(response);
 
-    const truncated = isLikelyTruncated(
-      rawHtml,
-      html
-    );
+    const rawHtml =
+      getResponseText(response);
 
-    const outputValid = isValidHtml(html);
+    const html =
+      cleanHtml(rawHtml);
+
+    const truncated =
+      isLikelyTruncated(
+        rawHtml,
+        html
+      );
+
+    const outputValid =
+      isValidHtml(html);
 
     console.log(
       "[Website Builder] Edit result:",
       {
-        rawLength: rawHtml.length,
-        cleanedLength: html.length,
+        rawLength:
+          rawHtml.length,
+        cleanedLength:
+          html.length,
         truncated,
         outputValid,
-        promptTokens: usage.promptTokens,
-        outputTokens: usage.outputTokens,
-        totalTokens: usage.totalTokens,
+        promptTokens:
+          usage.promptTokens,
+        outputTokens:
+          usage.outputTokens,
+        totalTokens:
+          usage.totalTokens,
       }
     );
 
     if (!outputValid || truncated) {
+      // We still record the Gemini usage because
+      // tokens were actually consumed.
       await saveProviderUsage({
         userId,
         operation,
         usage,
-        status: "error",
+        status: "success",
         outputValid: false,
       });
 
       console.error(
         "[Website Builder] Invalid or truncated edited HTML.",
         {
-          rawLength: rawHtml.length,
-          cleanedLength: html.length,
+          rawLength:
+            rawHtml.length,
+          cleanedLength:
+            html.length,
           truncated,
           usage,
-          preview: rawHtml.slice(0, 500),
-          ending: rawHtml.slice(-500),
+          preview:
+            rawHtml.slice(0, 500),
+          ending:
+            rawHtml.slice(-500),
         }
       );
 
@@ -599,13 +684,14 @@ End with </html>.
       );
     }
 
-    const usageSave = await saveProviderUsage({
-      userId,
-      operation,
-      usage,
-      status: "success",
-      outputValid: true,
-    });
+    const usageSave =
+      await saveProviderUsage({
+        userId,
+        operation,
+        usage,
+        status: "success",
+        outputValid: true,
+      });
 
     return NextResponse.json({
       success: true,
@@ -613,7 +699,11 @@ End with </html>.
       provider: "gemini",
       feature: "website-builder",
       usage,
-      providerUsageSaved: usageSave.success,
+      providerUsageSaved:
+        usageSave.success,
+
+      // Measurement mode:
+      // no ZUQEN credits are deducted.
       creditsConsumed: 0,
     });
   } catch (error: any) {
