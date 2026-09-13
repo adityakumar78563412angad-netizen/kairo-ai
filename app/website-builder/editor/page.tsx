@@ -1,365 +1,161 @@
+
 "use client";
 
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 
-type Device = "desktop" | "tablet" | "mobile";
-type ViewMode = "preview" | "code";
+const STORAGE_KEY = "ZUQEN-website-builder-project";
 
-type WebsiteProject = {
-  prompt: string;
+type Project = {
   html: string;
-  name: string;
-  createdAt: string;
+  prompt?: string;
+  createdAt?: string;
+  updatedAt?: string;
 };
 
-const PROJECT_KEY =
-  "ZUQEN-website-builder-project";
+type PreviewMode = "desktop" | "tablet" | "mobile";
 
-const DRIVE_PROJECTS_KEY =
-  "ZUQEN-website-builder-drive-projects";
+function cleanHtml(value: string) {
+  let html = value.trim();
 
-const AI_EDIT_CREDITS = 50;
+  html = html.replace(/^```html\s*/i, "");
+  html = html.replace(/^```HTML\s*/i, "");
+  html = html.replace(/^```\s*/i, "");
+  html = html.replace(/\s*```$/i, "");
+
+  const doctypeIndex = html.toLowerCase().indexOf("<!doctype html>");
+  const htmlIndex = html.toLowerCase().indexOf("<html");
+
+  if (doctypeIndex >= 0) {
+    html = html.slice(doctypeIndex);
+  } else if (htmlIndex >= 0) {
+    html = html.slice(htmlIndex);
+  }
+
+  const closingIndex = html.toLowerCase().lastIndexOf("</html>");
+
+  if (closingIndex >= 0) {
+    html = html.slice(0, closingIndex + "</html>".length);
+  }
+
+  return html.trim();
+}
+
+function isValidHtml(value: string) {
+  const html = cleanHtml(value).toLowerCase();
+
+  return (
+    html.length > 20 &&
+    html.includes("<html") &&
+    html.includes("</html>") &&
+    html.includes("<head") &&
+    html.includes("<body")
+  );
+}
+
+function formatNumber(value: number) {
+  return new Intl.NumberFormat("en-US").format(value);
+}
 
 export default function WebsiteBuilderEditorPage() {
-  const router = useRouter();
-
-  const [project, setProject] =
-    useState<WebsiteProject | null>(null);
-
+  const [project, setProject] = useState<Project | null>(null);
   const [html, setHtml] = useState("");
-  const [codeValue, setCodeValue] =
-    useState("");
+  const [editPrompt, setEditPrompt] = useState("");
 
-  const [viewMode, setViewMode] =
-    useState<ViewMode>("preview");
+  const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState(false);
 
-  const [device, setDevice] =
-    useState<Device>("desktop");
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
 
-  const [loading, setLoading] =
-    useState(true);
+  const [copied, setCopied] = useState(false);
+  const [previewMode, setPreviewMode] =
+    useState<PreviewMode>("desktop");
 
-  const [aiLoading, setAiLoading] =
+  const [showCode, setShowCode] = useState(false);
+  const [showFullscreen, setShowFullscreen] =
     useState(false);
 
-  const [error, setError] =
-    useState("");
-
-  const [aiInstruction, setAiInstruction] =
-    useState("");
-
-  const [showAiPanel, setShowAiPanel] =
-    useState(true);
-
-  const [showCodePanel, setShowCodePanel] =
-    useState(false);
-
-  const [fullscreen, setFullscreen] =
-    useState(false);
-
-  const [previewKey, setPreviewKey] =
-    useState(0);
-
-  const [history, setHistory] =
-    useState<string[]>([]);
-
-  const [historyIndex, setHistoryIndex] =
-    useState(-1);
-
-  const [saved, setSaved] =
-    useState(false);
-
-  const [creditBalance, setCreditBalance] =
-    useState<number | null>(null);
-
-  const iframeRef =
-    useRef<HTMLIFrameElement>(null);
+  const [usage, setUsage] = useState<{
+    promptTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    thoughtsTokens?: number;
+    cachedTokens?: number;
+  } | null>(null);
 
   useEffect(() => {
     try {
-      const raw =
-        sessionStorage.getItem(
-          PROJECT_KEY
-        );
+      const stored = sessionStorage.getItem(STORAGE_KEY);
 
-      if (!raw) {
-        router.replace(
-          "/website-builder"
+      if (!stored) {
+        setError(
+          "No generated website was found. Please generate a website first."
         );
+        setLoading(false);
         return;
       }
 
-      const parsed =
-        JSON.parse(raw) as WebsiteProject;
+      const parsed = JSON.parse(stored) as Project;
 
-      if (
-        !parsed ||
-        typeof parsed.html !==
-          "string" ||
-        !parsed.html.trim()
-      ) {
-        router.replace(
-          "/website-builder"
+      if (!parsed?.html || !isValidHtml(parsed.html)) {
+        setError(
+          "The saved website project is invalid or incomplete."
         );
+        setLoading(false);
         return;
       }
+
+      const cleaned = cleanHtml(parsed.html);
 
       setProject(parsed);
-      setHtml(parsed.html);
-      setCodeValue(parsed.html);
-      setHistory([parsed.html]);
-      setHistoryIndex(0);
-
-      loadCredits();
+      setHtml(cleaned);
     } catch (err) {
-      console.error(
-        "Editor project load error:",
-        err
-      );
+      console.error("Failed to load website project:", err);
 
-      router.replace(
-        "/website-builder"
+      setError(
+        "Unable to load the website project."
       );
     } finally {
       setLoading(false);
     }
-  }, [router]);
+  }, []);
 
-  async function loadCredits() {
-    try {
-      const response = await fetch(
-        "/api/credits",
-        {
-          method: "GET",
-          cache: "no-store",
-        }
-      );
+  function saveProject(nextHtml: string) {
+    if (!project) return;
 
-      if (!response.ok) {
-        return;
-      }
+    const nextProject: Project = {
+      ...project,
+      html: nextHtml,
+      updatedAt: new Date().toISOString(),
+    };
 
-      const data =
-        await response.json();
-
-      if (
-        typeof data.balance ===
-        "number"
-      ) {
-        setCreditBalance(
-          data.balance
-        );
-      }
-    } catch (err) {
-      console.error(
-        "Editor credits error:",
-        err
-      );
-    }
-  }
-
-  function updateProjectHtml(
-    nextHtml: string,
-    addHistory = true
-  ) {
-    setHtml(nextHtml);
-    setCodeValue(nextHtml);
-    setPreviewKey(
-      (value) => value + 1
+    sessionStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify(nextProject)
     );
 
-    if (addHistory) {
-      setHistory((previous) => {
-        const current =
-          previous[historyIndex];
-
-        if (current === nextHtml) {
-          return previous;
-        }
-
-        const trimmed =
-          previous.slice(
-            0,
-            historyIndex + 1
-          );
-
-        return [
-          ...trimmed,
-          nextHtml,
-        ];
-      });
-
-      setHistoryIndex(
-        (previousIndex) =>
-          previousIndex + 1
-      );
-    }
-
-    setProject((previous) =>
-      previous
-        ? {
-            ...previous,
-            html: nextHtml,
-          }
-        : previous
-    );
-
-    try {
-      const raw =
-        sessionStorage.getItem(
-          PROJECT_KEY
-        );
-
-      if (raw) {
-        const stored =
-          JSON.parse(raw);
-
-        sessionStorage.setItem(
-          PROJECT_KEY,
-          JSON.stringify({
-            ...stored,
-            html: nextHtml,
-          })
-        );
-      }
-    } catch (err) {
-      console.error(
-        "Project session update error:",
-        err
-      );
-    }
+    setProject(nextProject);
   }
 
-  function undo() {
-    if (historyIndex <= 0) {
+  async function handleEdit() {
+    const instruction = editPrompt.trim();
+
+    if (!instruction) {
+      setError("Please describe what you want to change.");
       return;
     }
 
-    const nextIndex =
-      historyIndex - 1;
-
-    const nextHtml =
-      history[nextIndex];
-
-    setHistoryIndex(nextIndex);
-    setHtml(nextHtml);
-    setCodeValue(nextHtml);
-    setPreviewKey(
-      (value) => value + 1
-    );
-  }
-
-  function redo() {
-    if (
-      historyIndex >=
-      history.length - 1
-    ) {
+    if (!html.trim()) {
+      setError("No website HTML is available to edit.");
       return;
     }
 
-    const nextIndex =
-      historyIndex + 1;
-
-    const nextHtml =
-      history[nextIndex];
-
-    setHistoryIndex(nextIndex);
-    setHtml(nextHtml);
-    setCodeValue(nextHtml);
-    setPreviewKey(
-      (value) => value + 1
-    );
-  }
-
-  function applyCodeChanges() {
-    if (!codeValue.trim()) {
-      setError(
-        "Website code empty nahi ho sakta."
-      );
-      return;
-    }
+    if (editing) return;
 
     setError("");
-
-    if (codeValue === html) {
-      return;
-    }
-
-    const nextHistory =
-      history
-        .slice(0, historyIndex + 1)
-        .concat(codeValue);
-
-    setHistory(nextHistory);
-    setHistoryIndex(
-      nextHistory.length - 1
-    );
-
-    setHtml(codeValue);
-    setPreviewKey(
-      (value) => value + 1
-    );
-
-    setProject((previous) =>
-      previous
-        ? {
-            ...previous,
-            html: codeValue,
-          }
-        : previous
-    );
-
-    saveCurrentProject(
-      codeValue
-    );
-  }
-
-  function resetCode() {
-    setCodeValue(html);
-    setError("");
-  }
-
-  async function handleAiEdit(
-    instruction?: string
-  ) {
-    const finalInstruction =
-      (
-        instruction ??
-        aiInstruction
-      ).trim();
-
-    if (!finalInstruction) {
-      setError(
-        "AI ko batane ke liye instruction likho."
-      );
-      return;
-    }
-
-    if (finalInstruction.length > 5000) {
-      setError(
-        "AI instruction 5,000 characters se chhota rakho."
-      );
-      return;
-    }
-
-    if (
-      creditBalance !== null &&
-      creditBalance < AI_EDIT_CREDITS
-    ) {
-      setError(
-        `AI Edit ke liye ${AI_EDIT_CREDITS} credits chahiye. Tumhare paas ${creditBalance} credits hain.`
-      );
-      return;
-    }
-
-    setError("");
-    setAiLoading(true);
+    setSuccess("");
+    setUsage(null);
+    setEditing(true);
 
     try {
       const response = await fetch(
@@ -367,361 +163,190 @@ export default function WebsiteBuilderEditorPage() {
         {
           method: "POST",
           headers: {
-            "Content-Type":
-              "application/json",
+            "Content-Type": "application/json",
           },
           body: JSON.stringify({
             action: "edit",
-            prompt:
-              finalInstruction,
             html,
+            instruction,
           }),
         }
       );
 
-      let data: {
-        success?: boolean;
-        html?: string;
-        error?: string;
-        code?: string;
-        balance?: number;
-      } = {};
+      let data: any = null;
 
       try {
         data = await response.json();
       } catch {
-        throw new Error(
-          "Server ne valid response nahi diya."
-        );
+        data = null;
       }
 
-      if (
-        !response.ok ||
-        !data.success
-      ) {
-        if (
-          data.code ===
-          "insufficient_credits"
-        ) {
-          if (
-            typeof data.balance ===
-            "number"
-          ) {
-            setCreditBalance(
-              data.balance
-            );
-          }
+      if (!response.ok) {
+        const message =
+          data?.message ||
+          data?.error ||
+          `Edit request failed with status ${response.status}.`;
 
-          throw new Error(
-            "AI Edit ke liye enough credits nahi hain."
-          );
-        }
-
-        throw new Error(
-          data.error ||
-            "AI website edit nahi kar payi."
-        );
+        throw new Error(message);
       }
 
-      if (
-        !data.html ||
-        typeof data.html !==
-          "string"
-      ) {
-        throw new Error(
-          "AI ne valid HTML return nahi kiya."
-        );
-      }
-
-      updateProjectHtml(
-        data.html,
-        true
+      const nextHtml = cleanHtml(
+        typeof data?.html === "string"
+          ? data.html
+          : ""
       );
 
-      if (
-        typeof data.balance ===
-        "number"
-      ) {
-        setCreditBalance(
-          data.balance
+      if (!isValidHtml(nextHtml)) {
+        throw new Error(
+          "Gemini returned invalid website HTML."
         );
-      } else {
-        const header =
-          response.headers.get(
-            "X-Zuqen-Credits-Remaining"
-          );
-
-        if (header) {
-          const remaining =
-            Number(header);
-
-          if (
-            Number.isFinite(
-              remaining
-            )
-          ) {
-            setCreditBalance(
-              remaining
-            );
-          }
-        } else {
-          await loadCredits();
-        }
       }
 
-      setAiInstruction("");
+      setHtml(nextHtml);
+      saveProject(nextHtml);
+
+      if (data?.usage) {
+        setUsage({
+          promptTokens:
+            Number(data.usage.promptTokens) || 0,
+          outputTokens:
+            Number(data.usage.outputTokens) || 0,
+          totalTokens:
+            Number(data.usage.totalTokens) || 0,
+          thoughtsTokens:
+            Number(data.usage.thoughtsTokens) || 0,
+          cachedTokens:
+            Number(data.usage.cachedTokens) || 0,
+        });
+      }
+
+      setEditPrompt("");
+
+      setSuccess(
+        "Website updated successfully. No ZUQEN credits were charged during this measurement test."
+      );
     } catch (err) {
-      console.error(
-        "AI website edit error:",
-        err
-      );
+      console.error("Website edit error:", err);
 
       setError(
         err instanceof Error
           ? err.message
-          : "AI edit karte waqt kuch galat ho gaya."
+          : "Unable to edit the website."
       );
     } finally {
-      setAiLoading(false);
+      setEditing(false);
     }
   }
 
-  function saveCurrentProject(
-    htmlToSave = html
-  ) {
-    if (!project) {
-      return;
-    }
+  async function copyCode() {
+    if (!html) return;
 
     try {
-      const raw =
-        localStorage.getItem(
-          DRIVE_PROJECTS_KEY
-        );
+      await navigator.clipboard.writeText(html);
 
-      const existing =
-        raw ? JSON.parse(raw) : [];
-
-      const projects =
-        Array.isArray(existing)
-          ? existing
-          : [];
-
-      const updatedProject = {
-        ...project,
-        html: htmlToSave,
-        updatedAt:
-          new Date().toISOString(),
-      };
-
-      const index =
-        projects.findIndex(
-          (item: WebsiteProject) =>
-            item.name === project.name &&
-            item.createdAt ===
-              project.createdAt
-        );
-
-      if (index >= 0) {
-        projects[index] =
-          updatedProject;
-      } else {
-        projects.unshift(
-          updatedProject
-        );
-      }
-
-      localStorage.setItem(
-        DRIVE_PROJECTS_KEY,
-        JSON.stringify(
-          projects
-        )
-      );
-
-      setSaved(true);
+      setCopied(true);
 
       window.setTimeout(() => {
-        setSaved(false);
-      }, 1800);
+        setCopied(false);
+      }, 1600);
     } catch (err) {
-      console.error(
-        "Save project error:",
-        err
-      );
-
-      setError(
-        "Project save nahi ho paya."
-      );
+      console.error("Copy failed:", err);
+      setCopied(false);
     }
   }
 
-  function downloadWebsite() {
-    const blob =
-      new Blob([html], {
-        type: "text/html",
-      });
+  function downloadHtml() {
+    if (!html) return;
 
-    const url =
-      URL.createObjectURL(blob);
-
-    const anchor =
-      document.createElement("a");
-
-    anchor.href = url;
-    anchor.download =
-      `${safeFileName(
-        project?.name ||
-          "ZUQEN-website"
-      )}.html`;
-
-    document.body.appendChild(
-      anchor
+    const blob = new Blob(
+      [html],
+      { type: "text/html;charset=utf-8" }
     );
 
-    anchor.click();
+    const url = URL.createObjectURL(blob);
 
+    const anchor = document.createElement("a");
+
+    anchor.href = url;
+    anchor.download = "zuqen-website.html";
+
+    document.body.appendChild(anchor);
+    anchor.click();
     anchor.remove();
 
     URL.revokeObjectURL(url);
   }
 
-  async function copyCode() {
-    try {
-      await navigator.clipboard.writeText(
-        html
-      );
+  function getPreviewWidth() {
+    switch (previewMode) {
+      case "mobile":
+        return "390px";
 
-      setSaved(true);
+      case "tablet":
+        return "768px";
 
-      window.setTimeout(() => {
-        setSaved(false);
-      }, 1500);
-    } catch {
-      setError(
-        "Code copy nahi ho paya."
-      );
+      default:
+        return "100%";
     }
   }
 
-  function safeFileName(
-    value: string
-  ) {
-    return value
-      .replace(
-        /[^a-z0-9-_ ]/gi,
-        ""
-      )
-      .trim()
-      .replace(/\s+/g, "-")
-      .slice(0, 80);
+  function resetProject() {
+    if (!project?.html) return;
+
+    setHtml(project.html);
+    setEditPrompt("");
+    setError("");
+    setSuccess("");
+    setUsage(null);
   }
-
-  function goBack() {
-    try {
-      if (project) {
-        sessionStorage.setItem(
-          PROJECT_KEY,
-          JSON.stringify({
-            ...project,
-            html,
-          })
-        );
-      }
-    } catch (err) {
-      console.error(
-        "Back save error:",
-        err
-      );
-    }
-
-    router.push(
-      "/website-builder"
-    );
-  }
-
-  function setSuggestion(
-    suggestion: string
-  ) {
-    setAiInstruction(
-      suggestion
-    );
-  }
-
-  const deviceWidth =
-    useMemo(() => {
-      if (device === "mobile") {
-        return 390;
-      }
-
-      if (device === "tablet") {
-        return 768;
-      }
-
-      return 1440;
-    }, [device]);
-
-  const previewContainerStyle =
-    useMemo(
-      () => ({
-        width:
-          deviceWidth === 1440
-            ? "100%"
-            : `${deviceWidth}px`,
-        maxWidth:
-          "100%",
-      }),
-      [deviceWidth]
-    );
 
   if (loading) {
     return (
-      <main className="editor-loading">
-        <style jsx>{`
-          .editor-loading {
-            min-height: 100vh;
-            background: #050505;
-            color: white;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-family:
-              Inter,
-              system-ui,
-              sans-serif;
-          }
+      <main className="min-h-screen bg-[#07080c] text-white">
+        <div className="flex min-h-screen items-center justify-center">
+          <div className="text-center">
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-white/5">
+              <span className="animate-pulse text-xl">
+                ✦
+              </span>
+            </div>
 
-          .loading-box {
-            text-align: center;
-          }
+            <p className="text-sm text-white/60">
+              Loading your website...
+            </p>
+          </div>
+        </div>
+      </main>
+    );
+  }
 
-          .spinner {
-            width: 30px;
-            height: 30px;
-            margin: 0 auto 15px;
-            border: 3px solid
-              rgba(255, 255, 255, 0.1);
-            border-top-color: #8066ff;
-            border-radius: 50%;
-            animation:
-              spin 0.7s linear infinite;
-          }
+  if (!html) {
+    return (
+      <main className="min-h-screen bg-[#07080c] text-white">
+        <div className="mx-auto flex min-h-screen max-w-xl items-center justify-center px-5">
+          <div className="w-full rounded-3xl border border-red-400/10 bg-red-400/[0.04] p-7 text-center">
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl border border-red-400/10 bg-red-400/10 text-red-300">
+              !
+            </div>
 
-          @keyframes spin {
-            to {
-              transform: rotate(360deg);
-            }
-          }
+            <h1 className="text-lg font-semibold">
+              Website unavailable
+            </h1>
 
-          .loading-text {
-            color: #777;
-            font-size: 12px;
-          }
-        `}</style>
+            <p className="mt-2 text-sm leading-6 text-white/45">
+              {error ||
+                "No website project is available."}
+            </p>
 
-        <div className="loading-box">
-          <div className="spinner" />
-          <div className="loading-text">
-            Loading website editor...
+            <button
+              onClick={() => {
+                window.location.href =
+                  "/website-builder";
+              }}
+              className="mt-6 rounded-xl bg-white px-5 py-3 text-sm font-semibold text-black transition hover:bg-white/90"
+            >
+              Back to Website Builder
+            </button>
           </div>
         </div>
       </main>
@@ -729,1158 +354,520 @@ export default function WebsiteBuilderEditorPage() {
   }
 
   return (
-    <main
-      className={`website-editor ${
-        fullscreen
-          ? "is-fullscreen"
-          : ""
-      }`}
-    >
-      <style jsx global>{`
-        * {
-          box-sizing: border-box;
-        }
-
-        html,
-        body {
-          margin: 0;
-          padding: 0;
-          background: #050505;
-        }
-
-        body {
-          font-family:
-            Inter,
-            ui-sans-serif,
-            system-ui,
-            -apple-system,
-            BlinkMacSystemFont,
-            "Segoe UI",
-            sans-serif;
-        }
-
-        button,
-        textarea {
-          font: inherit;
-        }
-
-        button {
-          cursor: pointer;
-        }
-
-        .website-editor {
-          min-height: 100vh;
-          height: 100vh;
-          overflow: hidden;
-          display: flex;
-          flex-direction: column;
-          background: #050505;
-          color: white;
-        }
-
-        .website-editor.is-fullscreen
-          .editor-sidebar,
-        .website-editor.is-fullscreen
-          .editor-topbar {
-          display: none;
-        }
-
-        .editor-topbar {
-          height: 64px;
-          flex: 0 0 64px;
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 15px;
-          padding: 0 18px;
-          border-bottom: 1px solid
-            rgba(255, 255, 255, 0.07);
-          background: #08080a;
-          z-index: 20;
-        }
-
-        .topbar-left {
-          min-width: 0;
-          display: flex;
-          align-items: center;
-          gap: 12px;
-        }
-
-        .brand-mini {
-          width: 34px;
-          height: 34px;
-          flex: 0 0 34px;
-          border-radius: 10px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-weight: 900;
-          font-size: 14px;
-          background:
-            linear-gradient(
-              135deg,
-              #8066ff,
-              #4f46e5
-            );
-          box-shadow:
-            0 0 25px
-              rgba(124, 92, 255, 0.25);
-        }
-
-        .project-title-wrap {
-          min-width: 0;
-        }
-
-        .project-title {
-          font-size: 12px;
-          font-weight: 800;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-        }
-
-        .project-subtitle {
-          color: #555;
-          font-size: 9px;
-          margin-top: 2px;
-        }
-
-        .topbar-center {
-          display: flex;
-          align-items: center;
-          gap: 3px;
-          padding: 3px;
-          border: 1px solid
-            rgba(255, 255, 255, 0.07);
-          border-radius: 9px;
-          background: rgba(
-            255,
-            255,
-            255,
-            0.025
-          );
-        }
-
-        .mode-button {
-          height: 30px;
-          padding: 0 11px;
-          border: 0;
-          border-radius: 7px;
-          background: transparent;
-          color: #666;
-          font-size: 10px;
-          font-weight: 700;
-        }
-
-        .mode-button.active {
-          background: rgba(
-            255,
-            255,
-            255,
-            0.08
-          );
-          color: white;
-        }
-
-        .topbar-actions {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-        }
-
-        .credit-pill {
-          height: 32px;
-          padding: 0 10px;
-          display: flex;
-          align-items: center;
-          gap: 5px;
-          border-radius: 8px;
-          border: 1px solid
-            rgba(124, 92, 255, 0.2);
-          background: rgba(
-            124,
-            92,
-            255,
-            0.06
-          );
-          color: #afa3ff;
-          font-size: 9px;
-          font-weight: 800;
-        }
-
-        .toolbar-button {
-          height: 32px;
-          padding: 0 10px;
-          border: 1px solid
-            rgba(255, 255, 255, 0.07);
-          border-radius: 8px;
-          background: rgba(
-            255,
-            255,
-            255,
-            0.03
-          );
-          color: #999;
-          font-size: 10px;
-          font-weight: 700;
-          transition: 0.2s ease;
-        }
-
-        .toolbar-button:hover:not(
-            :disabled
-          ) {
-          color: white;
-          background: rgba(
-            255,
-            255,
-            255,
-            0.07
-          );
-        }
-
-        .toolbar-button:disabled {
-          opacity: 0.3;
-          cursor: not-allowed;
-        }
-
-        .toolbar-button.primary {
-          color: white;
-          border-color: transparent;
-          background:
-            linear-gradient(
-              135deg,
-              #8066ff,
-              #5b4be7
-            );
-        }
-
-        .editor-body {
-          flex: 1;
-          min-height: 0;
-          display: flex;
-          overflow: hidden;
-        }
-
-        .editor-sidebar {
-          width: 310px;
-          flex: 0 0 310px;
-          min-height: 0;
-          border-right: 1px solid
-            rgba(255, 255, 255, 0.07);
-          background: #08080a;
-          display: flex;
-          flex-direction: column;
-          overflow-y: auto;
-        }
-
-        .sidebar-section {
-          padding: 17px;
-          border-bottom: 1px solid
-            rgba(255, 255, 255, 0.055);
-        }
-
-        .sidebar-heading {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          margin-bottom: 11px;
-          color: #aaa;
-          font-size: 10px;
-          font-weight: 800;
-        }
-
-        .sidebar-label {
-          color: #555;
-          font-size: 8px;
-          text-transform: uppercase;
-          letter-spacing: 0.12em;
-          font-weight: 800;
-        }
-
-        .ai-credit-note {
-          color: #555;
-          font-size: 8px;
-          font-weight: 600;
-        }
-
-        .ai-input {
-          width: 100%;
-          min-height: 112px;
-          resize: vertical;
-          border: 1px solid
-            rgba(255, 255, 255, 0.07);
-          outline: none;
-          border-radius: 10px;
-          padding: 11px;
-          background: rgba(
-            255,
-            255,
-            255,
-            0.035
-          );
-          color: #eee;
-          font-size: 10px;
-          line-height: 1.6;
-        }
-
-        .ai-input:focus {
-          border-color: rgba(
-            124,
-            92,
-            255,
-            0.35
-          );
-        }
-
-        .ai-input::placeholder {
-          color: #4d4d4d;
-        }
-
-        .ai-button {
-          width: 100%;
-          height: 38px;
-          margin-top: 8px;
-          border: 0;
-          border-radius: 9px;
-          color: white;
-          font-size: 10px;
-          font-weight: 800;
-          background:
-            linear-gradient(
-              135deg,
-              #8066ff,
-              #5b4be7
-            );
-          box-shadow:
-            0 8px 25px
-              rgba(91, 75, 231, 0.2);
-        }
-
-        .ai-button:disabled {
-          opacity: 0.45;
-          cursor: not-allowed;
-        }
-
-        .suggestions {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 6px;
-          margin-top: 10px;
-        }
-
-        .suggestion {
-          border: 1px solid
-            rgba(255, 255, 255, 0.06);
-          border-radius: 999px;
-          padding: 6px 8px;
-          background: rgba(
-            255,
-            255,
-            255,
-            0.025
-          );
-          color: #666;
-          font-size: 8px;
-        }
-
-        .suggestion:hover {
-          color: #bbb;
-          border-color: rgba(
-            124,
-            92,
-            255,
-            0.25
-          );
-        }
-
-        .device-grid {
-          display: grid;
-          grid-template-columns:
-            repeat(3, 1fr);
-          gap: 6px;
-        }
-
-        .device-button {
-          height: 52px;
-          border: 1px solid
-            rgba(255, 255, 255, 0.06);
-          border-radius: 9px;
-          background: rgba(
-            255,
-            255,
-            255,
-            0.025
-          );
-          color: #666;
-          font-size: 9px;
-          font-weight: 700;
-        }
-
-        .device-button.active {
-          color: #c5bdff;
-          border-color: rgba(
-            124,
-            92,
-            255,
-            0.3
-          );
-          background: rgba(
-            124,
-            92,
-            255,
-            0.08
-          );
-        }
-
-        .history-actions {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 6px;
-        }
-
-        .history-button {
-          height: 34px;
-          border: 1px solid
-            rgba(255, 255, 255, 0.06);
-          border-radius: 8px;
-          background: rgba(
-            255,
-            255,
-            255,
-            0.025
-          );
-          color: #777;
-          font-size: 9px;
-          font-weight: 700;
-        }
-
-        .history-button:disabled {
-          opacity: 0.25;
-          cursor: not-allowed;
-        }
-
-        .sidebar-footer {
-          margin-top: auto;
-          padding: 15px 17px;
-          color: #444;
-          font-size: 8px;
-          line-height: 1.6;
-        }
-
-        .editor-workspace {
-          flex: 1;
-          min-width: 0;
-          min-height: 0;
-          display: flex;
-          flex-direction: column;
-          background: #111114;
-        }
-
-        .workspace-toolbar {
-          height: 48px;
-          flex: 0 0 48px;
-          padding: 0 13px;
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          border-bottom: 1px solid
-            rgba(255, 255, 255, 0.06);
-          background: #0c0c0f;
-        }
-
-        .workspace-left,
-        .workspace-right {
-          display: flex;
-          align-items: center;
-          gap: 5px;
-        }
-
-        .workspace-button {
-          height: 29px;
-          padding: 0 9px;
-          border: 1px solid
-            rgba(255, 255, 255, 0.06);
-          border-radius: 7px;
-          background: rgba(
-            255,
-            255,
-            255,
-            0.025
-          );
-          color: #777;
-          font-size: 9px;
-          font-weight: 700;
-        }
-
-        .workspace-button:hover {
-          color: white;
-        }
-
-        .workspace-button.active {
-          color: #c0b7ff;
-          border-color: rgba(
-            124,
-            92,
-            255,
-            0.2
-          );
-          background: rgba(
-            124,
-            92,
-            255,
-            0.06
-          );
-        }
-
-        .preview-area {
-          flex: 1;
-          min-height: 0;
-          overflow: auto;
-          display: flex;
-          justify-content: center;
-          align-items: flex-start;
-          padding: 25px;
-          background:
-            radial-gradient(
-              circle at center,
-              rgba(
-                124,
-                92,
-                255,
-                0.035
-              ),
-              transparent 40%
-            ),
-            #101012;
-        }
-
-        .preview-frame {
-          min-height: 700px;
-          flex-shrink: 0;
-          overflow: hidden;
-          background: white;
-          border-radius: 8px;
-          box-shadow:
-            0 30px 80px
-              rgba(0, 0, 0, 0.45),
-            0 0 0 1px
-              rgba(255, 255, 255, 0.08);
-          transition:
-            width 0.25s ease;
-        }
-
-        .preview-frame.full-width {
-          width: 100%;
-        }
-
-        .preview-frame iframe {
-          display: block;
-          width: 100%;
-          min-height: 700px;
-          height: calc(
-            100vh - 137px
-          );
-          border: 0;
-          background: white;
-        }
-
-        .code-area {
-          flex: 1;
-          min-height: 0;
-          display: flex;
-          flex-direction: column;
-          padding: 14px;
-          background: #0d0d10;
-        }
-
-        .code-editor {
-          flex: 1;
-          min-height: 0;
-          width: 100%;
-          resize: none;
-          outline: none;
-          border: 1px solid
-            rgba(255, 255, 255, 0.07);
-          border-radius: 9px;
-          padding: 15px;
-          background: #08080a;
-          color: #d7d7d9;
-          font-family:
-            "SFMono-Regular",
-            Consolas,
-            "Liberation Mono",
-            monospace;
-          font-size: 11px;
-          line-height: 1.65;
-          tab-size: 2;
-        }
-
-        .code-actions {
-          display: flex;
-          align-items: center;
-          justify-content: flex-end;
-          gap: 7px;
-          margin-top: 9px;
-        }
-
-        .error-box {
-          position: fixed;
-          left: 330px;
-          right: 20px;
-          bottom: 20px;
-          z-index: 100;
-          padding: 11px 14px;
-          border: 1px solid
-            rgba(255, 75, 75, 0.2);
-          border-radius: 9px;
-          background: rgba(
-            35,
-            10,
-            12,
-            0.96
-          );
-          color: #ff9b9b;
-          font-size: 10px;
-          box-shadow:
-            0 15px 40px
-              rgba(0, 0, 0, 0.45);
-        }
-
-        .saved-indicator {
-          color: #86dca2;
-          font-size: 9px;
-          font-weight: 700;
-        }
-
-        @media (max-width: 900px) {
-          .editor-sidebar {
-            width: 260px;
-            flex-basis: 260px;
-          }
-
-          .topbar-center {
-            display: none;
-          }
-
-          .credit-pill {
-            display: none;
-          }
-
-          .error-box {
-            left: 275px;
-          }
-        }
-
-        @media (max-width: 700px) {
-          .editor-topbar {
-            padding: 0 10px;
-          }
-
-          .editor-sidebar {
-            display: none;
-          }
-
-          .workspace-toolbar {
-            padding: 0 8px;
-          }
-
-          .preview-area {
-            padding: 10px;
-          }
-
-          .preview-frame {
-            min-height: 600px;
-          }
-
-          .preview-frame iframe {
-            min-height: 600px;
-            height: calc(
-              100vh - 112px
-            );
-          }
-
-          .error-box {
-            left: 10px;
-            right: 10px;
-            bottom: 10px;
-          }
-
-          .project-subtitle {
-            display: none;
-          }
-
-          .toolbar-button span.hide-mobile {
-            display: none;
-          }
-        }
-      `}</style>
-
-      <header className="editor-topbar">
-        <div className="topbar-left">
-          <button
-            type="button"
-            className="toolbar-button"
-            onClick={goBack}
+    <main className="min-h-screen overflow-hidden bg-[#07080c] text-white">
+      {/* Background */}
+      <div className="pointer-events-none fixed inset-0 overflow-hidden">
+        <div className="absolute left-[15%] top-[-300px] h-[650px] w-[650px] rounded-full bg-violet-600/10 blur-[150px]" />
+
+        <div className="absolute right-[-250px] top-[25%] h-[600px] w-[600px] rounded-full bg-blue-600/10 blur-[160px]" />
+      </div>
+
+      {/* HEADER */}
+      <header className="sticky top-0 z-40 border-b border-white/[0.07] bg-[#07080c]/90 backdrop-blur-xl">
+        <div className="mx-auto flex h-[68px] max-w-[1500px] items-center justify-between gap-4 px-4 sm:px-6">
+          {/* Brand */}
+          <a
+            href="/website-builder"
+            className="flex min-w-0 items-center gap-3"
           >
-            ←
-          </button>
-
-          <div className="brand-mini">
-            K
-          </div>
-
-          <div className="project-title-wrap">
-            <div className="project-title">
-              {project?.name ||
-                "ZUQEN Website"}
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-blue-500 text-sm font-bold">
+              ◈
             </div>
 
-            <div className="project-subtitle">
-              Website Builder · AI Editor
+            <div className="min-w-0">
+              <div className="text-sm font-semibold">
+                ZUQEN AI
+              </div>
+
+              <div className="text-[8px] uppercase tracking-[0.22em] text-white/25">
+                Website Builder
+              </div>
             </div>
-          </div>
-        </div>
+          </a>
 
-        <div className="topbar-center">
-          <button
-            type="button"
-            className={`mode-button ${
-              viewMode === "preview"
-                ? "active"
-                : ""
-            }`}
-            onClick={() => {
-              setViewMode("preview");
-              setShowCodePanel(false);
-            }}
-          >
-            Preview
-          </button>
-
-          <button
-            type="button"
-            className={`mode-button ${
-              viewMode === "code"
-                ? "active"
-                : ""
-            }`}
-            onClick={() => {
-              setViewMode("code");
-              setShowCodePanel(true);
-              setCodeValue(html);
-            }}
-          >
-            Code
-          </button>
-        </div>
-
-        <div className="topbar-actions">
-          <div className="credit-pill">
-            ✦{" "}
-            {creditBalance === null
-              ? "Credits"
-              : creditBalance.toLocaleString()}
-          </div>
-
-          {saved && (
-            <span className="saved-indicator">
-              Saved
+          {/* Project */}
+          <div className="hidden min-w-0 items-center gap-2 md:flex">
+            <span className="text-[10px] uppercase tracking-[0.15em] text-white/20">
+              Project
             </span>
-          )}
 
-          <button
-            type="button"
-            className="toolbar-button"
-            onClick={copyCode}
-          >
-            Copy
-          </button>
+            <span className="max-w-[280px] truncate rounded-lg border border-white/10 bg-white/[0.03] px-3 py-1.5 text-[10px] text-white/60">
+              {project?.prompt?.slice(0, 60) ||
+                "Generated Website"}
+            </span>
+          </div>
 
-          <button
-            type="button"
-            className="toolbar-button"
-            onClick={downloadWebsite}
-          >
-            Download
-          </button>
+          {/* Actions */}
+          <div className="flex items-center gap-2">
+            <div className="hidden rounded-lg border border-amber-400/10 bg-amber-400/[0.05] px-3 py-1.5 text-[9px] font-medium text-amber-300/70 sm:block">
+              Measurement Mode
+            </div>
 
-          <button
-            type="button"
-            className="toolbar-button primary"
-            onClick={() =>
-              saveCurrentProject()
-            }
-          >
-            Save
-          </button>
+            <button
+              onClick={copyCode}
+              className="rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2.5 text-xs font-medium text-white/70 transition hover:bg-white/[0.08] hover:text-white"
+            >
+              {copied ? "Copied ✓" : "Copy Code"}
+            </button>
+
+            <button
+              onClick={downloadHtml}
+              className="hidden rounded-xl bg-white px-4 py-2.5 text-xs font-semibold text-black transition hover:bg-white/90 sm:block"
+            >
+              Export
+            </button>
+          </div>
         </div>
       </header>
 
-      <div className="editor-body">
-        <aside className="editor-sidebar">
-          <section className="sidebar-section">
-            <div className="sidebar-heading">
-              <span>
-                ✦ AI Website Editor
-              </span>
+      {/* ALERTS */}
+      <div className="relative z-30 mx-auto max-w-[1500px] px-4 pt-4 sm:px-6">
+        {error && (
+          <div className="mb-3 flex items-start gap-3 rounded-2xl border border-red-400/10 bg-red-400/[0.05] px-4 py-3 text-sm text-red-200">
+            <span className="mt-0.5 shrink-0">
+              !
+            </span>
 
-              <span className="ai-credit-note">
-                ~{AI_EDIT_CREDITS} credits
-              </span>
-            </div>
-
-            <textarea
-              className="ai-input"
-              value={aiInstruction}
-              onChange={(event) =>
-                setAiInstruction(
-                  event.target.value
-                )
-              }
-              disabled={aiLoading}
-              placeholder="Example: Make the hero section more premium, add a glowing CTA button and improve the mobile layout..."
-            />
+            <span className="flex-1 leading-6">
+              {error}
+            </span>
 
             <button
-              type="button"
-              className="ai-button"
-              onClick={() =>
-                handleAiEdit()
-              }
-              disabled={
-                aiLoading ||
-                !aiInstruction.trim() ||
-                (creditBalance !== null &&
-                  creditBalance <
-                    AI_EDIT_CREDITS)
-              }
+              onClick={() => setError("")}
+              className="text-white/35 hover:text-white"
             >
-              {aiLoading
-                ? "AI is editing..."
-                : `✦ Edit with AI · ~${AI_EDIT_CREDITS} credits`}
+              ×
             </button>
+          </div>
+        )}
 
-            <div className="suggestions">
-              <button
-                type="button"
-                className="suggestion"
-                onClick={() =>
-                  setSuggestion(
-                    "Make the website more premium and modern without removing any existing sections."
-                  )
-                }
-              >
-                Make it premium
-              </button>
+        {success && (
+          <div className="mb-3 flex items-start gap-3 rounded-2xl border border-emerald-400/10 bg-emerald-400/[0.05] px-4 py-3 text-sm text-emerald-200">
+            <span className="mt-0.5 shrink-0">
+              ✓
+            </span>
 
-              <button
-                type="button"
-                className="suggestion"
-                onClick={() =>
-                  setSuggestion(
-                    "Improve the mobile responsive layout and make every section look perfect on small screens."
-                  )
-                }
-              >
-                Improve mobile
-              </button>
+            <span className="flex-1 leading-6">
+              {success}
+            </span>
 
-              <button
-                type="button"
-                className="suggestion"
-                onClick={() =>
-                  setSuggestion(
-                    "Improve typography, spacing, buttons and visual hierarchy while keeping the current overall design."
-                  )
-                }
-              >
-                Improve design
-              </button>
+            <button
+              onClick={() => setSuccess("")}
+              className="text-white/35 hover:text-white"
+            >
+              ×
+            </button>
+          </div>
+        )}
+      </div>
 
-              <button
-                type="button"
-                className="suggestion"
-                onClick={() =>
-                  setSuggestion(
-                    "Add smooth professional animations and hover effects without making the website slow."
-                  )
-                }
-              >
-                Add animations
-              </button>
-            </div>
-          </section>
+      {/* WORKSPACE */}
+      <section className="relative z-10 mx-auto grid min-h-[calc(100vh-68px)] max-w-[1500px] gap-0 px-4 pb-6 sm:px-6 lg:grid-cols-[minmax(0,1fr)_360px]">
+        {/* PREVIEW */}
+        <section className="flex min-h-[620px] min-w-0 flex-col overflow-hidden rounded-3xl border border-white/[0.07] bg-white/[0.025] lg:mr-4">
+          {/* Preview toolbar */}
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.07] px-4 py-3 sm:px-5">
+            <div>
+              <div className="text-[9px] font-semibold uppercase tracking-[0.2em] text-white/25">
+                Live Preview
+              </div>
 
-          <section className="sidebar-section">
-            <div className="sidebar-heading">
-              <span>
-                Device Preview
-              </span>
+              <div className="mt-1 text-xs text-white/45">
+                {previewMode === "desktop"
+                  ? "Desktop"
+                  : previewMode === "tablet"
+                    ? "Tablet"
+                    : "Mobile"}{" "}
+                viewport
+              </div>
             </div>
 
-            <div className="device-grid">
+            <div className="flex items-center gap-1 rounded-xl border border-white/10 bg-black/20 p-1">
               <button
-                type="button"
-                className={`device-button ${
-                  device === "desktop"
-                    ? "active"
-                    : ""
+                onClick={() =>
+                  setPreviewMode("desktop")
+                }
+                className={`rounded-lg px-3 py-2 text-[10px] transition ${
+                  previewMode === "desktop"
+                    ? "bg-white text-black"
+                    : "text-white/40 hover:text-white"
                 }`}
-                onClick={() =>
-                  setDevice("desktop")
-                }
               >
-                🖥
-                <br />
                 Desktop
               </button>
 
               <button
-                type="button"
-                className={`device-button ${
-                  device === "tablet"
-                    ? "active"
-                    : ""
-                }`}
                 onClick={() =>
-                  setDevice("tablet")
+                  setPreviewMode("tablet")
                 }
+                className={`rounded-lg px-3 py-2 text-[10px] transition ${
+                  previewMode === "tablet"
+                    ? "bg-white text-black"
+                    : "text-white/40 hover:text-white"
+                }`}
               >
-                ▣
-                <br />
                 Tablet
               </button>
 
               <button
-                type="button"
-                className={`device-button ${
-                  device === "mobile"
-                    ? "active"
-                    : ""
-                }`}
                 onClick={() =>
-                  setDevice("mobile")
+                  setPreviewMode("mobile")
                 }
+                className={`rounded-lg px-3 py-2 text-[10px] transition ${
+                  previewMode === "mobile"
+                    ? "bg-white text-black"
+                    : "text-white/40 hover:text-white"
+                }`}
               >
-                📱
-                <br />
                 Mobile
               </button>
             </div>
-          </section>
 
-          <section className="sidebar-section">
-            <div className="sidebar-heading">
-              <span>
-                History
+            <button
+              onClick={() =>
+                setShowFullscreen(true)
+              }
+              className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-[10px] text-white/45 transition hover:bg-white/[0.07] hover:text-white"
+            >
+              Fullscreen
+            </button>
+          </div>
+
+          {/* Preview area */}
+          <div className="relative flex min-h-[560px] flex-1 items-start justify-center overflow-auto bg-[#0a0b0f] p-3 sm:p-6">
+            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(124,58,237,0.07),transparent_55%)]" />
+
+            <div
+              className="relative min-h-[500px] overflow-hidden rounded-2xl border border-white/10 bg-white shadow-2xl transition-all duration-300"
+              style={{
+                width: getPreviewWidth(),
+                maxWidth: "100%",
+              }}
+            >
+              <iframe
+                title="Generated Website Preview"
+                srcDoc={html}
+                sandbox="allow-scripts allow-forms allow-modals allow-popups"
+                className="block h-[720px] w-full border-0 bg-white"
+              />
+            </div>
+          </div>
+        </section>
+
+        {/* RIGHT PANEL */}
+        <aside className="mt-4 flex min-h-0 flex-col gap-4 lg:mt-0">
+          {/* AI EDIT */}
+          <div className="rounded-3xl border border-white/[0.07] bg-white/[0.025] p-5">
+            <div className="mb-5">
+              <div className="flex items-center gap-2">
+                <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-violet-500/10 text-violet-300">
+                  ✦
+                </div>
+
+                <div>
+                  <div className="text-sm font-semibold">
+                    AI Edit
+                  </div>
+
+                  <div className="text-[10px] text-white/30">
+                    Improve your website with natural language
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <label className="mb-2 block text-[10px] font-medium uppercase tracking-[0.15em] text-white/30">
+              What should change?
+            </label>
+
+            <textarea
+              value={editPrompt}
+              onChange={(event) =>
+                setEditPrompt(event.target.value)
+              }
+              onKeyDown={(event) => {
+                if (
+                  event.key === "Enter" &&
+                  (event.ctrlKey || event.metaKey)
+                ) {
+                  event.preventDefault();
+                  handleEdit();
+                }
+              }}
+              disabled={editing}
+              rows={7}
+              placeholder="Example: Add a dark mode toggle to the navbar and make the entire website support both light and dark themes."
+              className="w-full resize-none rounded-2xl border border-white/10 bg-black/20 p-4 text-sm leading-6 text-white outline-none placeholder:text-white/20 transition focus:border-violet-400/30 disabled:opacity-50"
+            />
+
+            <div className="mt-3 flex items-center justify-between">
+              <span className="text-[9px] text-white/20">
+                Ctrl + Enter to edit
               </span>
-            </div>
 
-            <div className="history-actions">
-              <button
-                type="button"
-                className="history-button"
-                onClick={undo}
-                disabled={
-                  historyIndex <= 0
-                }
-              >
-                ↶ Undo
-              </button>
-
-              <button
-                type="button"
-                className="history-button"
-                onClick={redo}
-                disabled={
-                  historyIndex >=
-                  history.length - 1
-                }
-              >
-                ↷ Redo
-              </button>
-            </div>
-          </section>
-
-          <section className="sidebar-section">
-            <div className="sidebar-heading">
-              <span>
-                Project
+              <span className="text-[9px] text-emerald-300/50">
+                No credits charged
               </span>
             </div>
 
             <button
-              type="button"
-              className="workspace-button"
-              style={{
-                width: "100%",
-              }}
-              onClick={() =>
-                saveCurrentProject()
+              onClick={handleEdit}
+              disabled={
+                editing ||
+                !editPrompt.trim()
               }
+              className="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-500 to-blue-500 py-3.5 text-sm font-semibold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-30"
             >
-              ◈ Save to My Drive
+              {editing ? (
+                <>
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                  Editing Website...
+                </>
+              ) : (
+                <>
+                  <span>✦</span>
+                  Apply AI Edit
+                </>
+              )}
             </button>
+          </div>
 
-            <button
-              type="button"
-              className="workspace-button"
-              style={{
-                width: "100%",
-                marginTop: 6,
-              }}
-              onClick={() =>
-                setError(
-                  "Cloud Drive integration coming soon."
-                )
-              }
-            >
-              ☁ Save to ZUQEN AI
-            </button>
-          </section>
+          {/* USAGE */}
+          <div className="rounded-3xl border border-white/[0.07] bg-white/[0.025] p-5">
+            <div className="mb-4 flex items-center justify-between">
+              <div>
+                <div className="text-[9px] font-semibold uppercase tracking-[0.2em] text-white/25">
+                  Gemini Usage
+                </div>
 
-          <div className="sidebar-footer">
-            ZUQEN AI Website Builder
-            <br />
-            AI edits use your ZUQEN credit
-            balance.
+                <div className="mt-1 text-xs text-white/35">
+                  Latest edit request
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-amber-400/10 bg-amber-400/[0.04] px-2 py-1 text-[8px] text-amber-300/60">
+                TEST
+              </div>
+            </div>
+
+            {usage ? (
+              <div className="grid grid-cols-2 gap-2">
+                <div className="rounded-xl border border-white/[0.06] bg-black/15 p-3">
+                  <div className="text-[9px] text-white/25">
+                    Input
+                  </div>
+
+                  <div className="mt-1 text-sm font-semibold">
+                    {formatNumber(
+                      usage.promptTokens
+                    )}
+                  </div>
+
+                  <div className="mt-1 text-[8px] text-white/20">
+                    tokens
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-white/[0.06] bg-black/15 p-3">
+                  <div className="text-[9px] text-white/25">
+                    Output
+                  </div>
+
+                  <div className="mt-1 text-sm font-semibold">
+                    {formatNumber(
+                      usage.outputTokens
+                    )}
+                  </div>
+
+                  <div className="mt-1 text-[8px] text-white/20">
+                    tokens
+                  </div>
+                </div>
+
+                <div className="col-span-2 rounded-xl border border-violet-400/10 bg-violet-400/[0.04] p-3">
+                  <div className="text-[9px] text-white/30">
+                    Total Gemini Tokens
+                  </div>
+
+                  <div className="mt-1 text-lg font-semibold text-violet-200">
+                    {formatNumber(
+                      usage.totalTokens
+                    )}
+                  </div>
+                </div>
+
+                {(usage.thoughtsTokens ||
+                  usage.cachedTokens) ? (
+                  <div className="col-span-2 grid grid-cols-2 gap-2">
+                    <div className="rounded-xl border border-white/[0.06] bg-black/15 p-3">
+                      <div className="text-[9px] text-white/25">
+                        Thinking
+                      </div>
+
+                      <div className="mt-1 text-xs font-medium">
+                        {formatNumber(
+                          usage.thoughtsTokens || 0
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-white/[0.06] bg-black/15 p-3">
+                      <div className="text-[9px] text-white/25">
+                        Cached
+                      </div>
+
+                      <div className="mt-1 text-xs font-medium">
+                        {formatNumber(
+                          usage.cachedTokens || 0
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <div className="rounded-2xl border border-white/[0.06] bg-black/15 p-4">
+                <div className="text-xs text-white/35">
+                  No edit usage recorded yet.
+                </div>
+
+                <div className="mt-2 text-[9px] leading-5 text-white/20">
+                  Run exactly one edit to measure the
+                  actual Gemini token usage.
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* PROJECT ACTIONS */}
+          <div className="rounded-3xl border border-white/[0.07] bg-white/[0.025] p-5">
+            <div className="mb-4 text-[9px] font-semibold uppercase tracking-[0.2em] text-white/25">
+              Project
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => setShowCode(true)}
+                className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3 text-[10px] text-white/50 transition hover:bg-white/[0.07] hover:text-white"
+              >
+                View Code
+              </button>
+
+              <button
+                onClick={resetProject}
+                disabled={editing}
+                className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3 text-[10px] text-white/50 transition hover:bg-white/[0.07] hover:text-white disabled:opacity-30"
+              >
+                Reset
+              </button>
+
+              <button
+                onClick={downloadHtml}
+                className="col-span-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3 text-[10px] text-white/50 transition hover:bg-white/[0.07] hover:text-white"
+              >
+                Export HTML
+              </button>
+            </div>
+          </div>
+
+          {/* TESTING NOTICE */}
+          <div className="rounded-3xl border border-amber-400/10 bg-amber-400/[0.035] p-5">
+            <div className="flex items-start gap-3">
+              <div className="mt-0.5 text-amber-300">
+                ◉
+              </div>
+
+              <div>
+                <div className="text-xs font-medium text-amber-200/80">
+                  Measurement test
+                </div>
+
+                <p className="mt-2 text-[10px] leading-5 text-amber-100/35">
+                  This edit is intentionally running
+                  without ZUQEN credit deduction. The
+                  purpose is to measure the real Gemini
+                  token usage before the final credit
+                  conversion is implemented.
+                </p>
+              </div>
+            </div>
           </div>
         </aside>
+      </section>
 
-        <section className="editor-workspace">
-          <div className="workspace-toolbar">
-            <div className="workspace-left">
-              <button
-                type="button"
-                className={`workspace-button ${
-                  viewMode ===
-                  "preview"
-                    ? "active"
-                    : ""
-                }`}
-                onClick={() => {
-                  setViewMode(
-                    "preview"
-                  );
-                  setShowCodePanel(
-                    false
-                  );
-                }}
-              >
-                Preview
-              </button>
+      {/* CODE MODAL */}
+      {showCode && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
+          <div className="flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-3xl border border-white/10 bg-[#0c0d12] shadow-2xl">
+            <div className="flex items-center justify-between border-b border-white/[0.07] px-5 py-4">
+              <div>
+                <div className="text-sm font-semibold">
+                  Website HTML
+                </div>
 
-              <button
-                type="button"
-                className={`workspace-button ${
-                  viewMode === "code"
-                    ? "active"
-                    : ""
-                }`}
-                onClick={() => {
-                  setViewMode("code");
-                  setShowCodePanel(
-                    true
-                  );
-                  setCodeValue(html);
-                }}
-              >
-                &lt;/&gt; Code
-              </button>
+                <div className="mt-1 text-[9px] text-white/25">
+                  {formatNumber(html.length)} characters
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={copyCode}
+                  className="rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-[10px] text-white/50 hover:text-white"
+                >
+                  {copied
+                    ? "Copied ✓"
+                    : "Copy"}
+                </button>
+
+                <button
+                  onClick={() => setShowCode(false)}
+                  className="rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white/50 hover:text-white"
+                >
+                  ×
+                </button>
+              </div>
             </div>
 
-            <div className="workspace-right">
-              <button
-                type="button"
-                className="workspace-button"
-                onClick={() =>
-                  setFullscreen(
-                    (value) => !value
-                  )
-                }
-              >
-                {fullscreen
-                  ? "Exit Fullscreen"
-                  : "Fullscreen"}
-              </button>
+            <pre className="min-h-0 flex-1 overflow-auto p-5 text-[10px] leading-5 text-white/50">
+              <code>{html}</code>
+            </pre>
+          </div>
+        </div>
+      )}
 
-              <button
-                type="button"
-                className="workspace-button"
-                onClick={() =>
-                  setPreviewKey(
-                    (value) =>
-                      value + 1
-                  )
-                }
-              >
-                ↻ Refresh
-              </button>
+      {/* FULLSCREEN PREVIEW */}
+      {showFullscreen && (
+        <div className="fixed inset-0 z-[110] flex flex-col bg-black">
+          <div className="flex h-14 shrink-0 items-center justify-between border-b border-white/10 bg-[#090a0e] px-4">
+            <div className="flex items-center gap-2">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-violet-500 to-blue-500 text-xs font-bold">
+                ◈
+              </div>
+
+              <span className="text-xs font-medium text-white/70">
+                Website Preview
+              </span>
             </div>
+
+            <button
+              onClick={() =>
+                setShowFullscreen(false)
+              }
+              className="rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2 text-xs text-white/60 hover:text-white"
+            >
+              Close
+            </button>
           </div>
 
-          {viewMode === "preview" &&
-          !showCodePanel ? (
-            <div className="preview-area">
-              <div
-                className={`preview-frame ${
-                  device === "desktop"
-                    ? "full-width"
-                    : ""
-                }`}
-                style={
-                  previewContainerStyle
-                }
-              >
-                <iframe
-                  key={previewKey}
-                  ref={iframeRef}
-                  title="ZUQEN Website Preview"
-                  srcDoc={html}
-                  sandbox="allow-scripts allow-forms allow-modals allow-popups"
-                />
-              </div>
-            </div>
-          ) : (
-            <div className="code-area">
-              <textarea
-                className="code-editor"
-                value={codeValue}
-                onChange={(event) =>
-                  setCodeValue(
-                    event.target.value
-                  )
-                }
-                spellCheck={false}
-              />
-
-              <div className="code-actions">
-                <button
-                  type="button"
-                  className="workspace-button"
-                  onClick={resetCode}
-                >
-                  Reset
-                </button>
-
-                <button
-                  type="button"
-                  className="workspace-button primary"
-                  onClick={
-                    applyCodeChanges
-                  }
-                >
-                  Apply Changes
-                </button>
-              </div>
-            </div>
-          )}
-        </section>
-      </div>
-
-      {error && (
-        <div className="error-box">
-          {error}
+          <div className="min-h-0 flex-1 bg-white">
+            <iframe
+              title="Fullscreen Website Preview"
+              srcDoc={html}
+              sandbox="allow-scripts allow-forms allow-modals allow-popups"
+              className="h-full w-full border-0"
+            />
+          </div>
         </div>
       )}
     </main>
