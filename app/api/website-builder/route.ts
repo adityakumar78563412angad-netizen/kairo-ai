@@ -1,680 +1,490 @@
-import { NextResponse } from "next/server";
-import { GoogleGenAI } from "@google/genai";
-
+import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabaseClient } from "@/lib/supabase-server";
-import { recordProviderUsage } from "@/lib/provider-usage";
-
-const MODEL = "gemini-3.6-flash";
 
 const FEATURE_KEY = "website_builder";
+const PROVIDER = "gemini";
+const MODEL = "gemini-3.6-flash";
 
 const TOKENS_PER_CREDIT = 20_000;
-
-const MAX_GENERATE_PROMPT_LENGTH = 10_000;
-const MAX_EDIT_HTML_LENGTH = 500_000;
-const MAX_EDIT_INSTRUCTION_LENGTH = 5_000;
-
 const MAX_OUTPUT_TOKENS = 32_000;
+const MAX_INPUT_CHARS = 500_000;
+
+type JsonObject = Record<string, unknown>;
 
 type GeminiUsage = {
-  promptTokens: number;
-  outputTokens: number;
-  totalTokens: number;
-  thoughtsTokens: number;
-  cachedTokens: number;
+  promptTokenCount?: number;
+  candidatesTokenCount?: number;
+  totalTokenCount?: number;
 };
 
-type ReservationResult = {
-  success?: boolean;
-  code?: string;
-  reservationId?: string;
-  provider?: string;
-  feature?: string;
-  reserved?: number;
-  previousBalance?: number;
-  newBalance?: number;
-  message?: string;
+type GeminiCandidate = {
+  content?: {
+    parts?: Array<{
+      text?: string;
+    }>;
+  };
+  finishReason?: string;
 };
 
-type SettlementResult = {
-  success?: boolean;
-  code?: string;
-  reservationId?: string;
-  reserved?: number;
-  used?: number;
-  refunded?: number;
-  newBalance?: number;
-  status?: string;
-  message?: string;
+type GeminiResponse = {
+  candidates?: GeminiCandidate[];
+  usageMetadata?: GeminiUsage;
+  error?: {
+    message?: string;
+    code?: number;
+    status?: string;
+  };
 };
 
-type RefundResult = {
-  success?: boolean;
-  code?: string;
-  reservationId?: string;
-  refunded?: number;
-  newBalance?: number;
-  status?: string;
-  message?: string;
-};
+function response(body: JsonObject, status = 200) {
+  return NextResponse.json(body, { status });
+}
 
-const WEBSITE_BUILDER_SYSTEM_INSTRUCTION = `
-You are ZUQEN AI Website Builder.
-
-Your task is to generate or edit a complete production-quality website.
-
-STRICT OUTPUT RULES:
-
-1. Return ONLY complete standalone HTML.
-2. Do NOT use Markdown.
-3. Do NOT wrap the HTML in triple backticks.
-4. The response MUST contain:
-   <!DOCTYPE html>
-   <html>
-   <head>
-   <body>
-5. The response MUST end with:
-   </html>
-6. Never return explanations before or after the HTML.
-7. Never return partial HTML.
-8. Never intentionally truncate the website.
-9. Include all CSS and JavaScript necessary for the generated website directly inside the HTML whenever practical.
-10. The website should be responsive and work on desktop, tablet, and mobile.
-11. Create polished, modern UI with good typography, spacing, hierarchy, interactions, hover states, responsive layouts, and accessible controls.
-12. Do not reference unavailable local files.
-13. Use external assets only when they are appropriate and publicly accessible.
-14. Make the final HTML self-contained enough to preview directly inside an iframe.
-
-When editing an existing website:
-- Preserve useful existing functionality unless the user explicitly asks to remove it.
-- Apply the requested change carefully.
-- Return the ENTIRE updated HTML document.
-- Never return only a fragment or changed section.
-`;
-
-function cleanHtml(value: string) {
+function cleanHtml(value: string): string {
   let html = value.trim();
 
-  html = html.replace(/^```html\s*/i, "");
-  html = html.replace(/^```HTML\s*/i, "");
-  html = html.replace(/^```\s*/i, "");
-  html = html.replace(/\s*```$/i, "");
-
-  const doctypeIndex = html
-    .toLowerCase()
-    .indexOf("<!doctype html>");
-
-  const htmlIndex = html
-    .toLowerCase()
-    .indexOf("<html");
-
-  if (doctypeIndex >= 0) {
-    html = html.slice(doctypeIndex);
-  } else if (htmlIndex >= 0) {
-    html = html.slice(htmlIndex);
+  if (html.startsWith("```html")) {
+    html = html.slice(7);
+  } else if (html.startsWith("```")) {
+    html = html.slice(3);
   }
 
-  const closingIndex = html
-    .toLowerCase()
-    .lastIndexOf("</html>");
-
-  if (closingIndex >= 0) {
-    html = html.slice(
-      0,
-      closingIndex + "</html>".length
-    );
+  if (html.endsWith("```")) {
+    html = html.slice(0, -3);
   }
 
   return html.trim();
 }
 
-function isValidHtml(value: string) {
-  const html = cleanHtml(value).toLowerCase();
+function isValidWebsiteHtml(html: string): boolean {
+  if (!html || html.length < 100) {
+    return false;
+  }
 
-  return (
-    html.length > 20 &&
-    html.includes("<html") &&
-    html.includes("</html>") &&
-    html.includes("<head") &&
-    html.includes("<body")
-  );
+  const lower = html.toLowerCase();
+
+  const hasHtmlStructure =
+    lower.includes("<html") ||
+    lower.includes("<!doctype") ||
+    lower.includes("<body") ||
+    lower.includes("<main") ||
+    lower.includes("<section");
+
+  const hasUsefulContent =
+    lower.includes("<div") ||
+    lower.includes("<section") ||
+    lower.includes("<header") ||
+    lower.includes("<nav") ||
+    lower.includes("<main");
+
+  const looksLikeError =
+    lower.includes("i'm sorry") ||
+    lower.includes("i cannot") ||
+    lower.includes("i can't generate") ||
+    lower.includes("unable to generate");
+
+  return hasHtmlStructure && hasUsefulContent && !looksLikeError;
 }
 
-function isTruncatedHtml(value: string) {
-  const html = cleanHtml(value).toLowerCase();
-
-  if (!html) {
-    return true;
-  }
-
-  if (!html.includes("<html")) {
-    return true;
-  }
-
-  if (!html.includes("</html>")) {
-    return true;
-  }
-
-  if (
-    html.includes("<body") &&
-    !html.includes("</body>")
-  ) {
-    return true;
-  }
-
-  if (
-    html.includes("<head") &&
-    !html.includes("</head>")
-  ) {
-    return true;
-  }
-
-  return false;
+function getUsage(data: GeminiResponse): GeminiUsage {
+  return data.usageMetadata ?? {};
 }
 
-function readGeminiUsage(response: any): GeminiUsage {
-  const metadata =
-    response?.usageMetadata || {};
+function getTotalTokens(usage: GeminiUsage): number {
+  const total = Number(usage.totalTokenCount ?? 0);
 
-  const promptTokens =
-    Number(
-      metadata.promptTokenCount
-    ) || 0;
+  if (!Number.isFinite(total) || total < 0) {
+    return 0;
+  }
 
-  const outputTokens =
-    Number(
-      metadata.candidatesTokenCount
-    ) || 0;
-
-  const thoughtsTokens =
-    Number(
-      metadata.thoughtsTokenCount
-    ) || 0;
-
-  const cachedTokens =
-    Number(
-      metadata.cachedContentTokenCount
-    ) || 0;
-
-  const explicitTotal =
-    Number(
-      metadata.totalTokenCount
-    ) || 0;
-
-  const totalTokens =
-    explicitTotal > 0
-      ? explicitTotal
-      : promptTokens +
-        outputTokens +
-        thoughtsTokens;
-
-  return {
-    promptTokens,
-    outputTokens,
-    totalTokens,
-    thoughtsTokens,
-    cachedTokens,
-  };
+  return Math.ceil(total);
 }
 
-function getResponseText(response: any) {
-  if (
-    typeof response?.text === "string"
-  ) {
-    return response.text;
+function creditsFromTokens(tokens: number): number {
+  if (!Number.isFinite(tokens) || tokens <= 0) {
+    return 0;
   }
 
-  if (
-    typeof response?.text === "function"
-  ) {
-    try {
-      return response.text();
-    } catch {
-      return "";
-    }
-  }
+  return tokens / TOKENS_PER_CREDIT;
+}
 
-  const candidates =
-    response?.candidates || [];
-
-  const parts =
-    candidates?.[0]?.content?.parts || [];
-
-  return parts
-    .map((part: any) =>
-      typeof part?.text === "string"
-        ? part.text
-        : ""
-    )
-    .join("");
+function roundCredits(value: number): number {
+  return Math.round(value * 10000) / 10000;
 }
 
 /**
- * Estimate the maximum possible credit reservation
- * before calling Gemini.
+ * Temporary reservation only.
  *
- * This is intentionally a temporary hold.
- * Final billing always uses Gemini's actual
+ * This is NOT the final charge.
+ * Final billing always comes from Gemini's actual
  * usageMetadata.totalTokenCount.
  */
-function estimateReservationCredits(
-  inputTextLength: number
-) {
-  /*
-   * Gemini tokenization is not based on a fixed
-   * characters/token ratio. We therefore use a
-   * conservative reservation estimate only to make
-   * sure the final actual usage can be settled.
-   *
-   * The reservation is returned/refunded according
-   * to the settlement result.
-   */
-
-  const estimatedInputTokens =
-    Math.ceil(
-      inputTextLength / 3.5
-    );
+function estimateReservationCredits(prompt: string): number {
+  const estimatedInputTokens = Math.ceil(prompt.length / 3.5);
 
   const estimatedTotalTokens =
-    Math.ceil(
-      (estimatedInputTokens +
-        MAX_OUTPUT_TOKENS) *
-        1.15
-    );
+    estimatedInputTokens + MAX_OUTPUT_TOKENS;
+
+  const safetyFactor = 1.2;
+
+  const estimatedWithSafety =
+    Math.ceil(estimatedTotalTokens * safetyFactor);
 
   const credits =
-    estimatedTotalTokens /
-    TOKENS_PER_CREDIT;
+    estimatedWithSafety / TOKENS_PER_CREDIT;
 
-  return Math.max(
-    0.01,
-    Number(credits.toFixed(4))
+  return Math.max(0.01, roundCredits(credits));
+}
+
+async function getAuthenticatedUser(supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>) {
+  const {
+    data: { user },
+    error,
+  } = await supabase.auth.getUser();
+
+  if (error || !user) {
+    return null;
+  }
+
+  return user;
+}
+
+async function getCurrentBalance(
+  supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>,
+  userId: string
+): Promise<number> {
+  const { data, error } = await supabase
+    .from("feature_credit_balances")
+    .select("balance")
+    .eq("user_id", userId)
+    .eq("feature_key", FEATURE_KEY)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const balance = Number(data?.balance ?? 0);
+
+  if (!Number.isFinite(balance)) {
+    return 0;
+  }
+
+  return balance;
+}
+
+async function reserveCredits(
+  supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>,
+  userId: string,
+  amount: number,
+  providerRequestId: string,
+  referenceId: string,
+  metadata: JsonObject
+) {
+  const { data, error } = await supabase.rpc(
+    "reserve_feature_credits",
+    {
+      p_user_id: userId,
+      p_feature_key: FEATURE_KEY,
+      p_amount: amount,
+      p_provider_request_id: providerRequestId,
+      p_reference_id: referenceId,
+      p_metadata: metadata,
+    }
   );
-}
-
-function getProviderRequestId() {
-  return crypto.randomUUID();
-}
-
-async function reserveCredits({
-  supabase,
-  userId,
-  amount,
-  providerRequestId,
-  referenceId,
-  operation,
-}: {
-  supabase: any;
-  userId: string;
-  amount: number;
-  providerRequestId: string;
-  referenceId: string;
-  operation: string;
-}) {
-  const { data, error } =
-    await supabase.rpc(
-      "reserve_feature_credits",
-      {
-        p_user_id: userId,
-        p_feature_key: FEATURE_KEY,
-        p_amount: amount,
-        p_provider_request_id:
-          providerRequestId,
-        p_reference_id: referenceId,
-        p_metadata: {
-          operation,
-          billing_basis:
-            "gemini_total_tokens",
-          tokens_per_credit:
-            TOKENS_PER_CREDIT,
-          reservation_amount:
-            amount,
-        },
-      }
-    );
 
   if (error) {
-    console.error(
-      "Credit reservation RPC error:",
-      error
-    );
-
-    return {
-      success: false,
-      error: error.message,
-      result: null as ReservationResult | null,
-    };
+    throw new Error(error.message);
   }
 
-  const result =
-    (data || {}) as ReservationResult;
-
-  if (!result.success) {
-    return {
-      success: false,
-      error:
-        result.message ||
-        result.code ||
-        "Unable to reserve Website Builder credits.",
-      result,
-    };
-  }
-
-  return {
-    success: true,
-    error: null,
-    result,
+  return data as {
+    success?: boolean;
+    code?: string;
+    reservationId?: string;
+    reservation_id?: string;
+    provider?: string;
+    feature?: string;
+    reserved?: number;
+    previousBalance?: number;
+    newBalance?: number;
+    message?: string;
   };
 }
 
-async function settleCredits({
-  supabase,
-  reservationId,
-  actualCredits,
-  providerRequestId,
-  referenceId,
-  operation,
-  usage,
-}: {
-  supabase: any;
-  reservationId: string;
-  actualCredits: number;
-  providerRequestId: string;
-  referenceId: string;
-  operation: string;
+async function settleCredits(
+  supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>,
+  reservationId: string,
+  actualAmount: number,
+  providerRequestId: string,
+  description: string,
+  referenceId: string,
+  metadata: JsonObject
+) {
+  const { data, error } = await supabase.rpc(
+    "settle_feature_credit_reservation",
+    {
+      p_reservation_id: reservationId,
+      p_actual_amount: actualAmount,
+      p_provider_request_id: providerRequestId,
+      p_description: description,
+      p_reference_id: referenceId,
+      p_metadata: metadata,
+    }
+  );
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data as {
+    success?: boolean;
+    code?: string;
+    reservationId?: string;
+    reserved?: number;
+    used?: number;
+    refunded?: number;
+    newBalance?: number;
+    status?: string;
+    message?: string;
+  };
+}
+
+async function refundCredits(
+  supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>,
+  reservationId: string,
+  providerRequestId: string,
+  description: string,
+  referenceId: string,
+  metadata: JsonObject
+) {
+  const { data, error } = await supabase.rpc(
+    "refund_feature_credit_reservation",
+    {
+      p_reservation_id: reservationId,
+      p_provider_request_id: providerRequestId,
+      p_description: description,
+      p_reference_id: referenceId,
+      p_metadata: metadata,
+    }
+  );
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data as {
+    success?: boolean;
+    code?: string;
+    reservationId?: string;
+    refunded?: number;
+    newBalance?: number;
+    status?: string;
+    message?: string;
+  };
+}
+
+function createProviderRequestId(): string {
+  return `website-builder-${crypto.randomUUID()}`;
+}
+
+function createReferenceId(): string {
+  return `website-builder-${crypto.randomUUID()}`;
+}
+
+function buildGeminiPrompt(
+  action: string,
+  prompt: string,
+  existingHtml?: string
+): string {
+  const baseInstructions = `
+You are the website generation engine for ZUQEN AI.
+
+Generate a complete, polished, production-quality website as a SINGLE HTML document.
+
+Requirements:
+- Return ONLY the HTML document.
+- Do not use Markdown.
+- Do not wrap the answer in triple backticks.
+- Include <!DOCTYPE html>.
+- Include <html>, <head>, and <body>.
+- Include responsive CSS inside <style>.
+- Use modern, professional UI design.
+- Make the website fully responsive on desktop, tablet and mobile.
+- Use semantic HTML.
+- Include accessible buttons, links, labels and navigation.
+- Do not explain the code.
+- Do not mention Gemini.
+- Do not mention token usage.
+- Do not mention ZUQEN credits.
+- Do not return JSON.
+- Do not return commentary outside the HTML document.
+
+You may use:
+- HTML
+- CSS
+- Vanilla JavaScript
+- Google Fonts through normal <link> tags
+- Public image URLs when genuinely useful
+
+Do NOT depend on a build system, npm package, React, Next.js, Tailwind, or external JavaScript libraries.
+
+All important visual styling must be contained in this HTML document.
+`;
+
+  if (action === "edit" && existingHtml) {
+    return `
+${baseInstructions}
+
+The user wants to EDIT an existing website.
+
+User request:
+${prompt}
+
+Existing website HTML:
+${existingHtml}
+
+Modify the existing website according to the user's request.
+
+Preserve existing useful content and structure unless the user explicitly asks to remove or replace it.
+
+Return the COMPLETE updated HTML document.
+`;
+  }
+
+  return `
+${baseInstructions}
+
+Create a new website based on this user request:
+
+${prompt}
+
+Return the COMPLETE HTML document.
+`;
+}
+
+async function generateWithGemini(
+  prompt: string,
+  apiKey: string
+): Promise<{
+  html: string;
   usage: GeminiUsage;
-}) {
-  const { data, error } =
-    await supabase.rpc(
-      "settle_feature_credit_reservation",
+  finishReason: string | null;
+}> {
+  const endpoint =
+    `https://generativelanguage.googleapis.com/v1beta/models/` +
+    `${MODEL}:generateContent?key=${encodeURIComponent(apiKey)}`;
+
+  const requestBody = {
+    contents: [
       {
-        p_reservation_id:
-          reservationId,
-        p_actual_amount:
-          actualCredits,
-        p_provider_request_id:
-          providerRequestId,
-        p_description:
-          `Website Builder ${operation} - Gemini actual token usage`,
-        p_reference_id:
-          referenceId,
-        p_metadata: {
-          operation,
-          billing_basis:
-            "gemini_total_tokens",
-          tokens_per_credit:
-            TOKENS_PER_CREDIT,
-          prompt_tokens:
-            usage.promptTokens,
-          output_tokens:
-            usage.outputTokens,
-          thoughts_tokens:
-            usage.thoughtsTokens,
-          cached_tokens:
-            usage.cachedTokens,
-          total_tokens:
-            usage.totalTokens,
-          actual_credits:
-            actualCredits,
-        },
-      }
-    );
-
-  if (error) {
-    console.error(
-      "Credit settlement RPC error:",
-      error
-    );
-
-    return {
-      success: false,
-      error: error.message,
-      result: null as SettlementResult | null,
-    };
-  }
-
-  const result =
-    (data || {}) as SettlementResult;
-
-  if (!result.success) {
-    return {
-      success: false,
-      error:
-        result.message ||
-        result.code ||
-        "Unable to settle Website Builder credits.",
-      result,
-    };
-  }
-
-  return {
-    success: true,
-    error: null,
-    result,
-  };
-}
-
-async function refundCredits({
-  supabase,
-  reservationId,
-  providerRequestId,
-  referenceId,
-  operation,
-  reason,
-}: {
-  supabase: any;
-  reservationId: string;
-  providerRequestId: string;
-  referenceId: string;
-  operation: string;
-  reason: string;
-}) {
-  const { data, error } =
-    await supabase.rpc(
-      "refund_feature_credit_reservation",
-      {
-        p_reservation_id:
-          reservationId,
-        p_provider_request_id:
-          providerRequestId,
-        p_description:
-          `Website Builder ${operation} - reservation refunded`,
-        p_reference_id:
-          referenceId,
-        p_metadata: {
-          operation,
-          reason,
-          billing_basis:
-            "gemini_total_tokens",
-          tokens_per_credit:
-            TOKENS_PER_CREDIT,
-        },
-      }
-    );
-
-  if (error) {
-    console.error(
-      "Credit refund RPC error:",
-      error
-    );
-
-    return {
-      success: false,
-      error: error.message,
-      result: null as RefundResult | null,
-    };
-  }
-
-  const result =
-    (data || {}) as RefundResult;
-
-  if (!result.success) {
-    return {
-      success: false,
-      error:
-        result.message ||
-        result.code ||
-        "Unable to refund Website Builder credits.",
-      result,
-    };
-  }
-
-  return {
-    success: true,
-    error: null,
-    result,
-  };
-}
-
-async function saveProviderUsage({
-  userId,
-  operation,
-  usage,
-  outputValid,
-}: {
-  userId: string;
-  operation: string;
-  usage: GeminiUsage;
-  outputValid: boolean;
-}) {
-  try {
-    await recordProviderUsage({
-      userId,
-      provider: "gemini",
-      feature: FEATURE_KEY,
-      operation,
-      model: MODEL,
-      promptTokens:
-        usage.promptTokens,
-      outputTokens:
-        usage.outputTokens,
-      totalTokens:
-        usage.totalTokens,
-      thoughtsTokens:
-        usage.thoughtsTokens,
-      cachedTokens:
-        usage.cachedTokens,
-      status: outputValid
-        ? "success"
-        : "failed",
-      metadata: {
-        billingBasis:
-          "gemini_total_tokens",
-        tokensPerCredit:
-          TOKENS_PER_CREDIT,
-        outputValid,
+        role: "user",
+        parts: [
+          {
+            text: prompt,
+          },
+        ],
       },
-    });
-  } catch (error) {
-    console.error(
-      "Provider usage recording failed:",
-      error
+    ],
+    generationConfig: {
+      temperature: 0.7,
+      maxOutputTokens: MAX_OUTPUT_TOKENS,
+    },
+  };
+
+  const providerResponse = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(requestBody),
+    cache: "no-store",
+  });
+
+  let data: GeminiResponse;
+
+  try {
+    data = (await providerResponse.json()) as GeminiResponse;
+  } catch {
+    throw new Error(
+      `Gemini returned an invalid response (${providerResponse.status}).`
     );
   }
+
+  if (!providerResponse.ok) {
+    const providerMessage =
+      data.error?.message ||
+      `Gemini request failed with status ${providerResponse.status}.`;
+
+    throw new Error(providerMessage);
+  }
+
+  const usage = getUsage(data);
+
+  const candidate = data.candidates?.[0];
+
+  const finishReason =
+    typeof candidate?.finishReason === "string"
+      ? candidate.finishReason
+      : null;
+
+  const parts = candidate?.content?.parts ?? [];
+
+  const text = parts
+    .map((part) => part.text ?? "")
+    .join("")
+    .trim();
+
+  const html = cleanHtml(text);
+
+  return {
+    html,
+    usage,
+    finishReason,
+  };
 }
 
-/**
- * GET current Website Builder credit balance.
- */
 export async function GET() {
   try {
-    const supabase =
-      await createServerSupabaseClient();
+    const supabase = await createServerSupabaseClient();
 
-    const {
-      data: {
-        user,
-      },
-      error: userError,
-    } = await supabase.auth.getUser();
+    const user = await getAuthenticatedUser(supabase);
 
-    if (
-      userError ||
-      !user
-    ) {
-      return NextResponse.json(
+    if (!user) {
+      return response(
         {
           success: false,
-          code: "AUTH_REQUIRED",
-          message:
-            "Please sign in to use Website Builder.",
+          code: "UNAUTHENTICATED",
+          message: "Please sign in to use Website Builder.",
         },
-        {
-          status: 401,
-        }
+        401
       );
     }
 
     if (user.is_anonymous) {
-      return NextResponse.json(
+      return response(
         {
           success: false,
           code: "SIGN_IN_REQUIRED",
           message:
-            "Website Builder requires a permanent account.",
+            "Website Builder is available only for permanent accounts. Please create an account or sign in.",
           balance: 0,
-          totalGranted: 0,
-          totalUsed: 0,
         },
-        {
-          status: 403,
-        }
+        403
       );
     }
 
-    const { data, error } =
-      await supabase
-        .from(
-          "feature_credit_balances"
-        )
-        .select(
-          "balance,total_granted,total_used"
-        )
-        .eq(
-          "user_id",
-          user.id
-        )
-        .eq(
-          "feature_key",
-          FEATURE_KEY
-        )
-        .maybeSingle();
+    const balance = await getCurrentBalance(
+      supabase,
+      user.id
+    );
 
-    if (error) {
-      console.error(
-        "Failed to load Website Builder credits:",
-        error
-      );
-
-      return NextResponse.json(
-        {
-          success: false,
-          code: "CREDIT_BALANCE_ERROR",
-          message:
-            "Unable to load Website Builder credits.",
-        },
-        {
-          status: 500,
-        }
-      );
-    }
-
-    return NextResponse.json({
+    return response({
       success: true,
       feature: FEATURE_KEY,
-      provider: "gemini",
-      tokensPerCredit:
-        TOKENS_PER_CREDIT,
-      balance:
-        Number(data?.balance) || 0,
-      totalGranted:
-        Number(
-          data?.total_granted
-        ) || 0,
-      totalUsed:
-        Number(
-          data?.total_used
-        ) || 0,
+      provider: PROVIDER,
+      balance: roundCredits(balance),
+      tokensPerCredit: TOKENS_PER_CREDIT,
+      creditUnit: "ZUQEN Website Builder Credit",
     });
   } catch (error) {
     console.error(
@@ -682,670 +492,689 @@ export async function GET() {
       error
     );
 
-    return NextResponse.json(
+    return response(
       {
         success: false,
-        code: "SERVER_ERROR",
+        code: "BALANCE_ERROR",
         message:
-          "Unable to load Website Builder credits.",
+          error instanceof Error
+            ? error.message
+            : "Unable to load Website Builder credits.",
       },
-      {
-        status: 500,
-      }
+      500
     );
   }
 }
 
-export async function POST(
-  request: Request
-) {
-  const providerRequestId =
-    getProviderRequestId();
+export async function POST(request: NextRequest) {
+  const supabase = await createServerSupabaseClient();
 
-  const referenceId =
-    `website-builder:${providerRequestId}`;
+  let reservationId: string | null = null;
 
-  let reservationId:
-    | string
-    | null = null;
+  let providerRequestId = "";
+  let referenceId = "";
 
   try {
-    const body =
-      await request.json();
+    const user = await getAuthenticatedUser(supabase);
 
-    const action =
-      body?.action;
-
-    if (
-      action !== "generate" &&
-      action !== "edit"
-    ) {
-      return NextResponse.json(
+    if (!user) {
+      return response(
         {
           success: false,
-          code: "INVALID_ACTION",
-          message:
-            "Invalid Website Builder action.",
+          code: "UNAUTHENTICATED",
+          message: "Please sign in to use Website Builder.",
         },
-        {
-          status: 400,
-        }
-      );
-    }
-
-    const supabase =
-      await createServerSupabaseClient();
-
-    const {
-      data: {
-        user,
-      },
-      error: userError,
-    } = await supabase.auth.getUser();
-
-    if (
-      userError ||
-      !user
-    ) {
-      return NextResponse.json(
-        {
-          success: false,
-          code: "AUTH_REQUIRED",
-          message:
-            "Please sign in to use Website Builder.",
-        },
-        {
-          status: 401,
-        }
+        401
       );
     }
 
     if (user.is_anonymous) {
-      return NextResponse.json(
+      return response(
         {
           success: false,
           code: "SIGN_IN_REQUIRED",
           message:
-            "Website Builder requires a permanent account.",
+            "Website Builder requires a permanent account. Please create an account or sign in.",
         },
+        403
+      );
+    }
+
+    const body = (await request.json()) as {
+      action?: string;
+      prompt?: string;
+      existingHtml?: string;
+      projectId?: string;
+    };
+
+    const action =
+      body.action === "edit"
+        ? "edit"
+        : "generate";
+
+    const prompt =
+      typeof body.prompt === "string"
+        ? body.prompt.trim()
+        : "";
+
+    const existingHtml =
+      typeof body.existingHtml === "string"
+        ? body.existingHtml.trim()
+        : "";
+
+    const projectId =
+      typeof body.projectId === "string" &&
+      body.projectId.trim().length > 0
+        ? body.projectId.trim()
+        : createReferenceId();
+
+    if (!prompt) {
+      return response(
         {
-          status: 403,
-        }
+          success: false,
+          code: "INVALID_PROMPT",
+          message:
+            "Please enter a website description or edit instruction.",
+        },
+        400
+      );
+    }
+
+    if (prompt.length > MAX_INPUT_CHARS) {
+      return response(
+        {
+          success: false,
+          code: "PROMPT_TOO_LARGE",
+          message:
+            "Your request is too large. Please shorten the prompt.",
+        },
+        400
+      );
+    }
+
+    if (
+      action === "edit" &&
+      existingHtml.length > MAX_INPUT_CHARS
+    ) {
+      return response(
+        {
+          success: false,
+          code: "WEBSITE_TOO_LARGE",
+          message:
+            "The existing website is too large to edit in one request.",
+        },
+        400
       );
     }
 
     const apiKey =
-      process.env.GEMINI_API_KEY;
+      process.env.GEMINI_API_KEY ||
+      process.env.GOOGLE_GEMINI_API_KEY;
 
     if (!apiKey) {
-      console.error(
-        "GEMINI_API_KEY is missing."
-      );
-
-      return NextResponse.json(
+      return response(
         {
           success: false,
           code: "GEMINI_API_KEY_MISSING",
           message:
-            "Gemini API is not configured.",
+            "Gemini API key is not configured on the server.",
         },
-        {
-          status: 500,
-        }
+        500
       );
     }
 
-    const ai =
-      new GoogleGenAI({
-        apiKey,
-      });
+    const geminiPrompt = buildGeminiPrompt(
+      action,
+      prompt,
+      existingHtml || undefined
+    );
 
-    let operation = action;
-    let inputLength = 0;
+    /*
+     * Reserve enough credits before calling Gemini.
+     *
+     * The reservation is only a temporary hold.
+     * The final charge is calculated from the real
+     * Gemini usageMetadata.totalTokenCount.
+     */
+    const estimatedCredits =
+      estimateReservationCredits(geminiPrompt);
 
-    let prompt = "";
+    const currentBalance =
+      await getCurrentBalance(
+        supabase,
+        user.id
+      );
 
-    if (action === "generate") {
-      const userPrompt =
-        typeof body?.prompt ===
-        "string"
-          ? body.prompt.trim()
-          : "";
-
-      if (!userPrompt) {
-        return NextResponse.json(
-          {
-            success: false,
-            code: "PROMPT_REQUIRED",
-            message:
-              "Please describe the website you want to build.",
-          },
-          {
-            status: 400,
-          }
-        );
-      }
-
-      if (
-        userPrompt.length >
-        MAX_GENERATE_PROMPT_LENGTH
-      ) {
-        return NextResponse.json(
-          {
-            success: false,
-            code: "PROMPT_TOO_LONG",
-            message: `Website prompt must be ${MAX_GENERATE_PROMPT_LENGTH.toLocaleString()} characters or less.`,
-          },
-          {
-            status: 400,
-          }
-        );
-      }
-
-      inputLength =
-        userPrompt.length;
-
-      prompt = `
-${WEBSITE_BUILDER_SYSTEM_INSTRUCTION}
-
-USER WEBSITE REQUEST:
-
-${userPrompt}
-
-Generate the complete website now.
-Return ONLY the final standalone HTML document.
-`;
-    }
-
-    if (action === "edit") {
-      const htmlInput =
-        typeof body?.html ===
-        "string"
-          ? body.html.trim()
-          : "";
-
-      const instruction =
-        typeof body?.instruction ===
-        "string"
-          ? body.instruction.trim()
-          : "";
-
-      if (!htmlInput) {
-        return NextResponse.json(
-          {
-            success: false,
-            code: "HTML_REQUIRED",
-            message:
-              "Website HTML is required.",
-          },
-          {
-            status: 400,
-          }
-        );
-      }
-
-      if (
-        !isValidHtml(htmlInput)
-      ) {
-        return NextResponse.json(
-          {
-            success: false,
-            code: "INVALID_HTML",
-            message:
-              "The supplied website HTML is invalid or incomplete.",
-          },
-          {
-            status: 400,
-          }
-        );
-      }
-
-      if (!instruction) {
-        return NextResponse.json(
-          {
-            success: false,
-            code: "INSTRUCTION_REQUIRED",
-            message:
-              "Please describe what you want to change.",
-          },
-          {
-            status: 400,
-          }
-        );
-      }
-
-      if (
-        htmlInput.length >
-        MAX_EDIT_HTML_LENGTH
-      ) {
-        return NextResponse.json(
-          {
-            success: false,
-            code: "HTML_TOO_LONG",
-            message: `Website HTML must be ${MAX_EDIT_HTML_LENGTH.toLocaleString()} characters or less.`,
-          },
-          {
-            status: 400,
-          }
-        );
-      }
-
-      if (
-        instruction.length >
-        MAX_EDIT_INSTRUCTION_LENGTH
-      ) {
-        return NextResponse.json(
-          {
-            success: false,
-            code: "INSTRUCTION_TOO_LONG",
-            message: `Edit instruction must be ${MAX_EDIT_INSTRUCTION_LENGTH.toLocaleString()} characters or less.`,
-          },
-          {
-            status: 400,
-          }
-        );
-      }
-
-      inputLength =
-        htmlInput.length +
-        instruction.length;
-
-      prompt = `
-${WEBSITE_BUILDER_SYSTEM_INSTRUCTION}
-
-EXISTING WEBSITE HTML:
-
-${htmlInput}
-
-USER EDIT REQUEST:
-
-${instruction}
-
-Apply the requested changes.
-
-Return ONLY the complete updated standalone HTML document.
-`;
+    if (currentBalance <= 0) {
+      return response(
+        {
+          success: false,
+          code: "INSUFFICIENT_CREDITS",
+          message:
+            "You do not have enough Website Builder credits.",
+          balance: roundCredits(currentBalance),
+          required: roundCredits(estimatedCredits),
+        },
+        402
+      );
     }
 
     /*
-     * Reserve enough temporary credits before the
-     * Gemini request.
-     *
-     * Final charge is NOT this amount.
-     * Final charge is actual Gemini totalTokenCount.
+     * Never request more than the user's current
+     * available balance for the temporary reservation.
      */
-    const reservationAmount =
-      estimateReservationCredits(
-        inputLength
-      );
+    const reservationAmount = Math.min(
+      estimatedCredits,
+      currentBalance
+    );
+
+    providerRequestId =
+      createProviderRequestId();
+
+    referenceId = projectId;
 
     const reservation =
-      await reserveCredits({
+      await reserveCredits(
         supabase,
-        userId: user.id,
-        amount: reservationAmount,
+        user.id,
+        roundCredits(reservationAmount),
         providerRequestId,
         referenceId,
-        operation,
-      });
+        {
+          action,
+          model: MODEL,
+          estimatedCredits:
+            roundCredits(estimatedCredits),
+          tokensPerCredit:
+            TOKENS_PER_CREDIT,
+        }
+      );
 
     if (
-      !reservation.success ||
-      !reservation.result
+      !reservation ||
+      reservation.success !== true
     ) {
-      const reservationResult =
-        reservation.result;
+      const code =
+        reservation?.code ||
+        "CREDIT_RESERVATION_FAILED";
 
-      if (
-        reservationResult?.code ===
-        "INSUFFICIENT_CREDITS"
-      ) {
-        return NextResponse.json(
+      if (code === "INSUFFICIENT_CREDITS") {
+        const latestBalance =
+          await getCurrentBalance(
+            supabase,
+            user.id
+          );
+
+        return response(
           {
             success: false,
             code: "INSUFFICIENT_CREDITS",
             message:
-              "Not enough Website Builder credits for this request.",
+              "You do not have enough Website Builder credits.",
             balance:
-              Number(
-                reservationResult?.newBalance ??
-                  reservationResult?.previousBalance
-              ) || 0,
-            requestedReservation:
-              reservationAmount,
+              roundCredits(latestBalance),
+            required:
+              roundCredits(reservationAmount),
           },
-          {
-            status: 402,
-          }
+          402
         );
       }
 
-      return NextResponse.json(
+      return response(
         {
           success: false,
-          code: "CREDIT_RESERVATION_FAILED",
+          code,
           message:
-            reservation.error ||
+            reservation?.message ||
             "Unable to reserve Website Builder credits.",
         },
-        {
-          status: 500,
-        }
-      );
-    }
-
-    reservationId =
-      reservation.result
-        .reservationId || null;
-
-    if (!reservationId) {
-      return NextResponse.json(
-        {
-          success: false,
-          code: "CREDIT_RESERVATION_FAILED",
-          message:
-            "Credit reservation did not return a reservation ID.",
-        },
-        {
-          status: 500,
-        }
-      );
-    }
-
-    let geminiResponse: any;
-
-    let usage: GeminiUsage = {
-      promptTokens: 0,
-      outputTokens: 0,
-      totalTokens: 0,
-      thoughtsTokens: 0,
-      cachedTokens: 0,
-    };
-
-    try {
-      geminiResponse =
-        await ai.models.generateContent(
-          {
-            model: MODEL,
-            contents: prompt,
-            config: {
-              maxOutputTokens:
-                MAX_OUTPUT_TOKENS,
-              temperature:
-                action === "generate"
-                  ? 0.7
-                  : 0.4,
-            },
-          }
-        );
-
-      usage =
-        readGeminiUsage(
-          geminiResponse
-        );
-    } catch (geminiError) {
-      console.error(
-        "Gemini Website Builder error:",
-        geminiError
-      );
-
-      const refund =
-        await refundCredits({
-          supabase,
-          reservationId,
-          providerRequestId,
-          referenceId,
-          operation,
-          reason:
-            "Gemini provider request failed.",
-        });
-
-      if (!refund.success) {
-        console.error(
-          "CRITICAL: Gemini failed and credit refund also failed:",
-          refund.error
-        );
-      }
-
-      return NextResponse.json(
-        {
-          success: false,
-          code: "GEMINI_REQUEST_FAILED",
-          message:
-            "Gemini could not complete this website request. Your reserved credits were returned.",
-        },
-        {
-          status: 502,
-        }
-      );
-    }
-
-    const rawHtml =
-      getResponseText(
-        geminiResponse
-      );
-
-    const finalHtml =
-      cleanHtml(rawHtml);
-
-    const outputValid =
-      isValidHtml(finalHtml) &&
-      !isTruncatedHtml(
-        finalHtml
-      );
-
-    await saveProviderUsage({
-      userId: user.id,
-      operation,
-      usage,
-      outputValid,
-    });
-
-    if (!outputValid) {
-      const refund =
-        await refundCredits({
-          supabase,
-          reservationId,
-          providerRequestId,
-          referenceId,
-          operation,
-          reason:
-            "Gemini returned invalid or truncated HTML.",
-        });
-
-      if (!refund.success) {
-        console.error(
-          "CRITICAL: Invalid Gemini output and credit refund also failed:",
-          refund.error
-        );
-      }
-
-      return NextResponse.json(
-        {
-          success: false,
-          code: "INVALID_GEMINI_OUTPUT",
-          message:
-            "Gemini returned invalid or incomplete website HTML. Your reserved credits were returned.",
-          usage,
-        },
-        {
-          status: 502,
-        }
+        500
       );
     }
 
     /*
-     * REAL BILLING:
+     * IMPORTANT:
      *
-     * Actual ZUQEN credits =
-     * Gemini total tokens / 20,000
+     * Create a guaranteed string value immediately after
+     * the reservation succeeds.
      *
-     * Fractional credits are intentionally preserved.
+     * This avoids the TypeScript string | null problem.
      */
-    const actualCredits =
-      usage.totalTokens /
-      TOKENS_PER_CREDIT;
+    const reservedId =
+      reservation.reservationId ??
+      reservation.reservation_id;
 
-    const roundedActualCredits =
-      Number(
-        actualCredits.toFixed(6)
+    if (typeof reservedId !== "string") {
+      return response(
+        {
+          success: false,
+          code: "RESERVATION_ERROR",
+          message:
+            "Credit reservation was created but its ID was not returned.",
+        },
+        500
       );
+    }
 
-    const settlement =
-      await settleCredits({
-        supabase,
-        reservationId,
-        actualCredits:
-          roundedActualCredits,
-        providerRequestId,
-        referenceId,
-        operation,
-        usage,
-      });
+    reservationId = reservedId;
+
+    let generated: {
+      html: string;
+      usage: GeminiUsage;
+      finishReason: string | null;
+    };
+
+    try {
+      generated =
+        await generateWithGemini(
+          geminiPrompt,
+          apiKey
+        );
+    } catch (error) {
+      if (reservationId) {
+        try {
+          await refundCredits(
+            supabase,
+            reservationId,
+            providerRequestId,
+            "Website Builder Gemini request failed - reservation refunded",
+            referenceId,
+            {
+              action,
+              model: MODEL,
+              error:
+                error instanceof Error
+                  ? error.message
+                  : "Unknown Gemini error",
+            }
+          );
+        } catch (refundError) {
+          console.error(
+            "Website Builder refund error after Gemini failure:",
+            refundError
+          );
+        }
+
+        reservationId = null;
+      }
+
+      return response(
+        {
+          success: false,
+          code: "GEMINI_ERROR",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Gemini website generation failed.",
+        },
+        502
+      );
+    }
+
+    const usage = generated.usage;
+
+    const totalTokens =
+      getTotalTokens(usage);
+
+    const html = generated.html;
+
+    /*
+     * Gemini can return incomplete output when the
+     * output-token limit is reached.
+     */
+    const wasTruncated =
+      generated.finishReason === "MAX_TOKENS" ||
+      generated.finishReason === "LENGTH";
 
     if (
-      !settlement.success ||
-      !settlement.result
+      wasTruncated ||
+      !isValidWebsiteHtml(html)
     ) {
-      console.error(
-        "Credit settlement failed:",
-        settlement.error
+      if (reservationId) {
+        try {
+          await refundCredits(
+            supabase,
+            reservationId,
+            providerRequestId,
+            "Website Builder invalid or incomplete output - reservation refunded",
+            referenceId,
+            {
+              action,
+              model: MODEL,
+              finishReason:
+                generated.finishReason,
+              totalTokenCount:
+                totalTokens,
+            }
+          );
+        } catch (refundError) {
+          console.error(
+            "Website Builder refund error after invalid output:",
+            refundError
+          );
+        }
+
+        reservationId = null;
+      }
+
+      return response(
+        {
+          success: false,
+          code: "INVALID_PROVIDER_OUTPUT",
+          message:
+            "Gemini returned incomplete or invalid website code. No credits were charged.",
+          usage: {
+            promptTokenCount:
+              usage.promptTokenCount ?? 0,
+            candidatesTokenCount:
+              usage.candidatesTokenCount ?? 0,
+            totalTokenCount:
+              totalTokens,
+          },
+          billing: {
+            creditsConsumed: 0,
+          },
+        },
+        502
+      );
+    }
+
+    /*
+     * REAL BILLING
+     *
+     * 1.00 ZUQEN Website Builder Credit
+     * = 20,000 actual Gemini total tokens.
+     */
+    const actualCredits =
+      roundCredits(
+        creditsFromTokens(totalTokens)
       );
 
-      /*
-       * Try to refund the active reservation.
-       * This prevents a permanent deduction if
-       * settlement itself fails.
-       */
-      const refund =
-        await refundCredits({
-          supabase,
-          reservationId,
-          providerRequestId,
-          referenceId,
-          operation,
-          reason:
-            "Credit settlement failed after successful Gemini request.",
-        });
+    /*
+     * There should always be a reservation at this point.
+     * Use the guaranteed string variable rather than the
+     * mutable string | null variable.
+     */
+    if (typeof reservationId !== "string") {
+      return response(
+        {
+          success: false,
+          code: "RESERVATION_ERROR",
+          message:
+            "Credit reservation was lost before settlement.",
+        },
+        500
+      );
+    }
 
-      if (!refund.success) {
+    const settlementReservationId: string =
+      reservationId;
+
+    /*
+     * IMPORTANT:
+     *
+     * The DB settlement function requires:
+     *
+     * actual_amount <= reserved_amount
+     *
+     * If Gemini somehow used more than our temporary
+     * reservation, do not silently create incorrect billing.
+     */
+    const reservedAmount =
+      Number(reservation.reserved ?? reservationAmount);
+
+    if (
+      !Number.isFinite(reservedAmount) ||
+      actualCredits > reservedAmount
+    ) {
+      try {
+        await refundCredits(
+          supabase,
+          settlementReservationId,
+          providerRequestId,
+          "Website Builder reservation insufficient for actual usage - reservation refunded",
+          referenceId,
+          {
+            action,
+            model: MODEL,
+            reservedCredits:
+              reservedAmount,
+            actualCredits,
+            totalTokenCount:
+              totalTokens,
+          }
+        );
+      } catch (refundError) {
         console.error(
-          "CRITICAL: Settlement failed and refund also failed:",
-          refund.error
+          "Website Builder refund error after reservation mismatch:",
+          refundError
         );
       }
 
-      return NextResponse.json(
+      reservationId = null;
+
+      return response(
+        {
+          success: false,
+          code: "RESERVATION_TOO_SMALL",
+          message:
+            "The request used more Gemini tokens than the temporary credit reservation allowed. No credits were permanently charged.",
+          usage: {
+            promptTokenCount:
+              usage.promptTokenCount ?? 0,
+            candidatesTokenCount:
+              usage.candidatesTokenCount ?? 0,
+            totalTokenCount:
+              totalTokens,
+          },
+          billing: {
+            creditsConsumed: 0,
+            reservedCredits:
+              roundCredits(reservedAmount),
+            actualCredits,
+          },
+        },
+        500
+      );
+    }
+
+    /*
+     * SETTLE THE RESERVATION
+     *
+     * This permanently charges only the actual
+     * Gemini token usage and automatically refunds
+     * the unused reserved amount.
+     */
+    let settlement: Awaited<
+      ReturnType<typeof settleCredits>
+    >;
+
+    try {
+      settlement =
+        await settleCredits(
+          supabase,
+          settlementReservationId,
+          actualCredits,
+          providerRequestId,
+          "Website Builder Gemini usage settlement",
+          referenceId,
+          {
+            action,
+            model: MODEL,
+            totalTokenCount:
+              totalTokens,
+            promptTokenCount:
+              usage.promptTokenCount ?? 0,
+            candidatesTokenCount:
+              usage.candidatesTokenCount ?? 0,
+            tokensPerCredit:
+              TOKENS_PER_CREDIT,
+          }
+        );
+    } catch (settlementError) {
+      console.error(
+        "Website Builder settlement error:",
+        settlementError
+      );
+
+      return response(
         {
           success: false,
           code: "CREDIT_SETTLEMENT_FAILED",
           message:
-            "Website generation completed, but credit billing could not be finalized safely. No permanent credit deduction was intended.",
+            "Website was generated, but credit settlement failed. Please do not retry repeatedly; check your credit balance first.",
+          usage: {
+            promptTokenCount:
+              usage.promptTokenCount ?? 0,
+            candidatesTokenCount:
+              usage.candidatesTokenCount ?? 0,
+            totalTokenCount:
+              totalTokens,
+          },
+          billing: {
+            creditsConsumed: 0,
+            actualCredits,
+          },
         },
+        500
+      );
+    }
+
+    reservationId = null;
+
+    if (
+      !settlement ||
+      settlement.success !== true
+    ) {
+      return response(
         {
-          status: 500,
-        }
+          success: false,
+          code:
+            settlement?.code ||
+            "CREDIT_SETTLEMENT_FAILED",
+          message:
+            settlement?.message ||
+            "Website Builder credit settlement failed.",
+          usage: {
+            promptTokenCount:
+              usage.promptTokenCount ?? 0,
+            candidatesTokenCount:
+              usage.candidatesTokenCount ?? 0,
+            totalTokenCount:
+              totalTokens,
+          },
+          billing: {
+            creditsConsumed: 0,
+            actualCredits,
+          },
+        },
+        500
       );
     }
 
     const creditsConsumed =
-      Number(
-        settlement.result.used ??
-          roundedActualCredits
-      ) || 0;
+      roundCredits(
+        Number(
+          settlement.used ??
+            actualCredits
+        )
+      );
 
     const creditsRemaining =
-      Number(
-        settlement.result.newBalance
-      ) || 0;
+      roundCredits(
+        Number(
+          settlement.newBalance ??
+            0
+        )
+      );
 
-    return NextResponse.json({
+    return response({
       success: true,
-      html: finalHtml,
-      operation,
+      action,
+      feature: FEATURE_KEY,
+      provider: PROVIDER,
+      model: MODEL,
+
+      html,
 
       usage: {
-        promptTokens:
-          usage.promptTokens,
-        outputTokens:
-          usage.outputTokens,
-        totalTokens:
-          usage.totalTokens,
-        thoughtsTokens:
-          usage.thoughtsTokens,
-        cachedTokens:
-          usage.cachedTokens,
+        promptTokenCount:
+          usage.promptTokenCount ?? 0,
+        candidatesTokenCount:
+          usage.candidatesTokenCount ?? 0,
+        totalTokenCount:
+          totalTokens,
       },
 
       billing: {
-        provider: "gemini",
-        model: MODEL,
-        billingBasis:
-          "gemini_total_tokens",
         tokensPerCredit:
           TOKENS_PER_CREDIT,
-        reservation:
-          reservationAmount,
-        actualGeminiTokens:
-          usage.totalTokens,
         creditsConsumed,
         creditsRemaining,
+        reservedCredits:
+          roundCredits(reservedAmount),
+        refundedCredits:
+          roundCredits(
+            Math.max(
+              0,
+              reservedAmount -
+                creditsConsumed
+            )
+          ),
       },
 
       creditsConsumed,
       creditsRemaining,
+      projectId,
     });
   } catch (error) {
     console.error(
-      "Website Builder API error:",
+      "Website Builder POST error:",
       error
     );
 
     /*
-     * If an unexpected error happens after a
-     * reservation was created, try to refund it.
+     * Safety refund if an unexpected server error
+     * occurs after reservation.
      */
     if (reservationId) {
       try {
-        const supabase =
-          await createServerSupabaseClient();
-
-        const refund =
-          await refundCredits({
-            supabase,
-            reservationId,
-            providerRequestId,
-            referenceId,
-            operation:
-              "unknown",
-            reason:
-              "Unexpected Website Builder server error.",
-          });
-
-        if (!refund.success) {
-          console.error(
-            "CRITICAL: Unexpected error and reservation refund failed:",
-            refund.error
-          );
-        }
+        await refundCredits(
+          supabase,
+          reservationId,
+          providerRequestId ||
+            createProviderRequestId(),
+          "Website Builder unexpected server error - reservation refunded",
+          referenceId ||
+            createReferenceId(),
+          {
+            model: MODEL,
+            error:
+              error instanceof Error
+                ? error.message
+                : "Unknown server error",
+          }
+        );
       } catch (refundError) {
         console.error(
-          "CRITICAL: Unable to attempt credit refund:",
+          "Website Builder emergency refund error:",
           refundError
         );
       }
+
+      reservationId = null;
     }
 
-    return NextResponse.json(
+    return response(
       {
         success: false,
-        code: "SERVER_ERROR",
+        code: "WEBSITE_BUILDER_ERROR",
         message:
-          "Something went wrong while processing the Website Builder request.",
+          error instanceof Error
+            ? error.message
+            : "Website Builder request failed.",
       },
-      {
-        status: 500,
-      }
+      500
     );
   }
 }
