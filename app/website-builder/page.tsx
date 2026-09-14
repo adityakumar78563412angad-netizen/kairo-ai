@@ -24,6 +24,39 @@ type GenerationBilling = {
   creditsRemaining: number;
 };
 
+type WebsiteBuilderApiResponse = {
+  success?: boolean;
+  html?: string;
+  error?: string;
+  message?: string;
+  code?: string;
+
+  balance?: number;
+  totalGranted?: number;
+  totalUsed?: number;
+
+  tokensPerCredit?: number;
+  creditUnit?: string;
+
+  usage?: {
+    promptTokenCount?: number;
+    candidatesTokenCount?: number;
+    totalTokenCount?: number;
+  };
+
+  billing?: {
+    tokensPerCredit?: number;
+    reservedCredits?: number;
+    creditsConsumed?: number;
+    refundedCredits?: number;
+    creditsRemaining?: number;
+  };
+
+  creditsConsumed?: number;
+  creditsRemaining?: number;
+  projectId?: string;
+};
+
 export default function WebsiteBuilderPage() {
   const router = useRouter();
 
@@ -59,17 +92,19 @@ export default function WebsiteBuilderPage() {
         }
       );
 
-      let data: any = {};
+      let data: WebsiteBuilderApiResponse = {};
 
       try {
-        data = await response.json();
+        data =
+          (await response.json()) as WebsiteBuilderApiResponse;
       } catch {
         data = {};
       }
 
       if (
         data.code === "SIGN_IN_REQUIRED" ||
-        data.code === "UNAUTHORIZED"
+        data.code === "UNAUTHORIZED" ||
+        data.code === "UNAUTHENTICATED"
       ) {
         setSignInRequired(true);
         setCredits(null);
@@ -83,15 +118,28 @@ export default function WebsiteBuilderPage() {
 
       setSignInRequired(false);
 
+      /*
+       * IMPORTANT:
+       *
+       * The Website Builder API returns:
+       *
+       * {
+       *   success: true,
+       *   balance: 10,
+       *   ...
+       * }
+       *
+       * It does NOT return data.credits.balance.
+       */
       setCredits({
         balance: Number(
-          data?.credits?.balance ?? 0
+          data.balance ?? 0
         ),
         totalGranted: Number(
-          data?.credits?.totalGranted ?? 0
+          data.totalGranted ?? 0
         ),
         totalUsed: Number(
-          data?.credits?.totalUsed ?? 0
+          data.totalUsed ?? 0
         ),
       });
     } catch (error) {
@@ -166,31 +214,12 @@ export default function WebsiteBuilderPage() {
         }
       );
 
-      let data: {
-        success?: boolean;
-        html?: string;
-        error?: string;
-        message?: string;
-        code?: string;
-        usage?: {
-          totalTokens?: number;
-          promptTokens?: number;
-          outputTokens?: number;
-          thoughtsTokens?: number;
-          cachedTokens?: number;
-        };
-        billing?: {
-          tokensPerCredit?: number;
-          reservationCredits?: number;
-          creditsConsumed?: number;
-          creditsRefunded?: number;
-          creditsRemaining?: number;
-        };
-        creditsConsumed?: number;
-      } = {};
+      let data: WebsiteBuilderApiResponse =
+        {};
 
       try {
-        data = await response.json();
+        data =
+          (await response.json()) as WebsiteBuilderApiResponse;
       } catch {
         throw new Error(
           "Server ne valid response nahi diya."
@@ -201,7 +230,10 @@ export default function WebsiteBuilderPage() {
         if (
           data.code ===
             "SIGN_IN_REQUIRED" ||
-          data.code === "UNAUTHORIZED"
+          data.code ===
+            "UNAUTHORIZED" ||
+          data.code ===
+            "UNAUTHENTICATED"
         ) {
           setSignInRequired(true);
 
@@ -225,10 +257,13 @@ export default function WebsiteBuilderPage() {
           data.code ===
             "TRUNCATED_HTML" ||
           data.code ===
-            "INVALID_HTML"
+            "INVALID_HTML" ||
+          data.code ===
+            "INVALID_PROVIDER_OUTPUT"
         ) {
           if (
-            data.billing?.creditsRemaining !==
+            data.billing
+              ?.creditsRemaining !==
             undefined
           ) {
             setCredits((current) => ({
@@ -241,9 +276,11 @@ export default function WebsiteBuilderPage() {
                   current?.balance ?? 0
                 ),
               totalGranted:
-                current?.totalGranted ?? 0,
+                current?.totalGranted ??
+                0,
               totalUsed:
-                current?.totalUsed ?? 0,
+                current?.totalUsed ??
+                0,
             }));
           } else {
             await loadCredits();
@@ -266,6 +303,15 @@ export default function WebsiteBuilderPage() {
         );
       }
 
+      /*
+       * REAL GEMINI BILLING
+       *
+       * API returns:
+       * usage.totalTokenCount
+       *
+       * not:
+       * usage.totalTokens
+       */
       const consumed =
         Number(
           data.billing
@@ -277,32 +323,45 @@ export default function WebsiteBuilderPage() {
       const refunded =
         Number(
           data.billing
-            ?.creditsRefunded ?? 0
+            ?.refundedCredits ??
+            0
         );
 
       const remaining =
         Number(
           data.billing
             ?.creditsRemaining ??
+            data.creditsRemaining ??
             0
         );
 
       const totalTokens =
         Number(
-          data.usage?.totalTokens ?? 0
+          data.usage
+            ?.totalTokenCount ??
+            0
         );
 
       setBilling({
         totalTokens,
-        creditsConsumed: consumed,
-        creditsRefunded: refunded,
-        creditsRemaining: remaining,
+        creditsConsumed:
+          consumed,
+        creditsRefunded:
+          refunded,
+        creditsRemaining:
+          remaining,
       });
 
+      /*
+       * Update the visible balance using
+       * the exact balance returned by the
+       * backend settlement.
+       */
       setCredits((current) => ({
         balance: remaining,
         totalGranted:
-          current?.totalGranted ?? 0,
+          current?.totalGranted ??
+          0,
         totalUsed:
           (current?.totalUsed ?? 0) +
           consumed,
