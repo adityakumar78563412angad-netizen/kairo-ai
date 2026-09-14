@@ -1,21 +1,102 @@
-
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { createClient } from "@/lib/supabase";
+
+const FEATURE_KEY = "image_generator";
 
 export default function ImageGeneratorPage() {
+  const supabase = createClient();
+
   const [prompt, setPrompt] = useState("");
   const [image, setImage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  const [credits, setCredits] = useState<number | null>(null);
+  const [creditsLoading, setCreditsLoading] = useState(true);
+
+  async function loadCredits() {
+    try {
+      setCreditsLoading(true);
+
+      const {
+        data: { user },
+        error: authError,
+      } = await supabase.auth.getUser();
+
+      if (authError || !user) {
+        setCredits(0);
+        return;
+      }
+
+      const { data, error: creditError } = await supabase
+        .from("feature_credit_balances")
+        .select("balance")
+        .eq("user_id", user.id)
+        .eq("feature_key", FEATURE_KEY)
+        .maybeSingle();
+
+      if (creditError) {
+        console.error(
+          "Failed to load Image Generator credits:",
+          creditError
+        );
+
+        setCredits(null);
+        return;
+      }
+
+      setCredits(
+        typeof data?.balance === "number"
+          ? data.balance
+          : 0
+      );
+    } catch (err) {
+      console.error(
+        "Failed to load Image Generator credits:",
+        err
+      );
+
+      setCredits(null);
+    } finally {
+      setCreditsLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadCredits();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(() => {
+      loadCredits();
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []);
 
   async function generateImage() {
     const trimmedPrompt = prompt.trim();
 
     if (!trimmedPrompt || loading) return;
 
-    setLoading(true);
     setError("");
+
+    /*
+     * Do not allow generation when the balance is already known
+     * to be empty.
+     */
+    if (credits !== null && credits < 1) {
+      setError(
+        "You don't have enough Image Generator credits. Please sign in or add more credits to continue."
+      );
+      return;
+    }
+
+    setLoading(true);
     setImage(null);
 
     try {
@@ -33,6 +114,12 @@ export default function ImageGeneratorPage() {
         success?: boolean;
         image?: string;
         error?: string;
+        creditsConsumed?: number;
+        creditsRemaining?: number;
+        billing?: {
+          creditsConsumed?: number;
+          creditsRemaining?: number;
+        };
       };
 
       try {
@@ -56,14 +143,45 @@ export default function ImageGeneratorPage() {
       }
 
       setImage(result.image);
+
+      /*
+       * API returns the authoritative remaining balance
+       * after successful generation.
+       */
+      if (
+        typeof result.creditsRemaining === "number"
+      ) {
+        setCredits(result.creditsRemaining);
+      } else if (
+        typeof result.billing?.creditsRemaining ===
+        "number"
+      ) {
+        setCredits(
+          result.billing.creditsRemaining
+        );
+      } else {
+        /*
+         * Fallback: reload the real balance from Supabase.
+         */
+        await loadCredits();
+      }
     } catch (err) {
-      console.error("Image generation failed:", err);
+      console.error(
+        "Image generation failed:",
+        err
+      );
 
       setError(
         err instanceof Error
           ? err.message
           : "Something went wrong while generating the image."
       );
+
+      /*
+       * Reload balance after any failed request so the UI
+       * stays synchronized with the database.
+       */
+      await loadCredits();
     } finally {
       setLoading(false);
     }
@@ -86,6 +204,17 @@ export default function ImageGeneratorPage() {
     setImage(null);
     setError("");
   }
+
+  const formattedCredits =
+    credits === null
+      ? "—"
+      : credits.toFixed(2);
+
+  const cannotGenerate =
+    !prompt.trim() ||
+    loading ||
+    creditsLoading ||
+    (credits !== null && credits < 1);
 
   return (
     <main className="min-h-screen bg-[#050505] text-white">
@@ -121,8 +250,23 @@ export default function ImageGeneratorPage() {
             </div>
           </div>
 
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/[0.08] bg-white/[0.035] text-sm text-white/40">
-            ✦
+          {/* Credits */}
+          <div className="flex items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 py-2">
+            <span className="text-sm text-white/50">
+              ✦
+            </span>
+
+            <div className="text-right">
+              <div className="text-[9px] uppercase tracking-[0.16em] text-white/25">
+                Image Credits
+              </div>
+
+              <div className="text-xs font-semibold text-white/80">
+                {creditsLoading
+                  ? "Loading..."
+                  : formattedCredits}
+              </div>
+            </div>
           </div>
         </header>
 
@@ -143,6 +287,21 @@ export default function ImageGeneratorPage() {
             Turn your imagination into visuals. Describe what
             you want to create and let ZUQEN generate it for you.
           </p>
+
+          {/* Credit information */}
+          <div className="mx-auto mt-7 flex w-fit items-center gap-2 rounded-full border border-white/[0.07] bg-white/[0.025] px-4 py-2">
+            <span className="text-[10px] text-white/35">
+              1.00 ZUQEN Image Credit
+            </span>
+
+            <span className="text-white/15">
+              =
+            </span>
+
+            <span className="text-[10px] text-white/50">
+              1 successfully generated image
+            </span>
+          </div>
         </section>
 
         {/* Main generator */}
@@ -163,7 +322,7 @@ export default function ImageGeneratorPage() {
               </div>
 
               <div className="rounded-lg border border-white/[0.07] bg-white/[0.035] px-2.5 py-1 text-[10px] text-white/30">
-                AI
+                FLUX
               </div>
             </div>
 
@@ -205,7 +364,9 @@ export default function ImageGeneratorPage() {
             {error && (
               <div className="mt-4 rounded-2xl border border-red-400/15 bg-red-400/[0.06] px-4 py-3">
                 <div className="flex gap-3">
-                  <span className="text-red-300/80">!</span>
+                  <span className="text-red-300/80">
+                    !
+                  </span>
 
                   <div>
                     <p className="text-xs font-medium text-red-200/90">
@@ -220,16 +381,46 @@ export default function ImageGeneratorPage() {
               </div>
             )}
 
+            {/* Credit status */}
+            {!creditsLoading &&
+              credits !== null &&
+              credits < 1 && (
+                <div className="mt-4 rounded-2xl border border-amber-300/10 bg-amber-300/[0.045] px-4 py-3">
+                  <div className="flex gap-3">
+                    <span className="text-amber-200/70">
+                      ✦
+                    </span>
+
+                    <div>
+                      <p className="text-xs font-medium text-amber-100/80">
+                        No Image Credits Remaining
+                      </p>
+
+                      <p className="mt-1 text-[11px] leading-5 text-amber-100/40">
+                        You need 1.00 Image Credit to
+                        generate an image.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
             <button
               type="button"
               onClick={generateImage}
-              disabled={!prompt.trim() || loading}
+              disabled={cannotGenerate}
               className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-white px-5 py-3.5 text-sm font-semibold text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-25"
             >
               {loading ? (
                 <>
                   <span className="h-4 w-4 animate-spin rounded-full border-2 border-black/20 border-t-black" />
                   Creating image...
+                </>
+              ) : credits !== null &&
+                credits < 1 ? (
+                <>
+                  <span>✦</span>
+                  No Credits
                 </>
               ) : (
                 <>
@@ -238,6 +429,13 @@ export default function ImageGeneratorPage() {
                 </>
               )}
             </button>
+
+            {/* Cost */}
+            <div className="mt-3 text-center">
+              <span className="text-[10px] text-white/20">
+                This generation uses 1.00 Image Credit
+              </span>
+            </div>
           </div>
 
           {/* Preview panel */}
@@ -281,6 +479,13 @@ export default function ImageGeneratorPage() {
                       <p className="mt-1 truncate text-xs text-white/45">
                         {prompt}
                       </p>
+
+                      <p className="mt-1 text-[10px] text-white/20">
+                        1.00 Image Credit used
+                        {credits !== null
+                          ? ` · ${credits.toFixed(2)} remaining`
+                          : ""}
+                      </p>
                     </div>
 
                     <div className="flex shrink-0 gap-2">
@@ -295,7 +500,12 @@ export default function ImageGeneratorPage() {
                       <button
                         type="button"
                         onClick={generateImage}
-                        className="rounded-xl border border-white/[0.08] bg-white/[0.04] px-3.5 py-2 text-xs text-white/60 transition hover:bg-white/[0.08] hover:text-white"
+                        disabled={
+                          loading ||
+                          (credits !== null &&
+                            credits < 1)
+                        }
+                        className="rounded-xl border border-white/[0.08] bg-white/[0.04] px-3.5 py-2 text-xs text-white/60 transition hover:bg-white/[0.08] hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
                       >
                         ↻ Regenerate
                       </button>
@@ -342,4 +552,3 @@ export default function ImageGeneratorPage() {
     </main>
   );
 }
-
