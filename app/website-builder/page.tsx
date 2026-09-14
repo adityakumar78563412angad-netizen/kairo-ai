@@ -1,9 +1,28 @@
+
 "use client";
 
-import { FormEvent, useState } from "react";
+import {
+  FormEvent,
+  useEffect,
+  useState,
+} from "react";
 import { useRouter } from "next/navigation";
 
 const MAX_PROMPT_LENGTH = 10000;
+const TOKENS_PER_CREDIT = 20000;
+
+type CreditInfo = {
+  balance: number;
+  totalGranted: number;
+  totalUsed: number;
+};
+
+type GenerationBilling = {
+  totalTokens: number;
+  creditsConsumed: number;
+  creditsRefunded: number;
+  creditsRemaining: number;
+};
 
 export default function WebsiteBuilderPage() {
   const router = useRouter();
@@ -11,6 +30,81 @@ export default function WebsiteBuilderPage() {
   const [prompt, setPrompt] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  const [credits, setCredits] =
+    useState<CreditInfo | null>(null);
+
+  const [creditsLoading, setCreditsLoading] =
+    useState(true);
+
+  const [billing, setBilling] =
+    useState<GenerationBilling | null>(null);
+
+  const [signInRequired, setSignInRequired] =
+    useState(false);
+
+  useEffect(() => {
+    loadCredits();
+  }, []);
+
+  async function loadCredits() {
+    setCreditsLoading(true);
+
+    try {
+      const response = await fetch(
+        "/api/website-builder",
+        {
+          method: "GET",
+          cache: "no-store",
+        }
+      );
+
+      let data: any = {};
+
+      try {
+        data = await response.json();
+      } catch {
+        data = {};
+      }
+
+      if (
+        data.code === "SIGN_IN_REQUIRED" ||
+        data.code === "UNAUTHORIZED"
+      ) {
+        setSignInRequired(true);
+        setCredits(null);
+        return;
+      }
+
+      if (!response.ok || !data.success) {
+        setCredits(null);
+        return;
+      }
+
+      setSignInRequired(false);
+
+      setCredits({
+        balance: Number(
+          data?.credits?.balance ?? 0
+        ),
+        totalGranted: Number(
+          data?.credits?.totalGranted ?? 0
+        ),
+        totalUsed: Number(
+          data?.credits?.totalUsed ?? 0
+        ),
+      });
+    } catch (error) {
+      console.error(
+        "Website Builder credit loading error:",
+        error
+      );
+
+      setCredits(null);
+    } finally {
+      setCreditsLoading(false);
+    }
+  }
 
   async function generateWebsite(
     event?: FormEvent
@@ -36,7 +130,25 @@ export default function WebsiteBuilderPage() {
       return;
     }
 
+    if (signInRequired) {
+      setError(
+        "Please sign in to use Website Builder."
+      );
+      return;
+    }
+
+    if (
+      credits &&
+      credits.balance <= 0
+    ) {
+      setError(
+        "Your Website Builder credits are finished. Please add more credits to continue."
+      );
+      return;
+    }
+
     setError("");
+    setBilling(null);
     setLoading(true);
 
     try {
@@ -60,6 +172,21 @@ export default function WebsiteBuilderPage() {
         error?: string;
         message?: string;
         code?: string;
+        usage?: {
+          totalTokens?: number;
+          promptTokens?: number;
+          outputTokens?: number;
+          thoughtsTokens?: number;
+          cachedTokens?: number;
+        };
+        billing?: {
+          tokensPerCredit?: number;
+          reservationCredits?: number;
+          creditsConsumed?: number;
+          creditsRefunded?: number;
+          creditsRemaining?: number;
+        };
+        creditsConsumed?: number;
       } = {};
 
       try {
@@ -73,11 +200,54 @@ export default function WebsiteBuilderPage() {
       if (!response.ok || !data.success) {
         if (
           data.code ===
-          "SIGN_IN_REQUIRED"
+            "SIGN_IN_REQUIRED" ||
+          data.code === "UNAUTHORIZED"
         ) {
+          setSignInRequired(true);
+
           throw new Error(
             "Please sign in to use Website Builder."
           );
+        }
+
+        if (
+          data.code ===
+          "INSUFFICIENT_CREDITS"
+        ) {
+          await loadCredits();
+
+          throw new Error(
+            "Website Builder credits kam hain. Please add more credits to continue."
+          );
+        }
+
+        if (
+          data.code ===
+            "TRUNCATED_HTML" ||
+          data.code ===
+            "INVALID_HTML"
+        ) {
+          if (
+            data.billing?.creditsRemaining !==
+            undefined
+          ) {
+            setCredits((current) => ({
+              balance:
+                Number(
+                  data.billing
+                    ?.creditsRemaining
+                ) ||
+                Number(
+                  current?.balance ?? 0
+                ),
+              totalGranted:
+                current?.totalGranted ?? 0,
+              totalUsed:
+                current?.totalUsed ?? 0,
+            }));
+          } else {
+            await loadCredits();
+          }
         }
 
         throw new Error(
@@ -95,6 +265,48 @@ export default function WebsiteBuilderPage() {
           "AI ne valid website code return nahi kiya."
         );
       }
+
+      const consumed =
+        Number(
+          data.billing
+            ?.creditsConsumed ??
+            data.creditsConsumed ??
+            0
+        );
+
+      const refunded =
+        Number(
+          data.billing
+            ?.creditsRefunded ?? 0
+        );
+
+      const remaining =
+        Number(
+          data.billing
+            ?.creditsRemaining ??
+            0
+        );
+
+      const totalTokens =
+        Number(
+          data.usage?.totalTokens ?? 0
+        );
+
+      setBilling({
+        totalTokens,
+        creditsConsumed: consumed,
+        creditsRefunded: refunded,
+        creditsRemaining: remaining,
+      });
+
+      setCredits((current) => ({
+        balance: remaining,
+        totalGranted:
+          current?.totalGranted ?? 0,
+        totalUsed:
+          (current?.totalUsed ?? 0) +
+          consumed,
+      }));
 
       const websiteName =
         createWebsiteName(
@@ -167,6 +379,7 @@ export default function WebsiteBuilderPage() {
   ) {
     setPrompt(text);
     setError("");
+    setBilling(null);
 
     window.setTimeout(() => {
       document
@@ -176,6 +389,12 @@ export default function WebsiteBuilderPage() {
         ?.focus();
     }, 50);
   }
+
+  const currentBalance =
+    credits?.balance ?? 0;
+
+  const formattedBalance =
+    currentBalance.toFixed(2);
 
   return (
     <main className="ZUQEN-builder-home">
@@ -244,10 +463,11 @@ export default function WebsiteBuilderPage() {
         }
 
         .builder-navbar {
-          height: 76px;
+          min-height: 76px;
           display: flex;
           align-items: center;
           justify-content: space-between;
+          gap: 15px;
           border-bottom: 1px solid
             rgba(255, 255, 255, 0.06);
         }
@@ -295,37 +515,56 @@ export default function WebsiteBuilderPage() {
         .navbar-right {
           display: flex;
           align-items: center;
+          gap: 8px;
         }
 
-        .testing-badge {
-          height: 38px;
+        .credits-badge {
+          min-height: 38px;
           padding: 0 13px;
           display: inline-flex;
           align-items: center;
-          gap: 7px;
+          gap: 8px;
           border-radius: 10px;
           border: 1px solid
-            rgba(124, 92, 255, 0.2);
+            rgba(124, 92, 255, 0.22);
           background: rgba(
             124,
             92,
             255,
             0.07
           );
-          color: #bdb1ff;
-          font-size: 10px;
+          color: #c5bcff;
+          font-size: 11px;
           font-weight: 800;
           white-space: nowrap;
-          margin-right: 8px;
         }
 
-        .testing-dot {
-          width: 6px;
-          height: 6px;
+        .credits-icon {
+          width: 7px;
+          height: 7px;
           border-radius: 50%;
-          background: #8b7cff;
-          box-shadow: 0 0 10px
-            #8b7cff;
+          background: #9b8cff;
+          box-shadow: 0 0 12px #9b8cff;
+        }
+
+        .credits-loading {
+          color: #777;
+        }
+
+        .credits-empty {
+          color: #ffadad;
+          border-color: rgba(
+            255,
+            90,
+            90,
+            0.2
+          );
+          background: rgba(
+            255,
+            70,
+            70,
+            0.06
+          );
         }
 
         .back-button {
@@ -484,6 +723,7 @@ export default function WebsiteBuilderPage() {
           display: flex;
           align-items: center;
           justify-content: space-between;
+          gap: 10px;
           padding: 0 4px 12px;
         }
 
@@ -565,12 +805,13 @@ export default function WebsiteBuilderPage() {
           font-size: 9px;
         }
 
-        .testing-text {
+        .billing-text {
           color: #777;
           font-size: 9px;
+          line-height: 1.4;
         }
 
-        .testing-text strong {
+        .billing-text strong {
           color: #a995ff;
         }
 
@@ -624,6 +865,74 @@ export default function WebsiteBuilderPage() {
           opacity: 0.45;
           cursor: not-allowed;
           box-shadow: none;
+        }
+
+        .billing-result {
+          width: min(820px, 100%);
+          margin: 14px auto 0;
+          padding: 13px 15px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 15px;
+          border: 1px solid
+            rgba(124, 92, 255, 0.16);
+          border-radius: 12px;
+          background: rgba(
+            124,
+            92,
+            255,
+            0.045
+          );
+          text-align: left;
+        }
+
+        .billing-result-main {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+        }
+
+        .billing-result-title {
+          color: #bbb;
+          font-size: 11px;
+          font-weight: 800;
+        }
+
+        .billing-result-detail {
+          color: #666;
+          font-size: 9px;
+        }
+
+        .billing-result-values {
+          display: flex;
+          align-items: center;
+          gap: 15px;
+          flex-shrink: 0;
+        }
+
+        .billing-value {
+          display: flex;
+          flex-direction: column;
+          align-items: flex-end;
+          gap: 3px;
+        }
+
+        .billing-value-label {
+          color: #555;
+          font-size: 8px;
+          text-transform: uppercase;
+          letter-spacing: 0.4px;
+        }
+
+        .billing-value-number {
+          color: #b8adff;
+          font-size: 13px;
+          font-weight: 900;
+        }
+
+        .billing-value-number.remaining {
+          color: #fff;
         }
 
         .examples {
@@ -764,7 +1073,7 @@ export default function WebsiteBuilderPage() {
           }
 
           .builder-navbar {
-            height: 66px;
+            min-height: 66px;
           }
 
           .builder-brand-subtitle {
@@ -823,6 +1132,19 @@ export default function WebsiteBuilderPage() {
             width: 100%;
           }
 
+          .billing-result {
+            flex-direction: column;
+            align-items: stretch;
+          }
+
+          .billing-result-values {
+            justify-content: space-between;
+          }
+
+          .billing-value {
+            align-items: flex-start;
+          }
+
           .builder-features {
             grid-template-columns: 1fr;
             margin-top: 35px;
@@ -836,7 +1158,7 @@ export default function WebsiteBuilderPage() {
             padding: 0 10px;
           }
 
-          .testing-badge {
+          .credits-badge {
             padding: 0 9px;
           }
 
@@ -846,12 +1168,16 @@ export default function WebsiteBuilderPage() {
         }
 
         @media (max-width: 520px) {
-          .testing-badge {
-            display: none;
-          }
-
           .builder-brand-name {
             font-size: 13px;
+          }
+
+          .credits-badge {
+            font-size: 9px;
+          }
+
+          .billing-result-values {
+            gap: 10px;
           }
         }
       `}</style>
@@ -875,10 +1201,25 @@ export default function WebsiteBuilderPage() {
           </div>
 
           <div className="navbar-right">
-            <div className="testing-badge">
-              <span className="testing-dot" />
-              Testing Mode
-            </div>
+            {!creditsLoading &&
+              !signInRequired && (
+                <div
+                  className={`credits-badge ${
+                    currentBalance <= 0
+                      ? "credits-empty"
+                      : ""
+                  }`}
+                >
+                  <span className="credits-icon" />
+                  {formattedBalance} Credits
+                </div>
+              )}
+
+            {creditsLoading && (
+              <div className="credits-badge credits-loading">
+                Loading credits...
+              </div>
+            )}
 
             <button
               type="button"
@@ -912,6 +1253,15 @@ export default function WebsiteBuilderPage() {
               website.
             </p>
 
+            {signInRequired && (
+              <div className="error-message">
+                Please sign in to use Website
+                Builder. Website Builder is
+                available only for permanent
+                accounts.
+              </div>
+            )}
+
             <form
               className="prompt-wrapper"
               onSubmit={generateWebsite}
@@ -928,7 +1278,7 @@ export default function WebsiteBuilderPage() {
                     </div>
 
                     <div className="prompt-status">
-                      AI Website Generation
+                      Gemini Token Billing
                     </div>
                   </div>
 
@@ -936,12 +1286,17 @@ export default function WebsiteBuilderPage() {
                     id="website-prompt"
                     className="prompt-input"
                     value={prompt}
-                    onChange={(event) =>
+                    onChange={(event) => {
                       setPrompt(
                         event.target.value
-                      )
+                      );
+                      setError("");
+                      setBilling(null);
+                    }}
+                    disabled={
+                      loading ||
+                      signInRequired
                     }
-                    disabled={loading}
                     placeholder="Example: Create a premium dark portfolio website for a full-stack developer. Include a hero section, projects, skills, experience, testimonials and a contact form with smooth animations..."
                     maxLength={
                       MAX_PROMPT_LENGTH
@@ -963,11 +1318,13 @@ export default function WebsiteBuilderPage() {
                         {" characters"}
                       </div>
 
-                      <div className="testing-text">
+                      <div className="billing-text">
                         <strong>
-                          Testing mode
+                          Real usage billing
                         </strong>{" "}
-                        · No credits charged
+                        · 1 credit ={" "}
+                        {TOKENS_PER_CREDIT.toLocaleString()}{" "}
+                        Gemini tokens
                       </div>
                     </div>
 
@@ -976,7 +1333,10 @@ export default function WebsiteBuilderPage() {
                       className="generate-button"
                       disabled={
                         loading ||
-                        !prompt.trim()
+                        !prompt.trim() ||
+                        signInRequired ||
+                        creditsLoading ||
+                        currentBalance <= 0
                       }
                     >
                       {loading ? (
@@ -984,6 +1344,10 @@ export default function WebsiteBuilderPage() {
                           <span className="loading-spinner" />
                           Building...
                         </>
+                      ) : signInRequired ? (
+                        "Sign in required"
+                      ) : currentBalance <= 0 ? (
+                        "No credits"
                       ) : (
                         <>
                           ✦ Generate Website
@@ -994,6 +1358,63 @@ export default function WebsiteBuilderPage() {
                 </div>
               </div>
             </form>
+
+            {billing && (
+              <div className="billing-result">
+                <div className="billing-result-main">
+                  <div className="billing-result-title">
+                    Website generated successfully
+                  </div>
+
+                  <div className="billing-result-detail">
+                    Gemini actual usage:{" "}
+                    {billing.totalTokens.toLocaleString()}{" "}
+                    tokens
+                  </div>
+                </div>
+
+                <div className="billing-result-values">
+                  <div className="billing-value">
+                    <div className="billing-value-label">
+                      Used
+                    </div>
+
+                    <div className="billing-value-number">
+                      {billing.creditsConsumed.toFixed(
+                        2
+                      )}
+                    </div>
+                  </div>
+
+                  {billing.creditsRefunded >
+                    0 && (
+                    <div className="billing-value">
+                      <div className="billing-value-label">
+                        Refunded
+                      </div>
+
+                      <div className="billing-value-number">
+                        {billing.creditsRefunded.toFixed(
+                          2
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="billing-value">
+                    <div className="billing-value-label">
+                      Remaining
+                    </div>
+
+                    <div className="billing-value-number remaining">
+                      {billing.creditsRemaining.toFixed(
+                        2
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {error && (
               <div className="error-message">
@@ -1015,6 +1436,7 @@ export default function WebsiteBuilderPage() {
                       "Create a premium dark portfolio website for a software developer with hero, about, skills, projects, experience, testimonials and contact section."
                     )
                   }
+                  disabled={loading}
                 >
                   Developer Portfolio
                 </button>
@@ -1027,6 +1449,7 @@ export default function WebsiteBuilderPage() {
                       "Create a modern SaaS startup landing page with a hero section, features, pricing, testimonials, FAQ, CTA and footer."
                     )
                   }
+                  disabled={loading}
                 >
                   SaaS Startup
                 </button>
@@ -1039,6 +1462,7 @@ export default function WebsiteBuilderPage() {
                       "Create an elegant premium restaurant website with menu, popular dishes, gallery, reviews, opening hours, reservation section and location."
                     )
                   }
+                  disabled={loading}
                 >
                   Restaurant
                 </button>
@@ -1051,6 +1475,7 @@ export default function WebsiteBuilderPage() {
                       "Create a high-end creative agency website with bold hero, services, portfolio, team, statistics, testimonials, process and contact section."
                     )
                   }
+                  disabled={loading}
                 >
                   Creative Agency
                 </button>
@@ -1108,9 +1533,11 @@ export default function WebsiteBuilderPage() {
         </section>
 
         <footer className="builder-footer">
-          ZUQEN AI Website Builder · Testing Mode
+          ZUQEN AI Website Builder · Real Gemini
+          Token Billing
         </footer>
       </div>
     </main>
   );
 }
+

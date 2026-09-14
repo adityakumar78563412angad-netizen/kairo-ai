@@ -349,6 +349,100 @@ async function settleReservation(
   }
 }
 
+export async function GET() {
+  try {
+    const supabase = await createServerSupabaseClient();
+
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+
+    if (userError || !user) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Please sign in to use Website Builder.",
+          code: "UNAUTHORIZED",
+        },
+        { status: 401 }
+      );
+    }
+
+    if (user.is_anonymous === true) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Please sign in to use Website Builder.",
+          code: "SIGN_IN_REQUIRED",
+        },
+        { status: 403 }
+      );
+    }
+
+    const { data, error } = await supabase
+      .from("feature_credit_balances")
+      .select("balance, total_granted, total_used")
+      .eq("user_id", user.id)
+      .eq("feature_key", "website_builder")
+      .maybeSingle();
+
+    if (error) {
+      console.error(
+        "Website Builder credit balance error:",
+        error
+      );
+
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Unable to load Website Builder credits.",
+          code: "CREDIT_BALANCE_ERROR",
+        },
+        { status: 500 }
+      );
+    }
+
+    const balance = Number(data?.balance ?? 0);
+    const totalGranted = Number(
+      data?.total_granted ?? 0
+    );
+    const totalUsed = Number(
+      data?.total_used ?? 0
+    );
+
+    return NextResponse.json({
+      success: true,
+      feature: "website-builder",
+      credits: {
+        balance,
+        totalGranted,
+        totalUsed,
+      },
+      billing: {
+        provider: "gemini",
+        billingBasis: "gemini_total_tokens",
+        tokensPerCredit: 20000,
+      },
+    });
+  } catch (error) {
+    console.error(
+      "Website Builder credit GET error:",
+      error
+    );
+
+    return NextResponse.json(
+      {
+        success: false,
+        error: "Unable to load Website Builder credits.",
+        code: "CREDIT_BALANCE_ERROR",
+      },
+      { status: 500 }
+    );
+  }
+}
+
+
 export async function POST(request: Request) {
   let supabase: any = null;
   let reservationId: string | null = null;
