@@ -1,18 +1,29 @@
-
 "use client";
 
 import { useEffect, useState } from "react";
 
 const STORAGE_KEY = "ZUQEN-website-builder-project";
 
+const TOKENS_PER_CREDIT = 20000;
+
 type Project = {
   html: string;
   prompt?: string;
   createdAt?: string;
   updatedAt?: string;
+  creditsConsumed?: number;
+  creditsRemaining?: number;
 };
 
 type PreviewMode = "desktop" | "tablet" | "mobile";
+
+type Usage = {
+  promptTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  thoughtsTokens?: number;
+  cachedTokens?: number;
+};
 
 function cleanHtml(value: string) {
   let html = value.trim();
@@ -56,6 +67,10 @@ function formatNumber(value: number) {
   return new Intl.NumberFormat("en-US").format(value);
 }
 
+function formatCredits(value: number) {
+  return Number(value || 0).toFixed(2);
+}
+
 export default function WebsiteBuilderEditorPage() {
   const [project, setProject] = useState<Project | null>(null);
   const [html, setHtml] = useState("");
@@ -75,52 +90,146 @@ export default function WebsiteBuilderEditorPage() {
   const [showFullscreen, setShowFullscreen] =
     useState(false);
 
-  const [usage, setUsage] = useState<{
-    promptTokens: number;
-    outputTokens: number;
-    totalTokens: number;
-    thoughtsTokens?: number;
-    cachedTokens?: number;
+  const [credits, setCredits] = useState({
+    balance: 0,
+    totalGranted: 0,
+    totalUsed: 0,
+  });
+
+  const [creditsLoading, setCreditsLoading] =
+    useState(true);
+
+  const [lastBilling, setLastBilling] = useState<{
+    creditsConsumed: number;
+    creditsRemaining: number;
   } | null>(null);
 
+  const [usage, setUsage] = useState<Usage | null>(
+    null
+  );
+
   useEffect(() => {
-    try {
-      const stored = sessionStorage.getItem(STORAGE_KEY);
+    async function loadCredits() {
+      try {
+        setCreditsLoading(true);
 
-      if (!stored) {
-        setError(
-          "No generated website was found. Please generate a website first."
+        const response = await fetch(
+          "/api/website-builder",
+          {
+            method: "GET",
+            cache: "no-store",
+          }
         );
-        setLoading(false);
-        return;
-      }
 
-      const parsed = JSON.parse(stored) as Project;
+        let data: any = null;
 
-      if (!parsed?.html || !isValidHtml(parsed.html)) {
-        setError(
-          "The saved website project is invalid or incomplete."
+        try {
+          data = await response.json();
+        } catch {
+          data = null;
+        }
+
+        if (!response.ok) {
+          if (
+            data?.code === "SIGN_IN_REQUIRED"
+          ) {
+            setError(
+              "Please sign in to use Website Builder."
+            );
+          }
+
+          return;
+        }
+
+        setCredits({
+          balance:
+            Number(data?.balance) || 0,
+          totalGranted:
+            Number(data?.totalGranted) || 0,
+          totalUsed:
+            Number(data?.totalUsed) || 0,
+        });
+      } catch (err) {
+        console.error(
+          "Failed to load Website Builder credits:",
+          err
         );
-        setLoading(false);
-        return;
+      } finally {
+        setCreditsLoading(false);
       }
-
-      const cleaned = cleanHtml(parsed.html);
-
-      setProject(parsed);
-      setHtml(cleaned);
-    } catch (err) {
-      console.error("Failed to load website project:", err);
-
-      setError(
-        "Unable to load the website project."
-      );
-    } finally {
-      setLoading(false);
     }
+
+    async function loadProject() {
+      try {
+        const stored =
+          sessionStorage.getItem(STORAGE_KEY);
+
+        if (!stored) {
+          setError(
+            "No generated website was found. Please generate a website first."
+          );
+          setLoading(false);
+          return;
+        }
+
+        const parsed = JSON.parse(
+          stored
+        ) as Project;
+
+        if (
+          !parsed?.html ||
+          !isValidHtml(parsed.html)
+        ) {
+          setError(
+            "The saved website project is invalid or incomplete."
+          );
+          setLoading(false);
+          return;
+        }
+
+        const cleaned = cleanHtml(parsed.html);
+
+        setProject(parsed);
+        setHtml(cleaned);
+
+        if (
+          typeof parsed.creditsConsumed ===
+            "number" &&
+          typeof parsed.creditsRemaining ===
+            "number"
+        ) {
+          setLastBilling({
+            creditsConsumed:
+              parsed.creditsConsumed,
+            creditsRemaining:
+              parsed.creditsRemaining,
+          });
+        }
+      } catch (err) {
+        console.error(
+          "Failed to load website project:",
+          err
+        );
+
+        setError(
+          "Unable to load the website project."
+        );
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    loadProject();
+    loadCredits();
   }, []);
 
-  function saveProject(nextHtml: string) {
+  function saveProject(
+    nextHtml: string,
+    billing?: {
+      creditsConsumed: number;
+      creditsRemaining: number;
+    }
+  ) {
     if (!project) return;
 
     const nextProject: Project = {
@@ -128,6 +237,14 @@ export default function WebsiteBuilderEditorPage() {
       html: nextHtml,
       updatedAt: new Date().toISOString(),
     };
+
+    if (billing) {
+      nextProject.creditsConsumed =
+        billing.creditsConsumed;
+
+      nextProject.creditsRemaining =
+        billing.creditsRemaining;
+    }
 
     sessionStorage.setItem(
       STORAGE_KEY,
@@ -137,24 +254,72 @@ export default function WebsiteBuilderEditorPage() {
     setProject(nextProject);
   }
 
+  async function refreshCredits() {
+    try {
+      const response = await fetch(
+        "/api/website-builder",
+        {
+          method: "GET",
+          cache: "no-store",
+        }
+      );
+
+      let data: any = null;
+
+      try {
+        data = await response.json();
+      } catch {
+        data = null;
+      }
+
+      if (!response.ok) return;
+
+      setCredits({
+        balance:
+          Number(data?.balance) || 0,
+        totalGranted:
+          Number(data?.totalGranted) || 0,
+        totalUsed:
+          Number(data?.totalUsed) || 0,
+      });
+    } catch (err) {
+      console.error(
+        "Failed to refresh credits:",
+        err
+      );
+    }
+  }
+
   async function handleEdit() {
     const instruction = editPrompt.trim();
 
     if (!instruction) {
-      setError("Please describe what you want to change.");
+      setError(
+        "Please describe what you want to change."
+      );
       return;
     }
 
     if (!html.trim()) {
-      setError("No website HTML is available to edit.");
+      setError(
+        "No website HTML is available to edit."
+      );
       return;
     }
 
     if (editing) return;
 
+    if (credits.balance <= 0) {
+      setError(
+        "You do not have enough Website Builder credits. Please add credits to continue."
+      );
+      return;
+    }
+
     setError("");
     setSuccess("");
     setUsage(null);
+    setLastBilling(null);
     setEditing(true);
 
     try {
@@ -182,6 +347,33 @@ export default function WebsiteBuilderEditorPage() {
       }
 
       if (!response.ok) {
+        if (
+          data?.code ===
+          "SIGN_IN_REQUIRED"
+        ) {
+          throw new Error(
+            "Please sign in to use Website Builder."
+          );
+        }
+
+        if (
+          data?.code ===
+          "INSUFFICIENT_CREDITS"
+        ) {
+          const available =
+            Number(
+              data?.balance ??
+                data?.availableCredits ??
+                credits.balance
+            ) || 0;
+
+          throw new Error(
+            `Not enough Website Builder credits. Available: ${formatCredits(
+              available
+            )}.`
+          );
+        }
+
         const message =
           data?.message ||
           data?.error ||
@@ -202,37 +394,100 @@ export default function WebsiteBuilderEditorPage() {
         );
       }
 
+      const creditsConsumed =
+        Number(
+          data?.creditsConsumed
+        ) || 0;
+
+      const creditsRemaining =
+        Number(
+          data?.creditsRemaining
+        );
+
+      const finalRemaining =
+        Number.isFinite(
+          creditsRemaining
+        )
+          ? creditsRemaining
+          : Math.max(
+              0,
+              credits.balance -
+                creditsConsumed
+            );
+
       setHtml(nextHtml);
-      saveProject(nextHtml);
+
+      saveProject(nextHtml, {
+        creditsConsumed,
+        creditsRemaining:
+          finalRemaining,
+      });
 
       if (data?.usage) {
         setUsage({
           promptTokens:
-            Number(data.usage.promptTokens) || 0,
+            Number(
+              data.usage.promptTokens
+            ) || 0,
+
           outputTokens:
-            Number(data.usage.outputTokens) || 0,
+            Number(
+              data.usage.outputTokens
+            ) || 0,
+
           totalTokens:
-            Number(data.usage.totalTokens) || 0,
+            Number(
+              data.usage.totalTokens
+            ) || 0,
+
           thoughtsTokens:
-            Number(data.usage.thoughtsTokens) || 0,
+            Number(
+              data.usage.thoughtsTokens
+            ) || 0,
+
           cachedTokens:
-            Number(data.usage.cachedTokens) || 0,
+            Number(
+              data.usage.cachedTokens
+            ) || 0,
         });
       }
+
+      setCredits((previous) => ({
+        ...previous,
+        balance: finalRemaining,
+        totalUsed:
+          previous.totalUsed +
+          creditsConsumed,
+      }));
+
+      setLastBilling({
+        creditsConsumed,
+        creditsRemaining:
+          finalRemaining,
+      });
 
       setEditPrompt("");
 
       setSuccess(
-        "Website updated successfully. No ZUQEN credits were charged during this measurement test."
+        `Website updated successfully. ${formatCredits(
+          creditsConsumed
+        )} ZUQEN Website Builder credits were used.`
       );
+
+      await refreshCredits();
     } catch (err) {
-      console.error("Website edit error:", err);
+      console.error(
+        "Website edit error:",
+        err
+      );
 
       setError(
         err instanceof Error
           ? err.message
           : "Unable to edit the website."
       );
+
+      await refreshCredits();
     } finally {
       setEditing(false);
     }
@@ -242,7 +497,9 @@ export default function WebsiteBuilderEditorPage() {
     if (!html) return;
 
     try {
-      await navigator.clipboard.writeText(html);
+      await navigator.clipboard.writeText(
+        html
+      );
 
       setCopied(true);
 
@@ -250,7 +507,10 @@ export default function WebsiteBuilderEditorPage() {
         setCopied(false);
       }, 1600);
     } catch (err) {
-      console.error("Copy failed:", err);
+      console.error(
+        "Copy failed:",
+        err
+      );
       setCopied(false);
     }
   }
@@ -260,15 +520,20 @@ export default function WebsiteBuilderEditorPage() {
 
     const blob = new Blob(
       [html],
-      { type: "text/html;charset=utf-8" }
+      {
+        type: "text/html;charset=utf-8",
+      }
     );
 
-    const url = URL.createObjectURL(blob);
+    const url =
+      URL.createObjectURL(blob);
 
-    const anchor = document.createElement("a");
+    const anchor =
+      document.createElement("a");
 
     anchor.href = url;
-    anchor.download = "zuqen-website.html";
+    anchor.download =
+      "zuqen-website.html";
 
     document.body.appendChild(anchor);
     anchor.click();
@@ -293,11 +558,15 @@ export default function WebsiteBuilderEditorPage() {
   function resetProject() {
     if (!project?.html) return;
 
-    setHtml(project.html);
+    const cleaned =
+      cleanHtml(project.html);
+
+    setHtml(cleaned);
     setEditPrompt("");
     setError("");
     setSuccess("");
     setUsage(null);
+    setLastBilling(null);
   }
 
   if (loading) {
@@ -392,22 +661,31 @@ export default function WebsiteBuilderEditorPage() {
             </span>
 
             <span className="max-w-[280px] truncate rounded-lg border border-white/10 bg-white/[0.03] px-3 py-1.5 text-[10px] text-white/60">
-              {project?.prompt?.slice(0, 60) ||
+              {project?.prompt?.slice(
+                0,
+                60
+              ) ||
                 "Generated Website"}
             </span>
           </div>
 
           {/* Actions */}
           <div className="flex items-center gap-2">
-            <div className="hidden rounded-lg border border-amber-400/10 bg-amber-400/[0.05] px-3 py-1.5 text-[9px] font-medium text-amber-300/70 sm:block">
-              Measurement Mode
+            <div className="hidden rounded-lg border border-violet-400/10 bg-violet-400/[0.05] px-3 py-1.5 text-[9px] font-medium text-violet-300/80 sm:block">
+              {creditsLoading
+                ? "Loading Credits..."
+                : `${formatCredits(
+                    credits.balance
+                  )} Credits`}
             </div>
 
             <button
               onClick={copyCode}
               className="rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2.5 text-xs font-medium text-white/70 transition hover:bg-white/[0.08] hover:text-white"
             >
-              {copied ? "Copied ✓" : "Copy Code"}
+              {copied
+                ? "Copied ✓"
+                : "Copy Code"}
             </button>
 
             <button
@@ -433,7 +711,9 @@ export default function WebsiteBuilderEditorPage() {
             </span>
 
             <button
-              onClick={() => setError("")}
+              onClick={() =>
+                setError("")
+              }
               className="text-white/35 hover:text-white"
             >
               ×
@@ -452,7 +732,9 @@ export default function WebsiteBuilderEditorPage() {
             </span>
 
             <button
-              onClick={() => setSuccess("")}
+              onClick={() =>
+                setSuccess("")
+              }
               className="text-white/35 hover:text-white"
             >
               ×
@@ -473,9 +755,11 @@ export default function WebsiteBuilderEditorPage() {
               </div>
 
               <div className="mt-1 text-xs text-white/45">
-                {previewMode === "desktop"
+                {previewMode ===
+                "desktop"
                   ? "Desktop"
-                  : previewMode === "tablet"
+                  : previewMode ===
+                    "tablet"
                     ? "Tablet"
                     : "Mobile"}{" "}
                 viewport
@@ -485,10 +769,13 @@ export default function WebsiteBuilderEditorPage() {
             <div className="flex items-center gap-1 rounded-xl border border-white/10 bg-black/20 p-1">
               <button
                 onClick={() =>
-                  setPreviewMode("desktop")
+                  setPreviewMode(
+                    "desktop"
+                  )
                 }
                 className={`rounded-lg px-3 py-2 text-[10px] transition ${
-                  previewMode === "desktop"
+                  previewMode ===
+                  "desktop"
                     ? "bg-white text-black"
                     : "text-white/40 hover:text-white"
                 }`}
@@ -498,10 +785,13 @@ export default function WebsiteBuilderEditorPage() {
 
               <button
                 onClick={() =>
-                  setPreviewMode("tablet")
+                  setPreviewMode(
+                    "tablet"
+                  )
                 }
                 className={`rounded-lg px-3 py-2 text-[10px] transition ${
-                  previewMode === "tablet"
+                  previewMode ===
+                  "tablet"
                     ? "bg-white text-black"
                     : "text-white/40 hover:text-white"
                 }`}
@@ -511,10 +801,13 @@ export default function WebsiteBuilderEditorPage() {
 
               <button
                 onClick={() =>
-                  setPreviewMode("mobile")
+                  setPreviewMode(
+                    "mobile"
+                  )
                 }
                 className={`rounded-lg px-3 py-2 text-[10px] transition ${
-                  previewMode === "mobile"
+                  previewMode ===
+                  "mobile"
                     ? "bg-white text-black"
                     : "text-white/40 hover:text-white"
                 }`}
@@ -525,7 +818,9 @@ export default function WebsiteBuilderEditorPage() {
 
             <button
               onClick={() =>
-                setShowFullscreen(true)
+                setShowFullscreen(
+                  true
+                )
               }
               className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-[10px] text-white/45 transition hover:bg-white/[0.07] hover:text-white"
             >
@@ -540,7 +835,8 @@ export default function WebsiteBuilderEditorPage() {
             <div
               className="relative min-h-[500px] overflow-hidden rounded-2xl border border-white/10 bg-white shadow-2xl transition-all duration-300"
               style={{
-                width: getPreviewWidth(),
+                width:
+                  getPreviewWidth(),
                 maxWidth: "100%",
               }}
             >
@@ -576,6 +872,67 @@ export default function WebsiteBuilderEditorPage() {
               </div>
             </div>
 
+            {/* CREDIT BALANCE */}
+            <div className="mb-4 rounded-2xl border border-violet-400/10 bg-violet-400/[0.04] p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-[9px] font-semibold uppercase tracking-[0.16em] text-white/30">
+                    Website Builder Credits
+                  </div>
+
+                  <div className="mt-1 text-xl font-semibold text-violet-100">
+                    {creditsLoading
+                      ? "..."
+                      : formatCredits(
+                          credits.balance
+                        )}
+                  </div>
+                </div>
+
+                <div className="text-right">
+                  <div className="text-[8px] uppercase tracking-[0.12em] text-white/20">
+                    Conversion
+                  </div>
+
+                  <div className="mt-1 text-[10px] text-white/45">
+                    1.00 ={" "}
+                    {formatNumber(
+                      TOKENS_PER_CREDIT
+                    )}{" "}
+                    tokens
+                  </div>
+                </div>
+              </div>
+
+              {lastBilling && (
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <div className="rounded-xl border border-white/[0.06] bg-black/15 p-2.5">
+                    <div className="text-[8px] text-white/25">
+                      Last Used
+                    </div>
+
+                    <div className="mt-1 text-sm font-semibold text-white/75">
+                      {formatCredits(
+                        lastBilling.creditsConsumed
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-emerald-400/10 bg-emerald-400/[0.035] p-2.5">
+                    <div className="text-[8px] text-white/25">
+                      Remaining
+                    </div>
+
+                    <div className="mt-1 text-sm font-semibold text-emerald-200">
+                      {formatCredits(
+                        lastBilling.creditsRemaining
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
             <label className="mb-2 block text-[10px] font-medium uppercase tracking-[0.15em] text-white/30">
               What should change?
             </label>
@@ -583,12 +940,16 @@ export default function WebsiteBuilderEditorPage() {
             <textarea
               value={editPrompt}
               onChange={(event) =>
-                setEditPrompt(event.target.value)
+                setEditPrompt(
+                  event.target.value
+                )
               }
               onKeyDown={(event) => {
                 if (
-                  event.key === "Enter" &&
-                  (event.ctrlKey || event.metaKey)
+                  event.key ===
+                    "Enter" &&
+                  (event.ctrlKey ||
+                    event.metaKey)
                 ) {
                   event.preventDefault();
                   handleEdit();
@@ -605,8 +966,8 @@ export default function WebsiteBuilderEditorPage() {
                 Ctrl + Enter to edit
               </span>
 
-              <span className="text-[9px] text-emerald-300/50">
-                No credits charged
+              <span className="text-[9px] text-violet-300/60">
+                Charged by actual Gemini usage
               </span>
             </div>
 
@@ -614,7 +975,9 @@ export default function WebsiteBuilderEditorPage() {
               onClick={handleEdit}
               disabled={
                 editing ||
-                !editPrompt.trim()
+                !editPrompt.trim() ||
+                creditsLoading ||
+                credits.balance <= 0
               }
               className="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-500 to-blue-500 py-3.5 text-sm font-semibold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-30"
             >
@@ -645,8 +1008,8 @@ export default function WebsiteBuilderEditorPage() {
                 </div>
               </div>
 
-              <div className="rounded-lg border border-amber-400/10 bg-amber-400/[0.04] px-2 py-1 text-[8px] text-amber-300/60">
-                TEST
+              <div className="rounded-lg border border-violet-400/10 bg-violet-400/[0.04] px-2 py-1 text-[8px] text-violet-300/60">
+                REAL
               </div>
             </div>
 
@@ -694,7 +1057,50 @@ export default function WebsiteBuilderEditorPage() {
                       usage.totalTokens
                     )}
                   </div>
+
+                  <div className="mt-1 text-[8px] text-white/25">
+                    Actual usage used for credit billing
+                  </div>
                 </div>
+
+                {lastBilling && (
+                  <div className="col-span-2 grid grid-cols-2 gap-2">
+                    <div className="rounded-xl border border-blue-400/10 bg-blue-400/[0.035] p-3">
+                      <div className="text-[9px] text-white/25">
+                        ZUQEN Credits Used
+                      </div>
+
+                      <div className="mt-1 text-lg font-semibold text-blue-200">
+                        {formatCredits(
+                          lastBilling.creditsConsumed
+                        )}
+                      </div>
+
+                      <div className="mt-1 text-[8px] text-white/20">
+                        {formatNumber(
+                          TOKENS_PER_CREDIT
+                        )}{" "}
+                        Gemini tokens = 1 credit
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-emerald-400/10 bg-emerald-400/[0.035] p-3">
+                      <div className="text-[9px] text-white/25">
+                        Credits Remaining
+                      </div>
+
+                      <div className="mt-1 text-lg font-semibold text-emerald-200">
+                        {formatCredits(
+                          lastBilling.creditsRemaining
+                        )}
+                      </div>
+
+                      <div className="mt-1 text-[8px] text-white/20">
+                        Available balance
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {(usage.thoughtsTokens ||
                   usage.cachedTokens) ? (
@@ -706,7 +1112,8 @@ export default function WebsiteBuilderEditorPage() {
 
                       <div className="mt-1 text-xs font-medium">
                         {formatNumber(
-                          usage.thoughtsTokens || 0
+                          usage.thoughtsTokens ||
+                            0
                         )}
                       </div>
                     </div>
@@ -718,7 +1125,8 @@ export default function WebsiteBuilderEditorPage() {
 
                       <div className="mt-1 text-xs font-medium">
                         {formatNumber(
-                          usage.cachedTokens || 0
+                          usage.cachedTokens ||
+                            0
                         )}
                       </div>
                     </div>
@@ -732,8 +1140,9 @@ export default function WebsiteBuilderEditorPage() {
                 </div>
 
                 <div className="mt-2 text-[9px] leading-5 text-white/20">
-                  Run exactly one edit to measure the
-                  actual Gemini token usage.
+                  After an edit, actual Gemini
+                  total-token usage and the exact
+                  ZUQEN credit deduction will appear here.
                 </div>
               </div>
             )}
@@ -747,7 +1156,9 @@ export default function WebsiteBuilderEditorPage() {
 
             <div className="grid grid-cols-2 gap-2">
               <button
-                onClick={() => setShowCode(true)}
+                onClick={() =>
+                  setShowCode(true)
+                }
                 className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3 text-[10px] text-white/50 transition hover:bg-white/[0.07] hover:text-white"
               >
                 View Code
@@ -770,25 +1181,62 @@ export default function WebsiteBuilderEditorPage() {
             </div>
           </div>
 
-          {/* TESTING NOTICE */}
-          <div className="rounded-3xl border border-amber-400/10 bg-amber-400/[0.035] p-5">
+          {/* CREDIT INFORMATION */}
+          <div className="rounded-3xl border border-violet-400/10 bg-violet-400/[0.035] p-5">
             <div className="flex items-start gap-3">
-              <div className="mt-0.5 text-amber-300">
+              <div className="mt-0.5 text-violet-300">
                 ◉
               </div>
 
               <div>
-                <div className="text-xs font-medium text-amber-200/80">
-                  Measurement test
+                <div className="text-xs font-medium text-violet-200/80">
+                  Real Gemini billing
                 </div>
 
-                <p className="mt-2 text-[10px] leading-5 text-amber-100/35">
-                  This edit is intentionally running
-                  without ZUQEN credit deduction. The
-                  purpose is to measure the real Gemini
-                  token usage before the final credit
-                  conversion is implemented.
+                <p className="mt-2 text-[10px] leading-5 text-violet-100/40">
+                  Website Builder credits are
+                  calculated from the actual Gemini
+                  total token usage. 1.00 ZUQEN credit
+                  equals {formatNumber(
+                    TOKENS_PER_CREDIT
+                  )} Gemini tokens.
                 </p>
+
+                <div className="mt-3 flex items-center justify-between border-t border-white/[0.06] pt-3">
+                  <span className="text-[9px] text-white/25">
+                    Total granted
+                  </span>
+
+                  <span className="text-[10px] font-medium text-white/55">
+                    {formatCredits(
+                      credits.totalGranted
+                    )}
+                  </span>
+                </div>
+
+                <div className="mt-2 flex items-center justify-between">
+                  <span className="text-[9px] text-white/25">
+                    Total used
+                  </span>
+
+                  <span className="text-[10px] font-medium text-white/55">
+                    {formatCredits(
+                      credits.totalUsed
+                    )}
+                  </span>
+                </div>
+
+                <div className="mt-2 flex items-center justify-between">
+                  <span className="text-[9px] text-white/25">
+                    Available
+                  </span>
+
+                  <span className="text-[10px] font-semibold text-emerald-300/80">
+                    {formatCredits(
+                      credits.balance
+                    )}
+                  </span>
+                </div>
               </div>
             </div>
           </div>
@@ -806,7 +1254,10 @@ export default function WebsiteBuilderEditorPage() {
                 </div>
 
                 <div className="mt-1 text-[9px] text-white/25">
-                  {formatNumber(html.length)} characters
+                  {formatNumber(
+                    html.length
+                  )}{" "}
+                  characters
                 </div>
               </div>
 
@@ -821,7 +1272,9 @@ export default function WebsiteBuilderEditorPage() {
                 </button>
 
                 <button
-                  onClick={() => setShowCode(false)}
+                  onClick={() =>
+                    setShowCode(false)
+                  }
                   className="rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white/50 hover:text-white"
                 >
                   ×
@@ -852,7 +1305,9 @@ export default function WebsiteBuilderEditorPage() {
 
             <button
               onClick={() =>
-                setShowFullscreen(false)
+                setShowFullscreen(
+                  false
+                )
               }
               className="rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2 text-xs text-white/60 hover:text-white"
             >
