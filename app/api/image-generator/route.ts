@@ -1,27 +1,96 @@
-
 import { NextResponse } from "next/server";
-import { InferenceClient } from "@huggingface/inference";
+import { fal } from "@fal-ai/client";
 import { createServerSupabaseClient } from "@/lib/supabase-server";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
 const FEATURE_KEY = "image_generator";
-const PROVIDER = "huggingface";
+const PROVIDER = "fal";
 const MODEL = "black-forest-labs/FLUX.1-schnell";
-const ROUTED_PROVIDER = "auto";
+const FAL_MODEL = "fal-ai/flux/schnell";
+const IMAGE_CREDIT_COST = 1.0;
 
-const IMAGE_CREDIT_COST = 1.00;
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (
+    typeof error === "object" &&
+    error !== null
+  ) {
+    try {
+      return JSON.stringify(error);
+    } catch {
+      return "Unknown error.";
+    }
+  }
+
+  return String(error);
+}
+
+function getErrorStatus(message: string): number {
+  const lower = message.toLowerCase();
+
+  if (
+    lower.includes("401") ||
+    lower.includes("unauthorized") ||
+    lower.includes("invalid api key") ||
+    lower.includes("invalid key") ||
+    lower.includes("authentication")
+  ) {
+    return 401;
+  }
+
+  if (
+    lower.includes("403") ||
+    lower.includes("forbidden") ||
+    lower.includes("permission")
+  ) {
+    return 403;
+  }
+
+  if (
+    lower.includes("429") ||
+    lower.includes("rate limit") ||
+    lower.includes("too many requests")
+  ) {
+    return 429;
+  }
+
+  if (
+    lower.includes("402") ||
+    lower.includes("payment required") ||
+    lower.includes("insufficient balance") ||
+    lower.includes("insufficient funds") ||
+    lower.includes("billing")
+  ) {
+    return 402;
+  }
+
+  if (
+    lower.includes("timeout") ||
+    lower.includes("timed out") ||
+    lower.includes("time out")
+  ) {
+    return 504;
+  }
+
+  return 500;
+}
 
 export async function POST(request: Request) {
-  const supabase = await createServerSupabaseClient();
-
   let reservationId: string | null = null;
 
   try {
-    // ---------------------------------------------------------
-    // 1. Authenticate user
-    // ---------------------------------------------------------
+    const supabase = await createServerSupabaseClient();
+
+    /*
+     * ---------------------------------------------------------
+     * 1. AUTHENTICATION
+     * ---------------------------------------------------------
+     */
 
     const {
       data: { user },
@@ -39,11 +108,11 @@ export async function POST(request: Request) {
       );
     }
 
-    // ---------------------------------------------------------
-    // 2. Guest / anonymous users cannot generate images
-    // ---------------------------------------------------------
+    /*
+     * Guests / anonymous users cannot generate images.
+     */
 
-    if (user.is_anonymous === true) {
+    if (user.is_anonymous) {
       return NextResponse.json(
         {
           success: false,
@@ -54,9 +123,11 @@ export async function POST(request: Request) {
       );
     }
 
-    // ---------------------------------------------------------
-    // 3. Validate prompt
-    // ---------------------------------------------------------
+    /*
+     * ---------------------------------------------------------
+     * 2. VALIDATE PROMPT
+     * ---------------------------------------------------------
+     */
 
     const body = await request.json();
 
@@ -69,6 +140,7 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           success: false,
+          code: "PROMPT_REQUIRED",
           error: "Please enter an image prompt.",
         },
         { status: 400 }
@@ -79,29 +151,64 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           success: false,
-          error: "Prompt must be 1000 characters or less.",
+          code: "PROMPT_TOO_LONG",
+          error:
+            "Prompt must be 1000 characters or less.",
         },
         { status: 400 }
       );
     }
 
-    // ---------------------------------------------------------
-    // 4. Check current Image Generator balance
-    // ---------------------------------------------------------
+    /*
+     * ---------------------------------------------------------
+     * 3. CHECK FAL KEY
+     * ---------------------------------------------------------
+     */
+
+    const falKey = process.env.FAL_KEY;
+
+    if (!falKey) {
+      console.error(
+        "ZUQEN image generator: FAL_KEY is missing."
+      );
+
+      return NextResponse.json(
+        {
+          success: false,
+          code: "PROVIDER_NOT_CONFIGURED",
+          error:
+            "Image generation provider is not configured. Please add FAL_KEY to the environment variables.",
+        },
+        { status: 500 }
+      );
+    }
+
+    /*
+     * The official fal client reads FAL_KEY from the
+     * server environment.
+     */
+
+    fal.config({
+      credentials: falKey,
+    });
+
+    /*
+     * ---------------------------------------------------------
+     * 4. READ CURRENT ZUQEN IMAGE CREDIT BALANCE
+     * ---------------------------------------------------------
+     */
 
     const { data: balanceRow, error: balanceError } =
       await supabase
         .from("feature_credit_balances")
-        .select(
-          "balance,total_granted,total_used"
-        )
+        .select("balance")
         .eq("user_id", user.id)
         .eq("feature_key", FEATURE_KEY)
         .maybeSingle();
 
     if (balanceError) {
       console.error(
-        "ZUQEN image credit balance error:",
+        "ZUQEN image generator balance error:",
         balanceError
       );
 
@@ -120,74 +227,61 @@ export async function POST(request: Request) {
       balanceRow?.balance ?? 0
     );
 
+    /*
+     * ---------------------------------------------------------
+     * 5. CHECK ZUQEN CREDIT
+     * ---------------------------------------------------------
+     */
+
     if (currentBalance < IMAGE_CREDIT_COST) {
       return NextResponse.json(
         {
           success: false,
           code: "INSUFFICIENT_CREDITS",
           error:
-            "You don't have enough Image Generator credits. Please add more credits to continue.",
-          credits: {
-            balance: currentBalance,
-            required: IMAGE_CREDIT_COST,
-          },
+            "You don't have enough Image Generator credits.",
+          creditsRemaining: currentBalance,
         },
         { status: 402 }
       );
     }
 
-    // ---------------------------------------------------------
-    // 5. Check Hugging Face token
-    // ---------------------------------------------------------
-
-    const token = process.env.HF_TOKEN;
-
-    if (!token) {
-      console.error(
-        "ZUQEN image generator: HF_TOKEN is missing."
-      );
-
-      return NextResponse.json(
-        {
-          success: false,
-          code: "HF_TOKEN_MISSING",
-          error:
-            "Hugging Face token is not configured. Please add HF_TOKEN to your environment variables.",
-        },
-        { status: 500 }
-      );
-    }
-
-    // ---------------------------------------------------------
-    // 6. Reserve exactly 1.00 ZUQEN Image Credit
-    // ---------------------------------------------------------
+    /*
+     * ---------------------------------------------------------
+     * 6. RESERVE 1.00 ZUQEN IMAGE CREDIT
+     * ---------------------------------------------------------
+     */
 
     const providerRequestId =
-      `image-${user.id}-${Date.now()}`;
+      `fal_${user.id}_${Date.now()}_${Math.random()
+        .toString(36)
+        .slice(2, 10)}`;
 
-    const { data: reservation, error: reservationError } =
+    const { data: reservation, error: reserveError } =
       await supabase.rpc(
         "reserve_feature_credits",
         {
           p_user_id: user.id,
           p_feature_key: FEATURE_KEY,
           p_amount: IMAGE_CREDIT_COST,
-          p_provider_request_id: providerRequestId,
+          p_provider_request_id:
+            providerRequestId,
           p_reference_id: providerRequestId,
           p_metadata: {
             source: "image_generator",
-            model: MODEL,
             provider: PROVIDER,
-            routed_provider: ROUTED_PROVIDER,
-            credits_per_image: IMAGE_CREDIT_COST,
+            model: MODEL,
+            fal_model: FAL_MODEL,
+            credits_reserved: IMAGE_CREDIT_COST,
+            prompt_length: prompt.length,
           },
         }
       );
 
-    if (reservationError) {
+    if (reserveError) {
       console.error(
         "ZUQEN image credit reservation error:",
-        reservationError
+        reserveError
       );
 
       return NextResponse.json(
@@ -195,20 +289,21 @@ export async function POST(request: Request) {
           success: false,
           code: "CREDIT_RESERVATION_ERROR",
           error:
-            "Unable to reserve Image Generator credits. Please try again.",
+            "Unable to reserve your Image Generator credit. Please try again.",
         },
         { status: 500 }
       );
     }
 
-    if (!reservation?.success) {
-      console.error(
-        "ZUQEN image credit reservation failed:",
-        reservation
-      );
+    if (
+      !reservation ||
+      reservation.success !== true
+    ) {
+      const reservationCode =
+        reservation?.code;
 
       if (
-        reservation?.code ===
+        reservationCode ===
         "INSUFFICIENT_CREDITS"
       ) {
         return NextResponse.json(
@@ -216,37 +311,14 @@ export async function POST(request: Request) {
             success: false,
             code: "INSUFFICIENT_CREDITS",
             error:
-              "You don't have enough Image Generator credits. Please add more credits to continue.",
-            credits: {
-              balance: Number(
-                reservation?.newBalance ??
-                  currentBalance
-              ),
-              required: IMAGE_CREDIT_COST,
-            },
+              "You don't have enough Image Generator credits.",
           },
           { status: 402 }
         );
       }
 
-      return NextResponse.json(
-        {
-          success: false,
-          code: "CREDIT_RESERVATION_ERROR",
-          error:
-            "Unable to reserve Image Generator credits. Please try again.",
-        },
-        { status: 500 }
-      );
-    }
-
-    const reservedId =
-      reservation.reservationId ??
-      reservation.reservation_id;
-
-    if (typeof reservedId !== "string") {
       console.error(
-        "ZUQEN image generator: reservation ID missing:",
+        "Unexpected credit reservation response:",
         reservation
       );
 
@@ -255,43 +327,203 @@ export async function POST(request: Request) {
           success: false,
           code: "CREDIT_RESERVATION_ERROR",
           error:
-            "Image Generator credit reservation could not be created.",
+            "Unable to reserve your Image Generator credit. Please try again.",
         },
         { status: 500 }
       );
     }
 
-    reservationId = reservedId;
+    reservationId =
+      reservation.reservationId;
 
-    // ---------------------------------------------------------
-    // 7. Generate image with Hugging Face
-    // ---------------------------------------------------------
+    /*
+     * ---------------------------------------------------------
+     * 7. GENERATE IMAGE THROUGH FAL
+     * ---------------------------------------------------------
+     */
 
-    const client = new InferenceClient(token);
+    let falResult: Awaited<
+      ReturnType<typeof fal.subscribe>
+    >;
 
-    const image = await client.textToImage(
-      {
-        model: MODEL,
-        inputs: prompt,
-        provider: ROUTED_PROVIDER,
-      },
-      {
-        outputType: "dataUrl",
+    try {
+      falResult = await fal.subscribe(
+        FAL_MODEL,
+        {
+          input: {
+            prompt,
+          },
+        }
+      );
+    } catch (providerError) {
+      /*
+       * Provider failed.
+       * The reservation MUST be refunded.
+       */
+
+      const providerMessage =
+        getErrorMessage(providerError);
+
+      console.error(
+        "ZUQEN fal image generation error:",
+        providerMessage
+      );
+
+      try {
+        await supabase.rpc(
+          "refund_feature_credit_reservation",
+          {
+            p_reservation_id:
+              reservationId,
+            p_provider_request_id:
+              providerRequestId,
+            p_description:
+              "Image Generator credit refunded after fal generation failure",
+            p_reference_id:
+              providerRequestId,
+            p_metadata: {
+              provider: PROVIDER,
+              model: MODEL,
+              fal_model: FAL_MODEL,
+              reason: "provider_error",
+              error: providerMessage,
+            },
+          }
+        );
+      } catch (refundError) {
+        console.error(
+          "CRITICAL: failed to refund Image Generator credit:",
+          refundError
+        );
       }
-    );
 
-    if (!image) {
-      throw new Error(
-        "Hugging Face did not return an image."
+      let userMessage =
+        "Image generation failed. Your Image Credit was refunded.";
+
+      const lower =
+        providerMessage.toLowerCase();
+
+      if (
+        lower.includes("401") ||
+        lower.includes("unauthorized") ||
+        lower.includes("invalid api key") ||
+        lower.includes("invalid key") ||
+        lower.includes("authentication")
+      ) {
+        userMessage =
+          "fal.ai authentication failed. Please check your FAL_KEY.";
+      } else if (
+        lower.includes("403") ||
+        lower.includes("forbidden") ||
+        lower.includes("permission")
+      ) {
+        userMessage =
+          "fal.ai denied the request. Please check your API key and account permissions.";
+      } else if (
+        lower.includes("402") ||
+        lower.includes("payment required") ||
+        lower.includes("insufficient balance") ||
+        lower.includes("insufficient funds") ||
+        lower.includes("billing")
+      ) {
+        userMessage =
+          "The fal.ai account does not have enough available balance to generate this image. Your ZUQEN Image Credit was refunded.";
+      } else if (
+        lower.includes("429") ||
+        lower.includes("rate limit") ||
+        lower.includes("too many requests")
+      ) {
+        userMessage =
+          "fal.ai rate limit was reached. Your ZUQEN Image Credit was refunded. Please try again later.";
+      } else if (
+        lower.includes("timeout") ||
+        lower.includes("timed out") ||
+        lower.includes("time out")
+      ) {
+        userMessage =
+          "Image generation timed out. Your ZUQEN Image Credit was refunded.";
+      }
+
+      return NextResponse.json(
+        {
+          success: false,
+          code: "IMAGE_GENERATION_FAILED",
+          provider: PROVIDER,
+          model: MODEL,
+          error: userMessage,
+        },
+        {
+          status:
+            getErrorStatus(providerMessage),
+        }
       );
     }
 
-    // ---------------------------------------------------------
-    // 8. Successful generation = exactly 1.00 credit
-    // ---------------------------------------------------------
+    /*
+     * ---------------------------------------------------------
+     * 8. EXTRACT IMAGE
+     * ---------------------------------------------------------
+     */
 
-    const settlementReservationId: string =
-      reservationId;
+    const imageUrl =
+      falResult?.data?.images?.[0]?.url;
+
+    if (!imageUrl) {
+      console.error(
+        "ZUQEN fal response did not contain an image:",
+        falResult?.data
+      );
+
+      /*
+       * Refund because generation did not
+       * produce a usable image.
+       */
+
+      try {
+        await supabase.rpc(
+          "refund_feature_credit_reservation",
+          {
+            p_reservation_id:
+              reservationId,
+            p_provider_request_id:
+              providerRequestId,
+            p_description:
+              "Image Generator credit refunded because fal returned no image",
+            p_reference_id:
+              providerRequestId,
+            p_metadata: {
+              provider: PROVIDER,
+              model: MODEL,
+              fal_model: FAL_MODEL,
+              reason: "missing_image",
+            },
+          }
+        );
+      } catch (refundError) {
+        console.error(
+          "CRITICAL: failed to refund missing-image reservation:",
+          refundError
+        );
+      }
+
+      return NextResponse.json(
+        {
+          success: false,
+          code: "IMAGE_NOT_RETURNED",
+          provider: PROVIDER,
+          model: MODEL,
+          error:
+            "fal.ai completed the request but did not return an image. Your Image Credit was refunded.",
+        },
+        { status: 502 }
+      );
+    }
+
+    /*
+     * ---------------------------------------------------------
+     * 9. SETTLE EXACTLY 1.00 ZUQEN IMAGE CREDIT
+     * ---------------------------------------------------------
+     */
 
     const {
       data: settlement,
@@ -300,53 +532,65 @@ export async function POST(request: Request) {
       "settle_feature_credit_reservation",
       {
         p_reservation_id:
-          settlementReservationId,
-        p_actual_amount: IMAGE_CREDIT_COST,
+          reservationId,
+        p_actual_amount:
+          IMAGE_CREDIT_COST,
         p_provider_request_id:
           providerRequestId,
         p_description:
-          "FLUX.1-schnell image generation",
-        p_reference_id: providerRequestId,
+          "Successful FLUX.1-schnell image generation",
+        p_reference_id:
+          providerRequestId,
         p_metadata: {
-          source: "image_generator",
-          model: MODEL,
           provider: PROVIDER,
-          routed_provider: ROUTED_PROVIDER,
+          model: MODEL,
+          fal_model: FAL_MODEL,
+          credits_consumed:
+            IMAGE_CREDIT_COST,
+          images_generated: 1,
           prompt_length: prompt.length,
-          credits_consumed: IMAGE_CREDIT_COST,
         },
       }
     );
 
-    if (settlementError) {
+    if (
+      settlementError ||
+      !settlement ||
+      settlement.success !== true
+    ) {
       console.error(
-        "ZUQEN image credit settlement error:",
-        settlementError
+        "ZUQEN image credit settlement failed:",
+        settlementError,
+        settlement
       );
 
-      // Try to refund if settlement failed.
+      /*
+       * Emergency refund attempt.
+       */
       try {
         await supabase.rpc(
           "refund_feature_credit_reservation",
           {
             p_reservation_id:
-              settlementReservationId,
+              reservationId,
             p_provider_request_id:
               providerRequestId,
             p_description:
-              "Image Generator settlement failed - reservation refunded",
-            p_reference_id: providerRequestId,
+              "Emergency Image Generator credit refund after settlement failure",
+            p_reference_id:
+              providerRequestId,
             p_metadata: {
-              source: "image_generator",
+              provider: PROVIDER,
+              model: MODEL,
+              fal_model: FAL_MODEL,
               reason:
                 "settlement_failed",
-              model: MODEL,
             },
           }
         );
       } catch (refundError) {
         console.error(
-          "ZUQEN image credit emergency refund error:",
+          "CRITICAL: emergency Image Generator refund failed:",
           refundError
         );
       }
@@ -355,49 +599,33 @@ export async function POST(request: Request) {
         {
           success: false,
           code: "CREDIT_SETTLEMENT_ERROR",
+          provider: PROVIDER,
+          model: MODEL,
           error:
-            "The image was generated, but the credit transaction could not be completed. Please contact support before generating again.",
+            "The image was generated, but ZUQEN could not safely finalize the credit transaction. Your credit was protected and the request needs to be retried.",
         },
         { status: 500 }
       );
     }
-
-    if (!settlement?.success) {
-      console.error(
-        "ZUQEN image credit settlement failed:",
-        settlement
-      );
-
-      return NextResponse.json(
-        {
-          success: false,
-          code: "CREDIT_SETTLEMENT_ERROR",
-          error:
-            "The image was generated, but the credit transaction could not be completed.",
-        },
-        { status: 500 }
-      );
-    }
-
-    // Reservation is now settled.
-    reservationId = null;
 
     const creditsRemaining = Number(
-      settlement?.newBalance ?? 0
+      settlement.newBalance ?? 0
     );
 
-    // ---------------------------------------------------------
-    // 9. Return successful response
-    // ---------------------------------------------------------
+    /*
+     * ---------------------------------------------------------
+     * 10. SUCCESS
+     * ---------------------------------------------------------
+     */
 
     return NextResponse.json(
       {
         success: true,
-        image,
+        image: imageUrl,
         provider: PROVIDER,
         feature: FEATURE_KEY,
         model: MODEL,
-        routedProvider: ROUTED_PROVIDER,
+        falModel: FAL_MODEL,
 
         usage: {
           tracked: true,
@@ -405,179 +633,99 @@ export async function POST(request: Request) {
         },
 
         billing: {
-          creditsConsumed: IMAGE_CREDIT_COST,
+          creditsConsumed:
+            IMAGE_CREDIT_COST,
           creditsRemaining,
         },
 
-        creditsConsumed: IMAGE_CREDIT_COST,
+        creditsConsumed:
+          IMAGE_CREDIT_COST,
         creditsRemaining,
 
-        text: "Image generated successfully by ZUQEN.",
+        text:
+          "Image generated successfully by ZUQEN.",
       },
       {
         status: 200,
         headers: {
-          "Cache-Control": "no-store",
-          "X-Zuquen-Provider": PROVIDER,
-          "X-Zuquen-Feature": FEATURE_KEY,
-          "X-Zuquen-Model": MODEL,
-          "X-Zuquen-Credits-Consumed":
-            IMAGE_CREDIT_COST.toFixed(2),
-          "X-Zuquen-Credits-Remaining":
-            creditsRemaining.toFixed(2),
+          "Cache-Control":
+            "no-store",
+          "X-Zuquen-Provider":
+            PROVIDER,
+          "X-Zuquen-Feature":
+            FEATURE_KEY,
+          "X-Zuquen-Model":
+            MODEL,
+          "X-Zuquen-Usage-Tracked":
+            "true",
         },
       }
     );
   } catch (error: unknown) {
+    /*
+     * ---------------------------------------------------------
+     * UNEXPECTED ERROR
+     * ---------------------------------------------------------
+     */
+
+    const message =
+      getErrorMessage(error);
+
     console.error(
-      "ZUQEN image generation error:",
+      "ZUQEN image generator unexpected error:",
       error
     );
 
-    // ---------------------------------------------------------
-    // 10. Refund reserved credit after any generation failure
-    // ---------------------------------------------------------
+    /*
+     * If a reservation exists, attempt to refund it.
+     */
 
-    if (typeof reservationId === "string") {
+    if (reservationId) {
       try {
-        const {
-          data: refund,
-          error: refundError,
-        } = await supabase.rpc(
+        const supabase =
+          await createServerSupabaseClient();
+
+        await supabase.rpc(
           "refund_feature_credit_reservation",
           {
             p_reservation_id:
               reservationId,
             p_provider_request_id:
-              `image-refund-${Date.now()}`,
+              null,
             p_description:
-              "Failed Image Generator request - credit refunded",
-            p_reference_id: reservationId,
+              "Image Generator credit refunded after unexpected error",
+            p_reference_id:
+              reservationId,
             p_metadata: {
-              source: "image_generator",
+              provider: PROVIDER,
               model: MODEL,
+              fal_model: FAL_MODEL,
               reason:
-                "image_generation_failed",
+                "unexpected_server_error",
+              error: message,
             },
           }
         );
-
-        if (refundError) {
-          console.error(
-            "ZUQEN image credit refund error:",
-            refundError
-          );
-        } else {
-          console.log(
-            "ZUQEN image credit reservation refunded:",
-            refund
-          );
-        }
       } catch (refundError) {
         console.error(
-          "ZUQEN image credit refund exception:",
+          "CRITICAL: unexpected-error refund failed:",
           refundError
         );
       }
     }
 
-    let message =
-      "Image generation failed. Please try again.";
-
-    if (error instanceof Error) {
-      message = error.message;
-    }
-
-    const lowerMessage =
-      message.toLowerCase();
-
-    if (
-      lowerMessage.includes("401") ||
-      lowerMessage.includes("unauthorized") ||
-      lowerMessage.includes("invalid token") ||
-      lowerMessage.includes("authentication")
-    ) {
-      message =
-        "Hugging Face authentication failed. Please check your HF_TOKEN and make sure it has the required Inference permission.";
-    } else if (
-      lowerMessage.includes("403") ||
-      lowerMessage.includes("forbidden") ||
-      lowerMessage.includes("permission")
-    ) {
-      message =
-        "Hugging Face denied the request. Please check your token permissions.";
-    } else if (
-      lowerMessage.includes("402") ||
-      lowerMessage.includes("payment required") ||
-      lowerMessage.includes("insufficient credit") ||
-      lowerMessage.includes("insufficient credits")
-    ) {
-      message =
-        "Hugging Face credits are unavailable for this request. Please check your Hugging Face billing or available credits.";
-    } else if (
-      lowerMessage.includes("429") ||
-      lowerMessage.includes("rate limit") ||
-      lowerMessage.includes("too many requests") ||
-      lowerMessage.includes("quota")
-    ) {
-      message =
-        "Hugging Face rate limit or available credits were reached. Please try again later.";
-    } else if (
-      lowerMessage.includes("model") &&
-      (lowerMessage.includes("not found") ||
-        lowerMessage.includes("unavailable"))
-    ) {
-      message =
-        "The selected image model is currently unavailable.";
-    } else if (
-      lowerMessage.includes("timeout") ||
-      lowerMessage.includes("timed out") ||
-      lowerMessage.includes("time out")
-    ) {
-      message =
-        "Image generation timed out. Please try again.";
-    }
-
-    let status = 500;
-
-    if (
-      lowerMessage.includes("401") ||
-      lowerMessage.includes("unauthorized")
-    ) {
-      status = 401;
-    } else if (
-      lowerMessage.includes("403") ||
-      lowerMessage.includes("forbidden")
-    ) {
-      status = 403;
-    } else if (
-      lowerMessage.includes("429") ||
-      lowerMessage.includes("rate limit") ||
-      lowerMessage.includes("quota")
-    ) {
-      status = 429;
-    } else if (
-      lowerMessage.includes("402") ||
-      lowerMessage.includes("payment required") ||
-      lowerMessage.includes("insufficient credit")
-    ) {
-      status = 402;
-    }
-
     return NextResponse.json(
       {
         success: false,
+        code: "IMAGE_GENERATION_ERROR",
         provider: PROVIDER,
         feature: FEATURE_KEY,
-        model: MODEL,
-        error: message,
-        creditRefunded:
-          typeof reservationId === "string"
-            ? "attempted"
-            : "not_required",
+        error:
+          "Image generation failed. Your Image Credit was protected.",
       },
-      { status }
+      {
+        status: 500,
+      }
     );
   }
 }
-
