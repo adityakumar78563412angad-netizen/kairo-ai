@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import puter from "@heyputer/puter.js";
 import { createClient } from "@/lib/supabase";
 
 const FEATURE_KEY = "image_generator";
@@ -84,10 +85,14 @@ export default function ImageGeneratorPage() {
     if (!trimmedPrompt || loading) return;
 
     setError("");
+    setImage(null);
 
     /*
-     * Do not allow generation when the balance is already known
-     * to be empty.
+     * ZUQEN credit check.
+     *
+     * This first Puter test does NOT deduct the credit yet.
+     * We will connect the real reservation/settlement system
+     * after confirming Puter image generation works.
      */
     if (credits !== null && credits < 1) {
       setError(
@@ -97,91 +102,53 @@ export default function ImageGeneratorPage() {
     }
 
     setLoading(true);
-    setImage(null);
 
     try {
-      const response = await fetch("/api/image-generator", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          prompt: trimmedPrompt,
-        }),
-      });
-
-      let result: {
-        success?: boolean;
-        image?: string;
-        error?: string;
-        creditsConsumed?: number;
-        creditsRemaining?: number;
-        billing?: {
-          creditsConsumed?: number;
-          creditsRemaining?: number;
-        };
-      };
-
-      try {
-        result = await response.json();
-      } catch {
-        throw new Error(
-          `Server returned an invalid response (${response.status}).`
-        );
-      }
-
-      if (!response.ok || !result.success) {
-        throw new Error(
-          result.error || "Image generation failed."
-        );
-      }
-
-      if (!result.image) {
-        throw new Error(
-          "The AI did not return an image."
-        );
-      }
-
-      setImage(result.image);
+      /*
+       * Puter image generation.
+       *
+       * No API key is required.
+       * Puter handles its own authentication.
+       */
+      const generatedImage = await puter.ai.txt2img(
+        trimmedPrompt
+      );
 
       /*
-       * API returns the authoritative remaining balance
-       * after successful generation.
+       * Puter returns an image element.
+       * We convert its source into a string so React
+       * can display it.
        */
-      if (
-        typeof result.creditsRemaining === "number"
-      ) {
-        setCredits(result.creditsRemaining);
-      } else if (
-        typeof result.billing?.creditsRemaining ===
-        "number"
-      ) {
-        setCredits(
-          result.billing.creditsRemaining
+      if (!generatedImage) {
+        throw new Error(
+          "Puter did not return an image."
         );
-      } else {
-        /*
-         * Fallback: reload the real balance from Supabase.
-         */
-        await loadCredits();
       }
+
+      const imageSource =
+        typeof generatedImage === "string"
+          ? generatedImage
+          : generatedImage.src;
+
+      if (!imageSource) {
+        throw new Error(
+          "Puter returned an invalid image."
+        );
+      }
+
+      setImage(imageSource);
     } catch (err) {
       console.error(
-        "Image generation failed:",
+        "Puter image generation failed:",
         err
       );
 
-      setError(
+      const message =
         err instanceof Error
           ? err.message
-          : "Something went wrong while generating the image."
-      );
+          : "Something went wrong while generating the image with Puter.";
 
-      /*
-       * Reload balance after any failed request so the UI
-       * stays synchronized with the database.
-       */
-      await loadCredits();
+      setError(message);
     } finally {
       setLoading(false);
     }
@@ -322,7 +289,7 @@ export default function ImageGeneratorPage() {
               </div>
 
               <div className="rounded-lg border border-white/[0.07] bg-white/[0.035] px-2.5 py-1 text-[10px] text-white/30">
-                FLUX
+                PUTER AI
               </div>
             </div>
 
@@ -481,9 +448,10 @@ export default function ImageGeneratorPage() {
                       </p>
 
                       <p className="mt-1 text-[10px] text-white/20">
-                        1.00 Image Credit used
+                        Test generation · ZUQEN credit not
+                        deducted yet
                         {credits !== null
-                          ? ` · ${credits.toFixed(2)} remaining`
+                          ? ` · ${credits.toFixed(2)} available`
                           : ""}
                       </p>
                     </div>
