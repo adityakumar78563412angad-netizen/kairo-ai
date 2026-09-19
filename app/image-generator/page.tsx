@@ -1,32 +1,101 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import puter from "@heyputer/puter.js";
 import { createClient } from "@/lib/supabase";
 
 const FEATURE_KEY = "image_generator";
+const IMAGE_MODEL = "gpt-image-1-mini";
+const IMAGE_CREDIT_COST = 1.0;
+
+type ImageError = {
+  message?: string;
+  code?: string;
+  errorCode?: string;
+};
+
+type ReservationResult = {
+  success?: boolean;
+  code?: string;
+  reservationId?: string;
+  reservation_id?: string;
+  provider?: string;
+  reserved?: number;
+  newBalance?: number;
+  new_balance?: number;
+};
+
+type SettlementResult = {
+  success?: boolean;
+  code?: string;
+  used?: number;
+  refunded?: number;
+  newBalance?: number;
+  new_balance?: number;
+};
+
+type RefundResult = {
+  success?: boolean;
+  code?: string;
+  refunded?: number;
+  newBalance?: number;
+  new_balance?: number;
+};
 
 export default function ImageGeneratorPage() {
   const supabase = createClient();
 
+  const [userId, setUserId] = useState<string | null>(null);
+  const [isAnonymous, setIsAnonymous] = useState(false);
+
+  const [credits, setCredits] = useState(0);
+  const [loadingCredits, setLoadingCredits] = useState(true);
+
   const [prompt, setPrompt] = useState("");
   const [image, setImage] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+
+  const [generating, setGenerating] = useState(false);
   const [error, setError] = useState("");
 
-  const [credits, setCredits] = useState<number | null>(null);
-  const [creditsLoading, setCreditsLoading] = useState(true);
+  const [lastPrompt, setLastPrompt] = useState("");
 
-  async function loadCredits() {
+  const [downloadName, setDownloadName] = useState(
+    "zuqen-generated-image.png"
+  );
+
+  /**
+   * Load current authenticated user + Image Generator credits.
+   */
+  const loadCredits = useCallback(async () => {
+    setLoadingCredits(true);
+
     try {
-      setCreditsLoading(true);
-
       const {
         data: { user },
-        error: authError,
+        error: userError,
       } = await supabase.auth.getUser();
 
-      if (authError || !user) {
+      if (userError) {
+        console.error("Supabase getUser error:", userError);
+        setUserId(null);
+        setIsAnonymous(false);
+        setCredits(0);
+        return;
+      }
+
+      if (!user) {
+        setUserId(null);
+        setIsAnonymous(false);
+        setCredits(0);
+        return;
+      }
+
+      setUserId(user.id);
+
+      const anonymous = Boolean(user.is_anonymous);
+      setIsAnonymous(anonymous);
+
+      if (anonymous) {
         setCredits(0);
         return;
       }
@@ -39,525 +108,1048 @@ export default function ImageGeneratorPage() {
         .maybeSingle();
 
       if (creditError) {
-        console.error(
-          "Failed to load Image Generator credits:",
-          creditError
+        console.error("Image credit load error:", creditError);
+        setCredits(0);
+        setError(
+          "Unable to load your Image Generator credits. Please refresh and try again."
         );
-
-        setCredits(null);
         return;
       }
 
-      setCredits(
-        typeof data?.balance === "number"
-          ? data.balance
-          : 0
-      );
+      setCredits(Number(data?.balance ?? 0));
     } catch (err) {
-      console.error(
-        "Failed to load Image Generator credits:",
-        err
-      );
-
-      setCredits(null);
+      console.error("loadCredits error:", err);
+      setCredits(0);
     } finally {
-      setCreditsLoading(false);
+      setLoadingCredits(false);
     }
-  }
+  }, [supabase]);
 
   useEffect(() => {
     loadCredits();
+  }, [loadCredits]);
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(() => {
-      loadCredits();
+  /**
+   * Reserve 1.00 ZUQEN Image Credit before calling Puter.
+   *
+   * This prevents generation when the user has no credit.
+   */
+  const reserveCredit = async (): Promise<string> => {
+    if (!userId) {
+      throw new Error("Please sign in to generate images.");
+    }
+
+    const { data, error } = await supabase.rpc("reserve_feature_credits", {
+      p_user_id: userId,
+      p_feature_key: FEATURE_KEY,
+      p_amount: IMAGE_CREDIT_COST,
+      p_provider_request_id: null,
+      p_reference_id: null,
+      p_metadata: {
+        source: "image_generator",
+        model: IMAGE_MODEL,
+        billing_basis: "successful_image",
+        zuqen_credit_cost: IMAGE_CREDIT_COST,
+      },
     });
 
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, []);
+    if (error) {
+      console.error("Reserve credit RPC error:", error);
+      throw new Error(error.message || "Unable to reserve Image Credit.");
+    }
 
-  async function generateImage() {
+    const result = data as ReservationResult | null;
+
+    if (!result?.success || !result.reservationId && !result?.reservation_id) {
+      const code = result?.code || "CREDIT_RESERVATION_FAILED";
+
+      if (code === "INSUFFICIENT_CREDITS") {
+        throw new Error(
+          "You don't have enough ZUQEN Image Credits. Please add credits to continue."
+        );
+      }
+
+      throw new Error(
+        `Unable to reserve Image Credit (${code}). Please try again.`
+      );
+    }
+
+    const reservationId =
+      result.reservationId || result.reservation_id;
+
+    if (!reservationId) {
+      throw new Error("Credit reservation ID was not returned.");
+    }
+
+    return reservationId;
+  };
+
+  /**
+   * Settle reservation after successful image generation.
+   *
+   * 1 successful image = exactly 1.00 ZUQEN Image Credit.
+   */
+  const settleCredit = async (reservationId: string) => {
+    if (!userId) return;
+
+    const { data, error } = await supabase.rpc(
+      "settle_feature_credit_reservation",
+      {
+        p_reservation_id: reservationId,
+        p_actual_amount: IMAGE_CREDIT_COST,
+        p_provider_request_id: null,
+        p_description: "Successful Image Generator image",
+        p_reference_id: null,
+        p_metadata: {
+          source: "image_generator",
+          model: IMAGE_MODEL,
+          billing_basis: "successful_image",
+          zuqen_credits_used: IMAGE_CREDIT_COST,
+        },
+      }
+    );
+
+    if (error) {
+      console.error("Settle credit RPC error:", error);
+      throw new Error(
+        error.message || "Image generated, but credit settlement failed."
+      );
+    }
+
+    const result = data as SettlementResult | null;
+
+    if (!result?.success) {
+      throw new Error(
+        `Image generated, but credit settlement failed (${result?.code || "SETTLEMENT_FAILED"}).`
+      );
+    }
+
+    const newBalance =
+      result.newBalance ?? result.new_balance;
+
+    if (typeof newBalance === "number") {
+      setCredits(Number(newBalance));
+    } else {
+      await loadCredits();
+    }
+  };
+
+  /**
+   * Refund reserved credit if Puter generation fails.
+   */
+  const refundCredit = async (reservationId: string) => {
+    if (!reservationId) return;
+
+    try {
+      const { data, error } = await supabase.rpc(
+        "refund_feature_credit_reservation",
+        {
+          p_reservation_id: reservationId,
+          p_provider_request_id: null,
+          p_description: "Failed Image Generator generation refund",
+          p_reference_id: null,
+          p_metadata: {
+            source: "image_generator",
+            model: IMAGE_MODEL,
+            reason: "generation_failed",
+            zuqen_credit_refunded: IMAGE_CREDIT_COST,
+          },
+        }
+      );
+
+      if (error) {
+        console.error("Refund credit RPC error:", error);
+        return;
+      }
+
+      const result = data as RefundResult | null;
+
+      if (!result?.success) {
+        console.error(
+          "Credit refund failed:",
+          result
+        );
+        return;
+      }
+
+      const newBalance =
+        result.newBalance ?? result.new_balance;
+
+      if (typeof newBalance === "number") {
+        setCredits(Number(newBalance));
+      } else {
+        await loadCredits();
+      }
+    } catch (refundError) {
+      console.error("refundCredit error:", refundError);
+    }
+  };
+
+  /**
+   * Convert Puter errors into a readable message.
+   */
+  const getPuterErrorMessage = (err: unknown): string => {
+    console.error("========== PUTER IMAGE ERROR ==========");
+    console.error("Raw error:", err);
+
+    if (err && typeof err === "object") {
+      const puterError = err as ImageError;
+
+      console.error("Error message:", puterError.message);
+      console.error("Error code:", puterError.code);
+      console.error("Error errorCode:", puterError.errorCode);
+
+      try {
+        console.error(
+          "Full error JSON:",
+          JSON.stringify(err, null, 2)
+        );
+      } catch {
+        console.error("Could not stringify Puter error.");
+      }
+
+      console.error("=======================================");
+
+      if (puterError.errorCode === "insufficient_funds") {
+        return "Puter does not have enough available AI usage for this image.";
+      }
+
+      if (puterError.errorCode === "moderation_flagged") {
+        return "Puter's image safety system rejected this prompt. Please try a different prompt.";
+      }
+
+      if (puterError.errorCode === "upstream_failed") {
+        return (
+          "The image provider failed to generate the image. " +
+          "Please try again."
+        );
+      }
+
+      if (puterError.message) {
+        let message = puterError.message;
+
+        if (puterError.code) {
+          message += ` (${puterError.code})`;
+        }
+
+        if (puterError.errorCode) {
+          message += ` [${puterError.errorCode}]`;
+        }
+
+        return message;
+      }
+
+      if (puterError.code) {
+        return `Puter image generation failed (${puterError.code}).`;
+      }
+    }
+
+    if (err instanceof Error) {
+      console.error("=======================================");
+      return err.message;
+    }
+
+    console.error("=======================================");
+
+    return "Puter image generation failed. Please try again.";
+  };
+
+  /**
+   * Generate image.
+   */
+  const generateImage = async () => {
     const trimmedPrompt = prompt.trim();
 
-    if (!trimmedPrompt || loading) return;
-
     setError("");
-    setImage(null);
 
-    /*
-     * ZUQEN credit check.
-     *
-     * This first Puter test does NOT deduct the credit yet.
-     * We will connect the real reservation/settlement system
-     * after confirming Puter image generation works.
-     */
-    if (credits !== null && credits < 1) {
+    if (!trimmedPrompt) {
+      setError("Please enter a prompt first.");
+      return;
+    }
+
+    if (isAnonymous) {
+      setError("Please sign in to generate images.");
+      return;
+    }
+
+    if (!userId) {
+      setError("Please sign in to generate images.");
+      return;
+    }
+
+    if (credits < IMAGE_CREDIT_COST) {
       setError(
-        "You don't have enough Image Generator credits. Please sign in or add more credits to continue."
+        "You don't have enough ZUQEN Image Credits. You need 1.00 credit to generate one image."
       );
       return;
     }
 
-    setLoading(true);
+    if (generating) {
+      return;
+    }
+
+    setGenerating(true);
+
+    let reservationId: string | null = null;
 
     try {
-      /*
-       * Puter image generation.
+      /**
+       * Make sure Puter is authenticated.
        *
-       * No API key is required.
-       * Puter handles its own authentication.
+       * Puter has its own authentication system, separate from Supabase.
+       */
+      try {
+        const puterSignedIn = await puter.auth.isSignedIn();
+
+        if (!puterSignedIn) {
+          await puter.auth.signIn();
+        }
+      } catch (puterAuthError) {
+        console.error("Puter authentication error:", puterAuthError);
+
+        throw new Error(
+          "Puter sign-in is required before generating an image."
+        );
+      }
+
+      /**
+       * Reserve ZUQEN credit first.
+       */
+      reservationId = await reserveCredit();
+
+      /**
+       * Generate image using Puter.
+       *
+       * Explicit model is important because Puter previously returned:
+       * Missing model (bad_request)
        */
       const generatedImage = await puter.ai.txt2img(
-        trimmedPrompt
+        trimmedPrompt,
+        {
+          model: IMAGE_MODEL,
+          quality: "low",
+        }
       );
 
-      /*
-       * Puter returns an image element.
-       * We convert its source into a string so React
-       * can display it.
-       */
       if (!generatedImage) {
         throw new Error(
-          "Puter did not return an image."
+          "Puter returned no image."
         );
       }
 
-      const imageSource =
-        typeof generatedImage === "string"
-          ? generatedImage
-          : generatedImage.src;
+      const imageSrc = generatedImage.src;
 
-      if (!imageSource) {
+      if (!imageSrc) {
         throw new Error(
-          "Puter returned an invalid image."
+          "Puter returned an image without a source."
         );
       }
 
-      setImage(imageSource);
-   } catch (err) {
-  console.error("========== PUTER IMAGE ERROR ==========");
-  console.error("Raw error:", err);
+      /**
+       * Image generation succeeded.
+       * Now permanently consume exactly 1.00 credit.
+       */
+      await settleCredit(reservationId);
 
-  if (err && typeof err === "object") {
-    console.error(
-      "Error message:",
-      "message" in err ? err.message : undefined
-    );
+      setImage(imageSrc);
+      setLastPrompt(trimmedPrompt);
 
-    console.error(
-      "Error code:",
-      "code" in err ? err.code : undefined
-    );
+      const safeName =
+        trimmedPrompt
+          .replace(/[^a-zA-Z0-9]+/g, "-")
+          .replace(/^-+|-+$/g, "")
+          .slice(0, 40) || "zuqen-image";
 
-    console.error(
-      "Error errorCode:",
-      "errorCode" in err ? err.errorCode : undefined
-    );
+      setDownloadName(
+        `${safeName}-${Date.now()}.png`
+      );
 
-    console.error(
-      "Full error JSON:",
-      JSON.stringify(err, null, 2)
-    );
-  }
+      setError("");
+    } catch (err) {
+      console.error("Image generation failed:", err);
 
-  console.error("=======================================");
+      /**
+       * If a credit was reserved but generation failed,
+       * return that credit to the user.
+       */
+      if (reservationId) {
+        await refundCredit(reservationId);
+      }
 
-  let message =
-    "Puter image generation failed.";
+      const message = getPuterErrorMessage(err);
 
-  if (err && typeof err === "object") {
-    const puterError = err as {
-      message?: string;
-      code?: string;
-      errorCode?: string;
-    };
+      setError(message);
+    } finally {
+      setGenerating(false);
 
-    if (puterError.message) {
-      message = puterError.message;
+      /**
+       * Refresh actual DB balance.
+       */
+      await loadCredits();
+    }
+  };
+
+  /**
+   * Regenerate the last prompt.
+   */
+  const regenerate = async () => {
+    if (!lastPrompt) return;
+
+    setPrompt(lastPrompt);
+
+    /**
+     * Small timeout allows React to update state before generation.
+     */
+    setTimeout(() => {
+      void generateImageWithPrompt(lastPrompt);
+    }, 0);
+  };
+
+  /**
+   * Internal generation helper for regenerate.
+   */
+  const generateImageWithPrompt = async (
+    value: string
+  ) => {
+    const trimmedPrompt = value.trim();
+
+    setError("");
+
+    if (!trimmedPrompt) {
+      setError("Please enter a prompt first.");
+      return;
     }
 
-    if (puterError.code) {
-      message += ` (${puterError.code})`;
+    if (isAnonymous || !userId) {
+      setError("Please sign in to generate images.");
+      return;
     }
 
-    if (puterError.errorCode) {
-      message += ` [${puterError.errorCode}]`;
+    if (credits < IMAGE_CREDIT_COST) {
+      setError(
+        "You don't have enough ZUQEN Image Credits."
+      );
+      return;
     }
-  } else if (err instanceof Error) {
-    message = err.message;
-  }
 
-  setError(message);
-} finally {
-      setLoading(false);
+    if (generating) {
+      return;
     }
-  }
 
-  function downloadImage() {
+    setGenerating(true);
+
+    let reservationId: string | null = null;
+
+    try {
+      try {
+        const puterSignedIn = await puter.auth.isSignedIn();
+
+        if (!puterSignedIn) {
+          await puter.auth.signIn();
+        }
+      } catch {
+        throw new Error(
+          "Puter sign-in is required before generating an image."
+        );
+      }
+
+      reservationId = await reserveCredit();
+
+      const generatedImage = await puter.ai.txt2img(
+        trimmedPrompt,
+        {
+          model: IMAGE_MODEL,
+          quality: "low",
+        }
+      );
+
+      if (!generatedImage?.src) {
+        throw new Error(
+          "Puter returned no image."
+        );
+      }
+
+      await settleCredit(reservationId);
+
+      setImage(generatedImage.src);
+      setLastPrompt(trimmedPrompt);
+
+      const safeName =
+        trimmedPrompt
+          .replace(/[^a-zA-Z0-9]+/g, "-")
+          .replace(/^-+|-+$/g, "")
+          .slice(0, 40) || "zuqen-image";
+
+      setDownloadName(
+        `${safeName}-${Date.now()}.png`
+      );
+
+      setError("");
+    } catch (err) {
+      console.error(
+        "Regeneration failed:",
+        err
+      );
+
+      if (reservationId) {
+        await refundCredit(reservationId);
+      }
+
+      setError(
+        getPuterErrorMessage(err)
+      );
+    } finally {
+      setGenerating(false);
+      await loadCredits();
+    }
+  };
+
+  /**
+   * Download generated image.
+   */
+  const downloadImage = () => {
     if (!image) return;
 
     const link = document.createElement("a");
 
     link.href = image;
-    link.download = "zuqen-generated-image.png";
+    link.download = downloadName;
 
     document.body.appendChild(link);
     link.click();
     link.remove();
-  }
+  };
 
-  function clearImage() {
+  /**
+   * Clear current image and start fresh.
+   */
+  const newImage = () => {
     setImage(null);
+    setLastPrompt("");
+    setPrompt("");
     setError("");
-  }
-
-  const formattedCredits =
-    credits === null
-      ? "—"
-      : credits.toFixed(2);
-
-  const cannotGenerate =
-    !prompt.trim() ||
-    loading ||
-    creditsLoading ||
-    (credits !== null && credits < 1);
+  };
 
   return (
-    <main className="min-h-screen bg-[#050505] text-white">
-      {/* Background glow */}
-      <div className="pointer-events-none fixed inset-0 overflow-hidden">
-        <div className="absolute left-1/2 top-[-250px] h-[500px] w-[700px] -translate-x-1/2 rounded-full bg-white/[0.035] blur-[120px]" />
-        <div className="absolute bottom-[-250px] left-[-200px] h-[500px] w-[500px] rounded-full bg-white/[0.02] blur-[120px]" />
-      </div>
-
-      <div className="relative mx-auto flex min-h-screen w-full max-w-7xl flex-col px-5 py-5 sm:px-8 sm:py-7">
-
+    <main
+      style={{
+        minHeight: "100vh",
+        background: "#050505",
+        color: "#ffffff",
+        padding: "40px 20px 80px",
+      }}
+    >
+      <div
+        style={{
+          width: "100%",
+          maxWidth: "1100px",
+          margin: "0 auto",
+        }}
+      >
         {/* Header */}
-        <header className="flex items-center justify-between border-b border-white/[0.07] pb-5">
-          <button
-            type="button"
-            onClick={() => window.history.back()}
-            className="group flex items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.035] px-3.5 py-2 text-sm text-white/65 transition hover:border-white/15 hover:bg-white/[0.07] hover:text-white"
+        <div
+          style={{
+            marginBottom: "30px",
+          }}
+        >
+          <div
+            style={{
+              fontSize: "13px",
+              letterSpacing: "1.5px",
+              textTransform: "uppercase",
+              opacity: 0.55,
+              marginBottom: "10px",
+            }}
           >
-            <span className="text-base transition-transform group-hover:-translate-x-0.5">
-              ←
-            </span>
-
-            <span>Back</span>
-          </button>
-
-          <div className="absolute left-1/2 -translate-x-1/2 text-center">
-            <div className="text-[10px] font-semibold uppercase tracking-[0.35em] text-white/35">
-              ZUQEN
-            </div>
-
-            <div className="mt-0.5 text-sm font-medium text-white/80">
-              Image Generator
-            </div>
+            ZUQEN AI
           </div>
 
-          {/* Credits */}
-          <div className="flex items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 py-2">
-            <span className="text-sm text-white/50">
-              ✦
-            </span>
-
-            <div className="text-right">
-              <div className="text-[9px] uppercase tracking-[0.16em] text-white/25">
-                Image Credits
-              </div>
-
-              <div className="text-xs font-semibold text-white/80">
-                {creditsLoading
-                  ? "Loading..."
-                  : formattedCredits}
-              </div>
-            </div>
-          </div>
-        </header>
-
-        {/* Hero */}
-        <section className="mx-auto w-full max-w-4xl pt-14 text-center sm:pt-20">
-          <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-[20px] border border-white/10 bg-white/[0.055] text-2xl shadow-[0_0_50px_rgba(255,255,255,0.04)]">
-            ✦
-          </div>
-
-          <h1 className="text-4xl font-semibold tracking-[-0.04em] sm:text-6xl">
-            Create images with
-            <span className="ml-3 bg-gradient-to-r from-white via-white/70 to-white/30 bg-clip-text text-transparent">
-              ZUQEN.
-            </span>
+          <h1
+            style={{
+              margin: 0,
+              fontSize: "38px",
+              lineHeight: 1.1,
+              fontWeight: 700,
+            }}
+          >
+            Image Generator
           </h1>
 
-          <p className="mx-auto mt-5 max-w-2xl text-sm leading-7 text-white/40 sm:text-base">
-            Turn your imagination into visuals. Describe what
-            you want to create and let ZUQEN generate it for you.
+          <p
+            style={{
+              marginTop: "12px",
+              marginBottom: 0,
+              color: "#a8a8a8",
+              fontSize: "15px",
+            }}
+          >
+            Create an image from your imagination.
           </p>
+        </div>
 
-          {/* Credit information */}
-          <div className="mx-auto mt-7 flex w-fit items-center gap-2 rounded-full border border-white/[0.07] bg-white/[0.025] px-4 py-2">
-            <span className="text-[10px] text-white/35">
-              1.00 ZUQEN Image Credit
-            </span>
+        {/* Credit Card */}
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: "20px",
+            padding: "18px 20px",
+            marginBottom: "24px",
+            border: "1px solid #252525",
+            borderRadius: "14px",
+            background: "#0c0c0c",
+          }}
+        >
+          <div>
+            <div
+              style={{
+                fontSize: "12px",
+                color: "#8c8c8c",
+                marginBottom: "5px",
+              }}
+            >
+              ZUQEN IMAGE CREDITS
+            </div>
 
-            <span className="text-white/15">
-              =
-            </span>
-
-            <span className="text-[10px] text-white/50">
-              1 successfully generated image
-            </span>
+            <div
+              style={{
+                fontSize: "25px",
+                fontWeight: 700,
+              }}
+            >
+              {loadingCredits
+                ? "Loading..."
+                : credits.toFixed(2)}
+            </div>
           </div>
-        </section>
 
-        {/* Main generator */}
-        <section className="mx-auto mt-12 grid w-full max-w-6xl gap-6 lg:grid-cols-[0.9fr_1.1fr]">
-
-          {/* Prompt panel */}
-          <div className="rounded-[28px] border border-white/[0.08] bg-white/[0.025] p-5 shadow-2xl backdrop-blur-xl sm:p-6">
-
-            <div className="mb-5 flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-white/80">
-                  Describe your image
-                </p>
-
-                <p className="mt-1 text-xs text-white/30">
-                  Be as creative as you want.
-                </p>
-              </div>
-
-              <div className="rounded-lg border border-white/[0.07] bg-white/[0.035] px-2.5 py-1 text-[10px] text-white/30">
-                PUTER AI
-              </div>
+          <div
+            style={{
+              textAlign: "right",
+              fontSize: "12px",
+              color: "#8c8c8c",
+              lineHeight: 1.5,
+            }}
+          >
+            <div>
+              1.00 Credit = 1 successful image
             </div>
 
-            <div className="rounded-2xl border border-white/[0.07] bg-black/30 p-1.5 transition focus-within:border-white/15">
-              <textarea
-                value={prompt}
-                onChange={(event) => {
-                  setPrompt(
-                    event.target.value.slice(0, 1000)
-                  );
-                  setError("");
-                }}
-                onKeyDown={(event) => {
-                  if (
-                    (event.ctrlKey || event.metaKey) &&
-                    event.key === "Enter"
-                  ) {
-                    event.preventDefault();
-                    generateImage();
-                  }
-                }}
-                disabled={loading}
-                rows={9}
-                placeholder="A futuristic city floating above the clouds at sunset, cinematic lighting, ultra detailed..."
-                className="w-full resize-none bg-transparent p-4 text-sm leading-7 text-white outline-none placeholder:text-white/20 disabled:cursor-not-allowed disabled:opacity-50"
-              />
+            <div>
+              Model: {IMAGE_MODEL}
+            </div>
+          </div>
+        </div>
+
+        {/* Guest warning */}
+        {isAnonymous && (
+          <div
+            style={{
+              padding: "15px 17px",
+              marginBottom: "20px",
+              border: "1px solid #493d1d",
+              borderRadius: "12px",
+              background: "#17130a",
+              color: "#e7d39b",
+              fontSize: "14px",
+            }}
+          >
+            Please sign in to generate images.
+          </div>
+        )}
+
+        {/* Error */}
+        {error && (
+          <div
+            style={{
+              padding: "16px 18px",
+              marginBottom: "20px",
+              border: "1px solid #512727",
+              borderRadius: "12px",
+              background: "#170b0b",
+              color: "#ffb4b4",
+              fontSize: "14px",
+              lineHeight: 1.5,
+            }}
+          >
+            <div
+              style={{
+                fontWeight: 700,
+                marginBottom: "5px",
+              }}
+            >
+              Generation failed
             </div>
 
-            <div className="mt-4 flex items-center justify-between">
-              <span className="text-[11px] text-white/25">
-                {prompt.length}/1000
-              </span>
+            <div>{error}</div>
+          </div>
+        )}
 
-              <span className="hidden text-[11px] text-white/20 sm:block">
-                Ctrl + Enter to generate
-              </span>
+        {/* Prompt */}
+        <section
+          style={{
+            border: "1px solid #252525",
+            borderRadius: "16px",
+            background: "#0c0c0c",
+            padding: "20px",
+            marginBottom: "25px",
+          }}
+        >
+          <label
+            htmlFor="image-prompt"
+            style={{
+              display: "block",
+              fontSize: "14px",
+              fontWeight: 600,
+              marginBottom: "10px",
+            }}
+          >
+            Describe your image
+          </label>
+
+          <textarea
+            id="image-prompt"
+            value={prompt}
+            onChange={(event) =>
+              setPrompt(event.target.value)
+            }
+            onKeyDown={(event) => {
+              if (
+                event.key === "Enter" &&
+                (event.ctrlKey || event.metaKey)
+              ) {
+                event.preventDefault();
+                void generateImage();
+              }
+            }}
+            disabled={generating}
+            placeholder="Example: A cinematic futuristic city at sunset, ultra detailed, dramatic lighting..."
+            rows={5}
+            style={{
+              width: "100%",
+              boxSizing: "border-box",
+              resize: "vertical",
+              minHeight: "130px",
+              borderRadius: "12px",
+              border: "1px solid #2c2c2c",
+              background: "#070707",
+              color: "#ffffff",
+              padding: "15px",
+              outline: "none",
+              fontSize: "15px",
+              lineHeight: 1.5,
+            }}
+          />
+
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: "15px",
+              marginTop: "14px",
+              flexWrap: "wrap",
+            }}
+          >
+            <div
+              style={{
+                color: "#777777",
+                fontSize: "12px",
+              }}
+            >
+              Ctrl + Enter to generate
             </div>
-
-            {error && (
-              <div className="mt-4 rounded-2xl border border-red-400/15 bg-red-400/[0.06] px-4 py-3">
-                <div className="flex gap-3">
-                  <span className="text-red-300/80">
-                    !
-                  </span>
-
-                  <div>
-                    <p className="text-xs font-medium text-red-200/90">
-                      Generation failed
-                    </p>
-
-                    <p className="mt-1 break-words text-[11px] leading-5 text-red-200/50">
-                      {error}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Credit status */}
-            {!creditsLoading &&
-              credits !== null &&
-              credits < 1 && (
-                <div className="mt-4 rounded-2xl border border-amber-300/10 bg-amber-300/[0.045] px-4 py-3">
-                  <div className="flex gap-3">
-                    <span className="text-amber-200/70">
-                      ✦
-                    </span>
-
-                    <div>
-                      <p className="text-xs font-medium text-amber-100/80">
-                        No Image Credits Remaining
-                      </p>
-
-                      <p className="mt-1 text-[11px] leading-5 text-amber-100/40">
-                        You need 1.00 Image Credit to
-                        generate an image.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              )}
 
             <button
               type="button"
-              onClick={generateImage}
-              disabled={cannotGenerate}
-              className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-white px-5 py-3.5 text-sm font-semibold text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-25"
+              onClick={() => void generateImage()}
+              disabled={
+                generating ||
+                loadingCredits ||
+                isAnonymous ||
+                !userId ||
+                credits < IMAGE_CREDIT_COST ||
+                !prompt.trim()
+              }
+              style={{
+                border: "none",
+                borderRadius: "10px",
+                padding: "12px 20px",
+                background:
+                  generating ||
+                  loadingCredits ||
+                  isAnonymous ||
+                  !userId ||
+                  credits < IMAGE_CREDIT_COST ||
+                  !prompt.trim()
+                    ? "#292929"
+                    : "#ffffff",
+                color:
+                  generating ||
+                  loadingCredits ||
+                  isAnonymous ||
+                  !userId ||
+                  credits < IMAGE_CREDIT_COST ||
+                  !prompt.trim()
+                    ? "#777777"
+                    : "#000000",
+                fontSize: "14px",
+                fontWeight: 700,
+                cursor:
+                  generating ||
+                  loadingCredits ||
+                  isAnonymous ||
+                  !userId ||
+                  credits < IMAGE_CREDIT_COST ||
+                  !prompt.trim()
+                    ? "not-allowed"
+                    : "pointer",
+              }}
             >
-              {loading ? (
-                <>
-                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-black/20 border-t-black" />
-                  Creating image...
-                </>
-              ) : credits !== null &&
-                credits < 1 ? (
-                <>
-                  <span>✦</span>
-                  No Credits
-                </>
-              ) : (
-                <>
-                  <span>✦</span>
-                  Generate Image
-                </>
-              )}
+              {generating
+                ? "Generating..."
+                : "Generate Image"}
             </button>
-
-            {/* Cost */}
-            <div className="mt-3 text-center">
-              <span className="text-[10px] text-white/20">
-                This generation uses 1.00 Image Credit
-              </span>
-            </div>
-          </div>
-
-          {/* Preview panel */}
-          <div className="relative min-h-[430px] overflow-hidden rounded-[28px] border border-white/[0.08] bg-white/[0.02]">
-
-            {loading ? (
-              <div className="flex h-full min-h-[430px] items-center justify-center">
-                <div className="text-center">
-                  <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04]">
-                    <div className="h-6 w-6 animate-spin rounded-full border-2 border-white/10 border-t-white" />
-                  </div>
-
-                  <p className="text-sm font-medium text-white/70">
-                    Creating your image
-                  </p>
-
-                  <p className="mx-auto mt-2 max-w-xs text-xs leading-5 text-white/30">
-                    ZUQEN is transforming your prompt into a
-                    visual. This may take a moment.
-                  </p>
-                </div>
-              </div>
-            ) : image ? (
-              <div className="flex h-full flex-col">
-
-                <div className="relative flex flex-1 items-center justify-center bg-black/20 p-3">
-                  <img
-                    src={image}
-                    alt={prompt}
-                    className="max-h-[650px] w-full rounded-2xl object-contain"
-                  />
-                </div>
-
-                <div className="border-t border-white/[0.08] bg-black/20 p-4">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="min-w-0">
-                      <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-white/25">
-                        Generated by ZUQEN
-                      </p>
-
-                      <p className="mt-1 truncate text-xs text-white/45">
-                        {prompt}
-                      </p>
-
-                      <p className="mt-1 text-[10px] text-white/20">
-                        Test generation · ZUQEN credit not
-                        deducted yet
-                        {credits !== null
-                          ? ` · ${credits.toFixed(2)} available`
-                          : ""}
-                      </p>
-                    </div>
-
-                    <div className="flex shrink-0 gap-2">
-                      <button
-                        type="button"
-                        onClick={clearImage}
-                        className="rounded-xl border border-white/[0.08] bg-white/[0.04] px-3.5 py-2 text-xs text-white/60 transition hover:bg-white/[0.08] hover:text-white"
-                      >
-                        New
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={generateImage}
-                        disabled={
-                          loading ||
-                          (credits !== null &&
-                            credits < 1)
-                        }
-                        className="rounded-xl border border-white/[0.08] bg-white/[0.04] px-3.5 py-2 text-xs text-white/60 transition hover:bg-white/[0.08] hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
-                      >
-                        ↻ Regenerate
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={downloadImage}
-                        className="rounded-xl bg-white px-4 py-2 text-xs font-semibold text-black transition hover:bg-white/90"
-                      >
-                        ↓ Download
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="flex h-full min-h-[430px] items-center justify-center">
-                <div className="px-6 text-center">
-                  <div className="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-[24px] border border-white/[0.07] bg-white/[0.025] text-2xl text-white/20">
-                    ◇
-                  </div>
-
-                  <h3 className="text-sm font-medium text-white/55">
-                    Your creation will appear here
-                  </h3>
-
-                  <p className="mx-auto mt-2 max-w-sm text-xs leading-5 text-white/25">
-                    Write a prompt on the left and generate
-                    your first image with ZUQEN.
-                  </p>
-                </div>
-              </div>
-            )}
           </div>
         </section>
 
-        {/* Footer */}
-        <footer className="mt-auto pt-14 text-center">
-          <p className="text-[10px] uppercase tracking-[0.3em] text-white/15">
-            ZUQEN · Create beyond the obvious
-          </p>
-        </footer>
+        {/* Generated Image */}
+        {image && (
+          <section
+            style={{
+              border: "1px solid #252525",
+              borderRadius: "16px",
+              background: "#0c0c0c",
+              padding: "20px",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: "15px",
+                marginBottom: "16px",
+                flexWrap: "wrap",
+              }}
+            >
+              <div>
+                <div
+                  style={{
+                    fontSize: "16px",
+                    fontWeight: 700,
+                  }}
+                >
+                  Generated Image
+                </div>
+
+                <div
+                  style={{
+                    marginTop: "4px",
+                    color: "#777777",
+                    fontSize: "12px",
+                  }}
+                >
+                  1.00 ZUQEN Image Credit used
+                </div>
+              </div>
+
+              <div
+                style={{
+                  display: "flex",
+                  gap: "8px",
+                  flexWrap: "wrap",
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={downloadImage}
+                  style={{
+                    border: "1px solid #303030",
+                    borderRadius: "9px",
+                    padding: "9px 14px",
+                    background: "#151515",
+                    color: "#ffffff",
+                    cursor: "pointer",
+                    fontSize: "13px",
+                  }}
+                >
+                  Download
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => void regenerate()}
+                  disabled={generating || credits < 1}
+                  style={{
+                    border: "1px solid #303030",
+                    borderRadius: "9px",
+                    padding: "9px 14px",
+                    background:
+                      generating || credits < 1
+                        ? "#101010"
+                        : "#ffffff",
+                    color:
+                      generating || credits < 1
+                        ? "#666666"
+                        : "#000000",
+                    cursor:
+                      generating || credits < 1
+                        ? "not-allowed"
+                        : "pointer",
+                    fontSize: "13px",
+                  }}
+                >
+                  Regenerate
+                </button>
+
+                <button
+                  type="button"
+                  onClick={newImage}
+                  style={{
+                    border: "1px solid #303030",
+                    borderRadius: "9px",
+                    padding: "9px 14px",
+                    background: "#151515",
+                    color: "#ffffff",
+                    cursor: "pointer",
+                    fontSize: "13px",
+                  }}
+                >
+                  New Image
+                </button>
+              </div>
+            </div>
+
+            <div
+              style={{
+                width: "100%",
+                overflow: "hidden",
+                borderRadius: "12px",
+                background: "#050505",
+                border: "1px solid #202020",
+              }}
+            >
+              <img
+                src={image}
+                alt={lastPrompt || "Generated image"}
+                style={{
+                  display: "block",
+                  width: "100%",
+                  height: "auto",
+                }}
+              />
+            </div>
+
+            {lastPrompt && (
+              <div
+                style={{
+                  marginTop: "15px",
+                  padding: "13px 15px",
+                  borderRadius: "10px",
+                  background: "#101010",
+                  color: "#9a9a9a",
+                  fontSize: "13px",
+                  lineHeight: 1.5,
+                }}
+              >
+                <strong
+                  style={{
+                    color: "#cfcfcf",
+                  }}
+                >
+                  Prompt:
+                </strong>{" "}
+                {lastPrompt}
+              </div>
+            )}
+          </section>
+        )}
+
+        {/* Empty state */}
+        {!image && !generating && (
+          <div
+            style={{
+              minHeight: "260px",
+              border: "1px dashed #292929",
+              borderRadius: "16px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              textAlign: "center",
+              padding: "30px",
+              color: "#666666",
+            }}
+          >
+            <div>
+              <div
+                style={{
+                  fontSize: "32px",
+                  marginBottom: "12px",
+                }}
+              >
+                ✦
+              </div>
+
+              <div
+                style={{
+                  fontSize: "15px",
+                  color: "#999999",
+                  marginBottom: "5px",
+                }}
+              >
+                Your generated image will appear here.
+              </div>
+
+              <div
+                style={{
+                  fontSize: "12px",
+                }}
+              >
+                Every successful generation uses exactly 1.00
+                ZUQEN Image Credit.
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Generating state */}
+        {generating && !image && (
+          <div
+            style={{
+              minHeight: "260px",
+              border: "1px solid #252525",
+              borderRadius: "16px",
+              background: "#0c0c0c",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              textAlign: "center",
+            }}
+          >
+            <div>
+              <div
+                style={{
+                  fontSize: "18px",
+                  fontWeight: 700,
+                  marginBottom: "8px",
+                }}
+              >
+                Creating your image...
+              </div>
+
+              <div
+                style={{
+                  color: "#777777",
+                  fontSize: "13px",
+                }}
+              >
+                Please wait while Puter generates the image.
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </main>
   );
