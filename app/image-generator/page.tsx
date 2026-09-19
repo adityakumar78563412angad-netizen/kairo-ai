@@ -137,19 +137,61 @@ export default function ImageGeneratorPage() {
       }
 
       setImage(imageSource);
-    } catch (err) {
-      console.error(
-        "Puter image generation failed:",
-        err
-      );
+   } catch (err) {
+  console.error("========== PUTER IMAGE ERROR ==========");
+  console.error("Raw error:", err);
 
-      const message =
-        err instanceof Error
-          ? err.message
-          : "Something went wrong while generating the image with Puter.";
+  if (err && typeof err === "object") {
+    console.error(
+      "Error message:",
+      "message" in err ? err.message : undefined
+    );
 
-      setError(message);
-    } finally {
+    console.error(
+      "Error code:",
+      "code" in err ? err.code : undefined
+    );
+
+    console.error(
+      "Error errorCode:",
+      "errorCode" in err ? err.errorCode : undefined
+    );
+
+    console.error(
+      "Full error JSON:",
+      JSON.stringify(err, null, 2)
+    );
+  }
+
+  console.error("=======================================");
+
+  let message =
+    "Puter image generation failed.";
+
+  if (err && typeof err === "object") {
+    const puterError = err as {
+      message?: string;
+      code?: string;
+      errorCode?: string;
+    };
+
+    if (puterError.message) {
+      message = puterError.message;
+    }
+
+    if (puterError.code) {
+      message += ` (${puterError.code})`;
+    }
+
+    if (puterError.errorCode) {
+      message += ` [${puterError.errorCode}]`;
+    }
+  } else if (err instanceof Error) {
+    message = err.message;
+  }
+
+  setError(message);
+} finally {
       setLoading(false);
     }
   }
