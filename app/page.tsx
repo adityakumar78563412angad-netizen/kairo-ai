@@ -1,261 +1,382 @@
-"use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createBrowserClient } from "@supabase/ssr";
-import {
-  Archive,
-  ArrowUp,
-  Bot,
-  Check,
-  ChevronDown,
-  Copy,
-  Edit3,
-  File,
-  FileText,
-  Image as ImageIcon,
-  LayoutTemplate,
-  Menu,
-  MessageSquare,
-  Mic,
-  MoreHorizontal,
-  Paperclip,
-  Pencil,
-  Plus,
-  RotateCcw,
-  Search,
-  Settings,
-  Sparkles,
-  Trash2,
-  User,
-  Video,
-  WandSparkles,
-  X,
-} from "lucide-react";
+import { createClient } from "@/lib/supabase";
 
 type Role = "user" | "assistant";
 
-type ChatMessage = {
+type User = {
+  id: string;
+  email?: string | null;
+  is_anonymous?: boolean;
+};
+
+type Attachment = {
+  id: string;
+  name: string;
+  type: string;
+  size: number;
+};
+
+type Message = {
   id: string;
   role: Role;
   content: string;
-  createdAt: string;
-  attachments?: {
-    name: string;
-    type: string;
-    size: number;
-  }[];
+  created_at: string;
+  attachments?: Attachment[];
 };
 
 type Chat = {
   id: string;
-  user_id?: string;
+  user_id: string;
   title: string;
   archived: boolean;
-  messages: ChatMessage[];
-  created_at?: string;
-  updated_at?: string;
+  messages?: Message[] | null;
+  created_at: string;
+  updated_at: string;
 };
 
-type Agent = {
-  id: string;
-  name: string;
-  description: string;
-  icon: React.ReactNode;
-  href?: string;
+type CreditRow = {
+  feature_key: string;
+  balance: number;
+  total_granted: number;
+  total_used: number;
 };
 
-const supabase = createBrowserClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!
-);
+const supabase = createClient();
 
-const AGENTS: Agent[] = [
+const AGENTS = [
   {
-    id: "chat",
     name: "ZUQEN AI",
-    description: "Your intelligent AI assistant",
-    icon: <Sparkles size={17} />,
+    description: "General AI assistant",
+    icon: "✦",
+    route: null,
   },
   {
-    id: "website",
     name: "Website Builder",
-    description: "Build complete websites with AI",
-    icon: <WandSparkles size={17} />,
-    href: "/website-builder",
+    description: "Build complete websites",
+    icon: "⌘",
+    route: "/website-builder",
   },
   {
-    id: "image",
     name: "Text to Image",
     description: "Create images from text",
-    icon: <ImageIcon size={17} />,
-    href: "/generate-image",
+    icon: "◈",
+    route: "/image-generator",
   },
   {
-    id: "video",
     name: "Text to Video",
-    description: "Create videos from text",
-    icon: <Video size={17} />,
-    href: "/generate-video",
+    description: "Create videos with AI",
+    icon: "▶",
+    route: "/video-generator",
   },
   {
-    id: "voice",
     name: "Voice Generator",
-    description: "Generate natural AI voices",
-    icon: <Mic size={17} />,
-    href: "/generate-voice",
+    description: "Turn text into natural voice",
+    icon: "◉",
+    route: "/generate-voice",
   },
 ];
 
-const QUICK_PROMPTS = [
-  {
-    title: "Write something",
-    description: "Emails, articles, ideas and more",
-    icon: <Pencil size={17} />,
-    prompt: "Help me write ",
-  },
-  {
-    title: "Build a website",
-    description: "Create a website from an idea",
-    icon: <WandSparkles size={17} />,
-    prompt: "Help me plan a professional website for ",
-  },
-  {
-    title: "Analyze a file",
-    description: "Understand your documents",
-    icon: <FileText size={17} />,
-    prompt: "Analyze this document and explain ",
-  },
-  {
-    title: "Brainstorm ideas",
-    description: "Explore ideas with ZUQEN",
-    icon: <Sparkles size={17} />,
-    prompt: "Give me ideas for ",
-  },
-];
-
-function makeMessage(
-  role: Role,
-  content: string,
-  attachments?: ChatMessage["attachments"]
-): ChatMessage {
-  return {
-    id: crypto.randomUUID(),
-    role,
-    content,
-    createdAt: new Date().toISOString(),
-    attachments,
-  };
+function makeId() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-function makeChat(userId?: string): Chat {
-  const now = new Date().toISOString();
+function formatDate(date: string) {
+  const d = new Date(date);
+  const now = new Date();
 
-  return {
-    id: crypto.randomUUID(),
-    user_id: userId,
-    title: "New conversation",
-    archived: false,
-    messages: [],
-    created_at: now,
-    updated_at: now,
+  const sameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
+
+  if (sameDay) {
+    return d.toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  }
+
+  return d.toLocaleDateString([], {
+    day: "numeric",
+    month: "short",
+  });
+}
+
+function formatFileSize(size: number) {
+  if (!size) return "0 B";
+
+  const units = ["B", "KB", "MB", "GB"];
+  const index = Math.min(
+    Math.floor(Math.log(size) / Math.log(1024)),
+    units.length - 1
+  );
+
+  return `${(size / Math.pow(1024, index)).toFixed(
+    index === 0 ? 0 : 1
+  )} ${units[index]}`;
+}
+
+function Icon({
+  name,
+  size = 20,
+}: {
+  name: string;
+  size?: number;
+}) {
+  const common = {
+    width: size,
+    height: size,
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 1.8,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
   };
+
+  switch (name) {
+    case "plus":
+      return (
+        <svg {...common}>
+          <path d="M12 5v14M5 12h14" />
+        </svg>
+      );
+
+    case "search":
+      return (
+        <svg {...common}>
+          <circle cx="11" cy="11" r="7" />
+          <path d="m20 20-4-4" />
+        </svg>
+      );
+
+    case "archive":
+      return (
+        <svg {...common}>
+          <path d="M4 7h16" />
+          <path d="M5 7v12h14V7" />
+          <path d="M3 4h18v3H3z" />
+          <path d="M9 11h6" />
+        </svg>
+      );
+
+    case "trash":
+      return (
+        <svg {...common}>
+          <path d="M4 7h16" />
+          <path d="M10 11v6M14 11v6" />
+          <path d="M6 7l1 14h10l1-14" />
+          <path d="M9 7V4h6v3" />
+        </svg>
+      );
+
+    case "edit":
+      return (
+        <svg {...common}>
+          <path d="M12 20h9" />
+          <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z" />
+        </svg>
+      );
+
+    case "copy":
+      return (
+        <svg {...common}>
+          <rect x="9" y="9" width="11" height="11" rx="2" />
+          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+        </svg>
+      );
+
+    case "refresh":
+      return (
+        <svg {...common}>
+          <path d="M20 11a8 8 0 0 0-14.9-4" />
+          <path d="M4 4v5h5" />
+          <path d="M4 13a8 8 0 0 0 14.9 4" />
+          <path d="M20 20v-5h-5" />
+        </svg>
+      );
+
+    case "menu":
+      return (
+        <svg {...common}>
+          <circle cx="5" cy="12" r="1" fill="currentColor" />
+          <circle cx="12" cy="12" r="1" fill="currentColor" />
+          <circle cx="19" cy="12" r="1" fill="currentColor" />
+        </svg>
+      );
+
+    case "send":
+      return (
+        <svg {...common}>
+          <path d="m22 2-7 20-4-9-9-4Z" />
+          <path d="M22 2 11 13" />
+        </svg>
+      );
+
+    case "paperclip":
+      return (
+        <svg {...common}>
+          <path d="m21.4 11.6-8.9 8.9a6 6 0 0 1-8.5-8.5l9.6-9.6a4 4 0 0 1 5.7 5.7l-9.7 9.6a2 2 0 0 1-2.8-2.8l8.8-8.8" />
+        </svg>
+      );
+
+    case "sun":
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="4" />
+          <path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.65 17.65l1.42 1.42M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.65 6.35l1.42-1.42" />
+        </svg>
+      );
+
+    case "moon":
+      return (
+        <svg {...common}>
+          <path d="M20.5 15.5A8.5 8.5 0 0 1 8.5 3.5 8.5 8.5 0 1 0 20.5 15.5Z" />
+        </svg>
+      );
+
+    case "chevron":
+      return (
+        <svg {...common}>
+          <path d="m6 9 6 6 6-6" />
+        </svg>
+      );
+
+    case "arrow":
+      return (
+        <svg {...common}>
+          <path d="M5 12h14" />
+          <path d="m13 6 6 6-6 6" />
+        </svg>
+      );
+
+    case "close":
+      return (
+        <svg {...common}>
+          <path d="m6 6 12 12M18 6 6 18" />
+        </svg>
+      );
+
+    case "check":
+      return (
+        <svg {...common}>
+          <path d="m5 12 4 4L19 6" />
+        </svg>
+      );
+
+    case "restore":
+      return (
+        <svg {...common}>
+          <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+          <path d="M21 3v5h-5" />
+          <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+          <path d="M3 21v-5h5" />
+        </svg>
+      );
+
+    case "spark":
+      return (
+        <svg {...common}>
+          <path d="m12 3-1.4 5.6L5 10l5.6 1.4L12 17l1.4-5.6L19 10l-5.6-1.4Z" />
+          <path d="m19 16-.7 2.3L16 19l2.3.7L19 22l.7-2.3L22 19l-2.3-.7Z" />
+        </svg>
+      );
+
+    case "user":
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="8" r="3.5" />
+          <path d="M5 20a7 7 0 0 1 14 0" />
+        </svg>
+      );
+
+    case "logout":
+      return (
+        <svg {...common}>
+          <path d="M10 17l5-5-5-5" />
+          <path d="M15 12H3" />
+          <path d="M21 3v18" />
+        </svg>
+      );
+
+    default:
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="8" />
+        </svg>
+      );
+  }
 }
 
 export default function HomePage() {
-  const [user, setUser] = useState<any>(null);
+  const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
 
   const [chats, setChats] = useState<Chat[]>([]);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
 
-  const [credits, setCredits] = useState<number>(0);
-  const [creditsLoading, setCreditsLoading] = useState(true);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  const [activeAgent, setActiveAgent] = useState("chat");
-  const [agentOpen, setAgentOpen] = useState(false);
-
-  const [templatesOpen, setTemplatesOpen] = useState(false);
-
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [searchOpen, setSearchOpen] = useState(false);
   const [search, setSearch] = useState("");
 
-  const [composer, setComposer] = useState("");
-  const [attachments, setAttachments] = useState<File[]>([]);
+  const [agentOpen, setAgentOpen] = useState(false);
+  const [selectedAgent, setSelectedAgent] = useState("ZUQEN AI");
 
-  const [generating, setGenerating] = useState(false);
-  const [editingMessageId, setEditingMessageId] = useState<string | null>(
-    null
-  );
-  const [editingText, setEditingText] = useState("");
+  const [creditsOpen, setCreditsOpen] = useState(false);
+  const [chatCredits, setChatCredits] = useState<number | null>(null);
 
-  const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [renamingChatId, setRenamingChatId] = useState<string | null>(null);
-  const [renameText, setRenameText] = useState("");
+  const [archivedOpen, setArchivedOpen] = useState(false);
+  const [menuId, setMenuId] = useState<string | null>(null);
 
-  const [showArchived, setShowArchived] = useState(false);
-  const [menuChatId, setMenuChatId] = useState<string | null>(null);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
 
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingValue, setEditingValue] = useState("");
+
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [errorMessage, setErrorMessage] = useState("");
+
+  const [lightMode, setLightMode] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const streamAbortRef = useRef<AbortController | null>(null);
 
   const activeChat = useMemo(
     () => chats.find((chat) => chat.id === activeChatId) ?? null,
     [chats, activeChatId]
   );
 
-  const currentAgent =
-    AGENTS.find((agent) => agent.id === activeAgent) ?? AGENTS[0];
-
   const visibleChats = useMemo(() => {
     const query = search.trim().toLowerCase();
 
-    return chats
-      .filter((chat) => (showArchived ? chat.archived : !chat.archived))
-      .filter((chat) =>
-        query ? chat.title.toLowerCase().includes(query) : true
-      )
-      .sort(
-        (a, b) =>
-          new Date(b.updated_at || 0).getTime() -
-          new Date(a.updated_at || 0).getTime()
-      );
-  }, [chats, search, showArchived]);
-
-  const scrollBottom = useCallback(() => {
-    requestAnimationFrame(() => {
-      bottomRef.current?.scrollIntoView({
-        behavior: "smooth",
-        block: "end",
-      });
-    });
-  }, []);
-
-  const loadChatCredits = useCallback(async (userId: string) => {
-    setCreditsLoading(true);
-
-    try {
-      const { data, error } = await supabase
-        .from("feature_credit_balances")
-        .select("balance")
-        .eq("user_id", userId)
-        .eq("feature_key", "chat")
-        .maybeSingle();
-
-      if (error) {
-        console.error("Credit load error:", error);
-        setCredits(0);
-        return;
+    return chats.filter((chat) => {
+      if (archivedOpen) {
+        if (!chat.archived) return false;
+      } else {
+        if (chat.archived) return false;
       }
 
-      setCredits(Number(data?.balance ?? 0));
-    } catch (error) {
-      console.error(error);
-      setCredits(0);
-    } finally {
-      setCreditsLoading(false);
-    }
+      if (!query) return true;
+
+      return chat.title.toLowerCase().includes(query);
+    });
+  }, [chats, search, archivedOpen]);
+
+  const resetTextarea = useCallback(() => {
+    if (!textareaRef.current) return;
+
+    textareaRef.current.style.height = "auto";
+    textareaRef.current.style.height = `${Math.min(
+      textareaRef.current.scrollHeight,
+      220
+    )}px`;
   }, []);
 
   const loadChats = useCallback(async (userId: string) => {
@@ -266,657 +387,1075 @@ export default function HomePage() {
       .order("updated_at", { ascending: false });
 
     if (error) {
-      console.error("Chat load error:", error);
+      console.error("loadChats:", error);
+      setErrorMessage(`Unable to load conversations: ${error.message}`);
       return;
     }
 
-    const loaded: Chat[] = (data || []).map((chat: any) => ({
-      ...chat,
-      archived: Boolean(chat.archived),
-      messages: Array.isArray(chat.messages) ? chat.messages : [],
-    }));
-
-    setChats(loaded);
-
-    if (loaded.length > 0) {
-      const firstNonArchived =
-        loaded.find((chat) => !chat.archived) ?? loaded[0];
-
-      setActiveChatId(firstNonArchived.id);
-    } else {
-      const first = makeChat(userId);
-      setChats([first]);
-      setActiveChatId(first.id);
-
-      await supabase.from("chats").insert({
-        id: first.id,
-        user_id: userId,
-        title: first.title,
-        archived: false,
-        messages: [],
-      });
-    }
+    setChats((data ?? []) as Chat[]);
   }, []);
 
+  const loadChatCredits = useCallback(async (userId: string) => {
+    const { data, error } = await supabase
+      .from("feature_credit_balances")
+      .select("feature_key,balance,total_granted,total_used")
+      .eq("user_id", userId)
+      .eq("feature_key", "chat")
+      .maybeSingle();
+
+    if (error) {
+      console.error("loadChatCredits:", error);
+      setChatCredits(null);
+      return;
+    }
+
+    const row = data as CreditRow | null;
+
+    setChatCredits(row ? Number(row.balance) : 0);
+  }, []);
+
+  /*
+   * Restore an existing session first.
+   * Anonymous sign-in happens only when there is genuinely
+   * no existing Supabase session.
+   */
   const initializeAuth = useCallback(async () => {
     try {
+      setAuthReady(false);
+      setErrorMessage("");
+
+      /*
+       * Restore an existing Supabase session first.
+       */
       const {
         data: { session },
+        error: sessionError,
       } = await supabase.auth.getSession();
+
+      if (sessionError) {
+        console.error("getSession:", sessionError);
+      }
 
       let currentUser = session?.user ?? null;
 
+      /*
+       * If getSession() did not return a user, try getUser().
+       */
       if (!currentUser) {
-        const { data, error } = await supabase.auth.signInAnonymously();
+        const {
+          data: { user: existingUser },
+          error: userError,
+        } = await supabase.auth.getUser();
 
-        if (error) {
-          console.error("Anonymous auth error:", error);
-          window.location.href = "/auth";
+        if (!userError && existingUser) {
+          currentUser = existingUser;
+        }
+      }
+
+      /*
+       * No existing session: create a new anonymous Guest account.
+       */
+      if (!currentUser) {
+        const {
+          data: anonymousData,
+          error: anonymousError,
+        } = await supabase.auth.signInAnonymously();
+
+        if (anonymousError) {
+          console.error("Anonymous sign-in:", anonymousError);
+
+          setErrorMessage(
+            "Unable to authenticate with Supabase."
+          );
+
           return;
         }
 
-        currentUser = data.user;
+        if (!anonymousData.user) {
+          console.error(
+            "Anonymous sign-in returned no user."
+          );
+
+          setErrorMessage(
+            "Unable to create a guest account."
+          );
+
+          return;
+        }
+
+        /*
+         * Explicitly make sure the returned anonymous session is
+         * installed in the browser client before calling the RPC.
+         * This prevents the RPC from running without auth context.
+         */
+        if (anonymousData.session) {
+          const { error: setSessionError } =
+            await supabase.auth.setSession({
+              access_token: anonymousData.session.access_token,
+              refresh_token: anonymousData.session.refresh_token,
+            });
+
+          if (setSessionError) {
+            console.error(
+              "Guest setSession:",
+              setSessionError
+            );
+
+            setErrorMessage(
+              "Guest authentication could not be established."
+            );
+
+            return;
+          }
+        }
+
+        /*
+         * Verify the authenticated session after anonymous sign-in.
+         */
+        const {
+          data: { session: verifiedSession },
+          error: verifiedSessionError,
+        } = await supabase.auth.getSession();
+
+        if (
+          verifiedSessionError ||
+          !verifiedSession?.user
+        ) {
+          console.error(
+            "Guest session verification failed:",
+            verifiedSessionError
+          );
+
+          setErrorMessage(
+            "Guest authentication could not be verified."
+          );
+
+          return;
+        }
+
+        currentUser = verifiedSession.user;
       }
 
-      if (!currentUser) {
-        window.location.href = "/auth";
-        return;
-      }
-
-      setUser(currentUser);
-
+      /*
+       * Guest users receive/setup the Guest Chat credit wallet.
+       * Permanent signed-in users never call this RPC.
+       */
       if (currentUser.is_anonymous) {
-        const { error } = await supabase.rpc("setup_guest_chat_credits");
+        const { error: creditError } =
+          await supabase.rpc(
+            "setup_guest_chat_credits"
+          );
 
-        if (error) {
-          console.error("Guest credit setup error:", error);
+        if (creditError) {
+          console.error(
+            "Guest credit setup error:",
+            creditError
+          );
+
+          setErrorMessage(
+            "Guest Mode started, but Chat credits could not be set up. Please refresh and try again."
+          );
+
+          return;
         }
       }
 
+      /*
+       * Convert the Supabase user into the User type used by ZUQEN.
+       */
+      const normalizedUser: User = {
+        id: currentUser.id,
+        email: currentUser.email,
+        is_anonymous: currentUser.is_anonymous,
+      };
+
+      setUser(normalizedUser);
+
+      /*
+       * Load conversations and Chat credits together.
+       */
       await Promise.all([
         loadChats(currentUser.id),
         loadChatCredits(currentUser.id),
       ]);
     } catch (error) {
-      console.error("Auth initialization error:", error);
+      console.error("initializeAuth:", error);
+
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to initialize ZUQEN AI."
+      );
     } finally {
       setAuthReady(true);
     }
-  }, [loadChatCredits, loadChats]);
+  }, [loadChats, loadChatCredits]);
 
   useEffect(() => {
-    initializeAuth();
+    let mounted = true;
+
+    const start = async () => {
+      if (!mounted) return;
+
+      await initializeAuth();
+    };
+
+    start();
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      const sessionUser = session?.user;
+    } = supabase.auth.onAuthStateChange(
+      async (_event, session) => {
+        if (!mounted) return;
 
-      if (!sessionUser) return;
+        if (session?.user) {
+          const nextUser: User = {
+            id: session.user.id,
+            email: session.user.email,
+            is_anonymous: session.user.is_anonymous,
+          };
 
-      setUser(sessionUser);
+          setUser(nextUser);
 
-      await Promise.all([
-        loadChats(sessionUser.id),
-        loadChatCredits(sessionUser.id),
-      ]);
+          await Promise.all([
+            loadChats(session.user.id),
+            loadChatCredits(session.user.id),
+          ]);
 
-      setAuthReady(true);
-    });
+          return;
+        }
 
-    return () => subscription.unsubscribe();
-  }, [initializeAuth, loadChatCredits, loadChats]);
+        /*
+         * When there is no session we don't automatically
+         * create another anonymous user here.
+         *
+         * This is important for explicit sign-out:
+         * the user should go to /auth instead of instantly
+         * receiving a brand-new anonymous account.
+         */
+        setUser(null);
+        setChats([]);
+        setMessages([]);
+        setActiveChatId(null);
+        setChatCredits(null);
+      }
+    );
 
-  useEffect(() => {
-    scrollBottom();
-  }, [activeChat?.messages.length, generating, scrollBottom]);
-
-  useEffect(() => {
-    if (!agentOpen && !templatesOpen && !menuChatId) return;
-
-    const close = () => {
-      setAgentOpen(false);
-      setTemplatesOpen(false);
-      setMenuChatId(null);
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+      streamAbortRef.current?.abort();
     };
+  }, [initializeAuth, loadChats, loadChatCredits]);
 
-    document.addEventListener("click", close);
+  const handleAuthNavigation = useCallback(() => {
+    window.location.href = "/auth";
+  }, []);
 
-    return () => document.removeEventListener("click", close);
-  }, [agentOpen, templatesOpen, menuChatId]);
-
-  const persistChat = async (chat: Chat) => {
-    if (!user?.id) return;
-
-    const { error } = await supabase.from("chats").upsert({
-      id: chat.id,
-      user_id: user.id,
-      title: chat.title,
-      archived: chat.archived,
-      messages: chat.messages,
-      updated_at: new Date().toISOString(),
-    });
-
-    if (error) {
-      console.error("Chat save error:", error);
-    }
-  };
-
-  const updateChat = async (
-    chatId: string,
-    updater: (chat: Chat) => Chat
-  ) => {
-    let changed: Chat | null = null;
-
-    setChats((previous) =>
-      previous.map((chat) => {
-        if (chat.id !== chatId) return chat;
-
-        changed = updater(chat);
-
-        return changed;
-      })
-    );
-
-    if (changed) {
-      await persistChat(changed);
-    }
-  };
-
-  const createNewChat = async () => {
-    if (!user?.id) return;
-
-    const chat = makeChat(user.id);
-
-    setChats((previous) => [chat, ...previous]);
-    setActiveChatId(chat.id);
-    setComposer("");
-    setAttachments([]);
-    setSidebarOpen(false);
-
-    await persistChat(chat);
-
-    textareaRef.current?.focus();
-  };
-
-  const selectChat = (id: string) => {
-    setActiveChatId(id);
-    setSidebarOpen(false);
-    setMenuChatId(null);
-  };
-
-  const deleteChat = async (id: string) => {
-    const { error } = await supabase.from("chats").delete().eq("id", id);
-
-    if (error) {
-      console.error(error);
-      return;
-    }
-
-    const remaining = chats.filter((chat) => chat.id !== id);
-
-    setChats(remaining);
-
-    if (activeChatId === id) {
-      const next = remaining.find((chat) => !chat.archived);
-      setActiveChatId(next?.id ?? null);
-    }
-
-    setMenuChatId(null);
-  };
-
-  const archiveChat = async (id: string) => {
-    const chat = chats.find((item) => item.id === id);
-    if (!chat) return;
-
-    const updated = {
-      ...chat,
-      archived: !chat.archived,
-      updated_at: new Date().toISOString(),
-    };
-
-    setChats((previous) =>
-      previous.map((item) => (item.id === id ? updated : item))
-    );
-
-    await persistChat(updated);
-
-    if (activeChatId === id && updated.archived) {
-      const next = chats.find(
-        (item) => item.id !== id && !item.archived
-      );
-
-      setActiveChatId(next?.id ?? null);
-    }
-
-    setMenuChatId(null);
-  };
-
-  const beginRename = (chat: Chat) => {
-    setRenamingChatId(chat.id);
-    setRenameText(chat.title);
-    setMenuChatId(null);
-  };
-
-  const finishRename = async () => {
-    if (!renamingChatId) return;
-
-    const title = renameText.trim();
-
-    if (!title) {
-      setRenamingChatId(null);
-      return;
-    }
-
-    const chat = chats.find((item) => item.id === renamingChatId);
-
-    if (!chat) return;
-
-    const updated = {
-      ...chat,
-      title,
-      updated_at: new Date().toISOString(),
-    };
-
-    setChats((previous) =>
-      previous.map((item) =>
-        item.id === renamingChatId ? updated : item
-      )
-    );
-
-    setRenamingChatId(null);
-    await persistChat(updated);
-  };
-
-  const copyMessage = async (message: ChatMessage) => {
-    try {
-      await navigator.clipboard.writeText(message.content);
-
-      setCopiedId(message.id);
-
-      setTimeout(() => {
-        setCopiedId(null);
-      }, 1400);
-    } catch (error) {
-      console.error(error);
-    }
-  };
-
-  const selectAgent = (agent: Agent) => {
-    setAgentOpen(false);
-
-    if (agent.href) {
-      window.location.href = agent.href;
-      return;
-    }
-
-    setActiveAgent(agent.id);
-  };
-
-  const handleFiles = (files: FileList | null) => {
-    if (!files) return;
-
-    const selected = Array.from(files);
-
-    setAttachments((previous) => [...previous, ...selected]);
-  };
-
-  const removeAttachment = (index: number) => {
-    setAttachments((previous) =>
-      previous.filter((_, itemIndex) => itemIndex !== index)
-    );
-  };
-
-  const getAttachmentMetadata = () =>
-    attachments.map((file) => ({
-      name: file.name,
-      type: file.type,
-      size: file.size,
-    }));
-
-  const sendMessage = async (
-    overrideText?: string,
-    regenerateFromIndex?: number
-  ) => {
-    if (generating || !user || activeAgent !== "chat") return;
-
-    const text = (overrideText ?? composer).trim();
-
-    if (!text && regenerateFromIndex === undefined) return;
-
-    if (!activeChat) {
-      await createNewChat();
-      return;
-    }
-
-    if (credits <= 0) {
-      const message = makeMessage(
-        "assistant",
-        "Your ZUQEN Chat Credits are exhausted. Please add more credits to continue."
-      );
-
-      const updated = {
-        ...activeChat,
-        messages: [...activeChat.messages, message],
-        updated_at: new Date().toISOString(),
-      };
-
-      setChats((previous) =>
-        previous.map((chat) =>
-          chat.id === activeChat.id ? updated : chat
-        )
-      );
-
-      await persistChat(updated);
-      return;
-    }
-
-    setGenerating(true);
-
-    let conversation = [...activeChat.messages];
-
-    if (regenerateFromIndex !== undefined) {
-      conversation = conversation.slice(0, regenerateFromIndex);
-    } else {
-      const userMessage = makeMessage(
-        "user",
-        text,
-        getAttachmentMetadata()
-      );
-
-      conversation.push(userMessage);
-    }
-
-    const title =
-      activeChat.messages.length === 0 && text
-        ? text.length > 60
-          ? `${text.slice(0, 60)}...`
-          : text
-        : activeChat.title;
-
-    const optimisticChat: Chat = {
-      ...activeChat,
-      title,
-      messages: conversation,
-      updated_at: new Date().toISOString(),
-    };
-
-    setChats((previous) =>
-      previous.map((chat) =>
-        chat.id === activeChat.id ? optimisticChat : chat
-      )
-    );
-
-    setComposer("");
-    setAttachments([]);
+  const handleSignOut = useCallback(async () => {
+    if (signingOut) return;
 
     try {
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          messages: conversation.map((message) => ({
-            role: message.role,
-            content: message.content,
-          })),
-          userId: user.id,
-          chatId: activeChat.id,
-        }),
-      });
+      setSigningOut(true);
+      setErrorMessage("");
 
-      if (!response.ok) {
-        const errorText = await response.text();
+      streamAbortRef.current?.abort();
 
-        throw new Error(
-          errorText || `Chat request failed: ${response.status}`
+      const { error } = await supabase.auth.signOut();
+
+      if (error) {
+        console.error("signOut:", error);
+
+        setErrorMessage(
+          error.message || "Unable to sign out."
         );
+
+        setSigningOut(false);
+        return;
       }
 
-      if (!response.body) {
-        throw new Error("The chat server returned no response body.");
+      /*
+       * Explicitly send the user to authentication page.
+       * We do NOT call signInAnonymously here.
+       */
+      window.location.href = "/auth";
+    } catch (error) {
+      console.error("handleSignOut:", error);
+
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to sign out."
+      );
+
+      setSigningOut(false);
+    }
+  }, [signingOut]);
+
+  const selectChat = useCallback((chat: Chat) => {
+    setActiveChatId(chat.id);
+
+    const storedMessages = Array.isArray(chat.messages)
+      ? chat.messages
+      : [];
+
+    setMessages(storedMessages);
+    setMenuId(null);
+    setRenamingId(null);
+    setEditingId(null);
+    setErrorMessage("");
+  }, []);
+
+  const createConversation = useCallback(
+    async (firstMessage?: string) => {
+      if (!user?.id) {
+        setErrorMessage(
+          "Your session is still loading. Please try again."
+        );
+        return null;
       }
 
-      const assistantId = crypto.randomUUID();
+      const now = new Date().toISOString();
 
-      const assistantMessage: ChatMessage = {
-        id: assistantId,
-        role: "assistant",
-        content: "",
-        createdAt: new Date().toISOString(),
+      const title =
+        firstMessage?.trim().slice(0, 55) ||
+        "New conversation";
+
+      const payload = {
+        user_id: user.id,
+        title,
+        archived: false,
+        messages: [],
+        created_at: now,
+        updated_at: now,
       };
 
-      let runningMessages = [
-        ...conversation,
-        assistantMessage,
-      ];
+      const { data, error } = await supabase
+        .from("chats")
+        .insert(payload)
+        .select("*")
+        .single();
+
+      if (error || !data) {
+        console.error("createConversation:", error);
+
+        setErrorMessage(
+          error?.message ||
+            "Unable to create a conversation."
+        );
+
+        return null;
+      }
+
+      const newChat = data as Chat;
+
+      setChats((previous) => [newChat, ...previous]);
+      setActiveChatId(newChat.id);
+      setMessages([]);
+
+      return newChat;
+    },
+    [user]
+  );
+
+  const saveMessages = useCallback(
+    async (chatId: string, nextMessages: Message[]) => {
+      if (!user?.id) {
+        setErrorMessage(
+          "Your session is not available."
+        );
+        return false;
+      }
+
+      const { error } = await supabase
+        .from("chats")
+        .update({
+          messages: nextMessages,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", chatId)
+        .eq("user_id", user.id);
+
+      if (error) {
+        console.error("saveMessages:", error);
+
+        setErrorMessage(
+          `Unable to save conversation: ${error.message}`
+        );
+
+        return false;
+      }
 
       setChats((previous) =>
         previous.map((chat) =>
-          chat.id === activeChat.id
+          chat.id === chatId
             ? {
                 ...chat,
-                messages: runningMessages,
+                messages: nextMessages,
                 updated_at: new Date().toISOString(),
               }
             : chat
         )
       );
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
+      return true;
+    },
+    [user]
+  );
 
-      let accumulated = "";
-      let buffer = "";
+  const renameChat = useCallback(
+    async (chatId: string, title: string) => {
+      const cleanTitle = title.trim();
 
-      while (true) {
-        const { done, value } = await reader.read();
+      if (!cleanTitle || !user?.id) return;
 
-        if (done) break;
+      const { error } = await supabase
+        .from("chats")
+        .update({
+          title: cleanTitle.slice(0, 100),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", chatId)
+        .eq("user_id", user.id);
 
-        buffer += decoder.decode(value, {
-          stream: true,
+      if (error) {
+        setErrorMessage(
+          `Unable to rename chat: ${error.message}`
+        );
+        return;
+      }
+
+      setChats((previous) =>
+        previous.map((chat) =>
+          chat.id === chatId
+            ? {
+                ...chat,
+                title: cleanTitle.slice(0, 100),
+              }
+            : chat
+        )
+      );
+
+      setRenamingId(null);
+      setRenameValue("");
+      setMenuId(null);
+    },
+    [user]
+  );
+
+  const archiveChat = useCallback(
+    async (chatId: string, archived: boolean) => {
+      if (!user?.id) return;
+
+      const { error } = await supabase
+        .from("chats")
+        .update({
+          archived,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", chatId)
+        .eq("user_id", user.id);
+
+      if (error) {
+        setErrorMessage(
+          `Unable to ${
+            archived ? "archive" : "restore"
+          } chat: ${error.message}`
+        );
+        return;
+      }
+
+      setChats((previous) =>
+        previous.map((chat) =>
+          chat.id === chatId
+            ? { ...chat, archived }
+            : chat
+        )
+      );
+
+      if (activeChatId === chatId && archived) {
+        setActiveChatId(null);
+        setMessages([]);
+      }
+
+      setMenuId(null);
+    },
+    [user, activeChatId]
+  );
+
+  const deleteChat = useCallback(
+    async (chatId: string) => {
+      if (!user?.id) return;
+
+      const { error } = await supabase
+        .from("chats")
+        .delete()
+        .eq("id", chatId)
+        .eq("user_id", user.id);
+
+      if (error) {
+        setErrorMessage(
+          `Unable to delete chat: ${error.message}`
+        );
+        return;
+      }
+
+      setChats((previous) =>
+        previous.filter((chat) => chat.id !== chatId)
+      );
+
+      if (activeChatId === chatId) {
+        setActiveChatId(null);
+        setMessages([]);
+      }
+
+      setMenuId(null);
+    },
+    [user, activeChatId]
+  );
+
+  const parseStreamLine = (line: string) => {
+    if (!line.startsWith("data:")) return null;
+
+    const raw = line.slice(5).trim();
+
+    if (!raw || raw === "[DONE]") return null;
+
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  };
+
+  const extractText = (payload: any): string => {
+    if (!payload) return "";
+
+    if (typeof payload === "string") return payload;
+
+    if (typeof payload.content === "string") {
+      return payload.content;
+    }
+
+    if (typeof payload.delta === "string") {
+      return payload.delta;
+    }
+
+    if (typeof payload.text === "string") {
+      return payload.text;
+    }
+
+    if (
+      payload.message &&
+      typeof payload.message.content === "string"
+    ) {
+      return payload.message.content;
+    }
+
+    if (
+      payload.choices?.[0]?.delta &&
+      typeof payload.choices[0].delta.content ===
+        "string"
+    ) {
+      return payload.choices[0].delta.content;
+    }
+
+    if (
+      payload.choices?.[0]?.message &&
+      typeof payload.choices[0].message.content ===
+        "string"
+    ) {
+      return payload.choices[0].message.content;
+    }
+
+    return "";
+  };
+
+  const sendMessage = useCallback(
+    async (forcedMessages?: Message[]) => {
+      const text = input.trim();
+
+      if (loading) return;
+
+      if (!text && !forcedMessages?.length) return;
+
+      if (!user?.id) {
+        setErrorMessage(
+          "Your session is not ready yet. Please try again."
+        );
+        return;
+      }
+
+      setErrorMessage("");
+
+      let chatId = activeChatId;
+
+      let workingMessages = forcedMessages
+        ? [...forcedMessages]
+        : [...messages];
+
+      if (!chatId) {
+        const newChat = await createConversation(text);
+
+        if (!newChat) return;
+
+        chatId = newChat.id;
+        workingMessages = [];
+      }
+
+      const userMessage: Message = {
+        id: makeId(),
+        role: "user",
+        content: text,
+        created_at: new Date().toISOString(),
+        attachments:
+          attachments.length > 0
+            ? [...attachments]
+            : undefined,
+      };
+
+      if (!forcedMessages) {
+        workingMessages = [
+          ...workingMessages,
+          userMessage,
+        ];
+
+        setMessages(workingMessages);
+        setInput("");
+        setAttachments([]);
+        resetTextarea();
+      }
+
+      const savedUserMessage = await saveMessages(
+        chatId,
+        workingMessages
+      );
+
+      if (!savedUserMessage) return;
+
+      setLoading(true);
+
+      const assistantId = makeId();
+
+      const initialAssistant: Message = {
+        id: assistantId,
+        role: "assistant",
+        content: "",
+        created_at: new Date().toISOString(),
+      };
+
+      const withAssistant = [
+        ...workingMessages,
+        initialAssistant,
+      ];
+
+      setMessages(withAssistant);
+
+      const controller = new AbortController();
+
+      streamAbortRef.current = controller;
+
+      try {
+        const response = await fetch("/api/chat", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            messages: workingMessages.map(
+              (message) => ({
+                role: message.role,
+                content: message.content,
+              })
+            ),
+          }),
+          signal: controller.signal,
         });
 
-        const lines = buffer.split("\n");
-
-        buffer = lines.pop() || "";
-
-        for (const rawLine of lines) {
-          const line = rawLine.trim();
-
-          if (!line) continue;
-
-          let payload = line;
-
-          if (payload.startsWith("data:")) {
-            payload = payload.slice(5).trim();
-          }
-
-          if (payload === "[DONE]") continue;
+        if (!response.ok) {
+          let message =
+            `Chat request failed (${response.status})`;
 
           try {
-            const parsed = JSON.parse(payload);
+            const data = await response.json();
 
-            const chunk =
-              parsed?.text ??
-              parsed?.content ??
-              parsed?.delta ??
-              parsed?.choices?.[0]?.delta?.content ??
-              "";
-
-            if (typeof chunk === "string" && chunk) {
-              accumulated += chunk;
+            if (data?.error) {
+              message = data.error;
             }
-          } catch {
-            accumulated += payload;
-          }
+          } catch {}
 
-          runningMessages = runningMessages.map((message) =>
-            message.id === assistantId
-              ? {
-                  ...message,
-                  content: accumulated,
-                }
-              : message
-          );
+          throw new Error(message);
+        }
 
-          setChats((previous) =>
-            previous.map((chat) =>
-              chat.id === activeChat.id
-                ? {
-                    ...chat,
-                    messages: runningMessages,
-                    updated_at: new Date().toISOString(),
-                  }
-                : chat
-            )
+        if (!response.body) {
+          throw new Error(
+            "The AI response stream is unavailable."
           );
         }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+
+        let buffer = "";
+        let assistantText = "";
+
+        while (true) {
+          const { value, done } =
+            await reader.read();
+
+          if (done) break;
+
+          buffer += decoder.decode(value, {
+            stream: true,
+          });
+
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+
+          for (const line of lines) {
+            const payload = parseStreamLine(line);
+
+            if (!payload) continue;
+
+            if (payload.error) {
+              throw new Error(payload.error);
+            }
+
+            const chunk = extractText(payload);
+
+            if (!chunk) continue;
+
+            assistantText += chunk;
+
+            setMessages((previous) =>
+              previous.map((message) =>
+                message.id === assistantId
+                  ? {
+                      ...message,
+                      content: assistantText,
+                    }
+                  : message
+              )
+            );
+          }
+        }
+
+        if (!assistantText.trim()) {
+          throw new Error(
+            "ZUQEN AI returned an empty response."
+          );
+        }
+
+        const finalAssistant: Message = {
+          ...initialAssistant,
+          content: assistantText,
+        };
+
+        const finalMessages = [
+          ...workingMessages,
+          finalAssistant,
+        ];
+
+        setMessages(finalMessages);
+
+        await saveMessages(
+          chatId,
+          finalMessages
+        );
+
+        await loadChatCredits(user.id);
+        await loadChats(user.id);
+      } catch (error) {
+        if (
+          error instanceof DOMException &&
+          error.name === "AbortError"
+        ) {
+          return;
+        }
+
+        console.error("sendMessage:", error);
+
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Something went wrong while chatting.";
+
+        setErrorMessage(message);
+
+        setMessages((previous) =>
+          previous.filter(
+            (message) =>
+              message.id !== assistantId
+          )
+        );
+      } finally {
+        streamAbortRef.current = null;
+        setLoading(false);
       }
+    },
+    [
+      input,
+      loading,
+      user,
+      activeChatId,
+      messages,
+      attachments,
+      createConversation,
+      saveMessages,
+      resetTextarea,
+      loadChatCredits,
+      loadChats,
+    ]
+  );
 
-      if (!accumulated.trim()) {
-        throw new Error("ZUQEN returned an empty response.");
-      }
+  const handleSubmit = async () => {
+    await sendMessage();
+  };
 
-      const finalChat: Chat = {
-        ...activeChat,
-        title,
-        messages: runningMessages,
-        updated_at: new Date().toISOString(),
-      };
-
-      setChats((previous) =>
-        previous.map((chat) =>
-          chat.id === activeChat.id ? finalChat : chat
-        )
-      );
-
-      await persistChat(finalChat);
-
-      await loadChatCredits(user.id);
-    } catch (error) {
-      console.error("Chat error:", error);
-
-      const errorMessage = makeMessage(
-        "assistant",
-        error instanceof Error
-          ? `I couldn't complete that request. ${error.message}`
-          : "I couldn't complete that request. Please try again."
-      );
-
-      const failedChat: Chat = {
-        ...activeChat,
-        messages: [...conversation, errorMessage],
-        updated_at: new Date().toISOString(),
-      };
-
-      setChats((previous) =>
-        previous.map((chat) =>
-          chat.id === activeChat.id ? failedChat : chat
-        )
-      );
-
-      await persistChat(failedChat);
-    } finally {
-      setGenerating(false);
-      scrollBottom();
+  const handleKeyDown = (
+    event: React.KeyboardEvent<HTMLTextAreaElement>
+  ) => {
+    if (
+      event.key === "Enter" &&
+      !event.shiftKey
+    ) {
+      event.preventDefault();
+      handleSubmit();
     }
   };
 
-  const editMessage = async (message: ChatMessage) => {
-    setEditingMessageId(message.id);
-    setEditingText(message.content);
+  const handleAttachment = (
+    event: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const files = Array.from(
+      event.target.files ?? []
+    );
+
+    const mapped = files.map((file) => ({
+      id: makeId(),
+      name: file.name,
+      type: file.type,
+      size: file.size,
+    }));
+
+    setAttachments((previous) => [
+      ...previous,
+      ...mapped,
+    ]);
+
+    event.target.value = "";
   };
 
-  const submitEdit = async () => {
-    if (!activeChat || !editingMessageId || !editingText.trim()) {
-      return;
-    }
+  const removeAttachment = (id: string) => {
+    setAttachments((previous) =>
+      previous.filter((item) => item.id !== id)
+    );
+  };
 
-    const index = activeChat.messages.findIndex(
-      (message) => message.id === editingMessageId
+  const copyMessage = async (content: string) => {
+    try {
+      await navigator.clipboard.writeText(content);
+    } catch {
+      setErrorMessage(
+        "Unable to copy message."
+      );
+    }
+  };
+
+  const startEditMessage = (
+    message: Message
+  ) => {
+    setEditingId(message.id);
+    setEditingValue(message.content);
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setEditingValue("");
+  };
+
+  const saveEditedMessage = async (
+    messageId: string
+  ) => {
+    const clean = editingValue.trim();
+
+    if (!clean || !activeChatId) return;
+
+    const index = messages.findIndex(
+      (message) => message.id === messageId
     );
 
     if (index === -1) return;
 
-    const updatedUserMessage = {
-      ...activeChat.messages[index],
-      content: editingText.trim(),
-    };
+    const message = messages[index];
 
-    const newMessages = [
-      ...activeChat.messages.slice(0, index),
-      updatedUserMessage,
-    ];
+    if (message.role !== "user") return;
 
-    const editedChat = {
-      ...activeChat,
-      messages: newMessages,
-      updated_at: new Date().toISOString(),
-    };
+    const nextMessages = messages
+      .slice(0, index)
+      .map((item, itemIndex) =>
+        itemIndex === index
+          ? {
+              ...item,
+              content: clean,
+            }
+          : item
+      );
 
-    setChats((previous) =>
-      previous.map((chat) =>
-        chat.id === activeChat.id ? editedChat : chat
-      )
+    setMessages(nextMessages);
+    setEditingId(null);
+    setEditingValue("");
+
+    await saveMessages(
+      activeChatId,
+      nextMessages
     );
 
-    setEditingMessageId(null);
-    setEditingText("");
+    setInput(clean);
 
-    await sendMessage(
-      updatedUserMessage.content,
-      index
+    setTimeout(() => {
+      sendMessage(nextMessages);
+    }, 0);
+  };
+
+  const regenerate = async () => {
+    if (!activeChatId || loading) return;
+
+    let lastUserIndex = -1;
+
+    for (
+      let i = messages.length - 1;
+      i >= 0;
+      i--
+    ) {
+      if (messages[i].role === "user") {
+        lastUserIndex = i;
+        break;
+      }
+    }
+
+    if (lastUserIndex === -1) return;
+
+    const baseMessages = messages.slice(
+      0,
+      lastUserIndex
     );
-  };
 
-  const regenerate = async (messageIndex: number) => {
-    if (!activeChat) return;
+    const lastUserMessage =
+      messages[lastUserIndex];
 
-    await sendMessage(undefined, messageIndex);
-  };
+    const text = lastUserMessage.content;
 
-  const logout = async () => {
-    await supabase.auth.signOut();
-    window.location.href = "/auth";
-  };
+    setMessages(baseMessages);
 
-  if (!authReady) {
-    return (
-      <main className="flex min-h-screen items-center justify-center bg-[#07080b] text-white">
-        <style jsx global>{`
-          body {
-            margin: 0;
-            background: #07080b;
-          }
-        `}</style>
-
-        <div className="flex flex-col items-center gap-5">
-          <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04]">
-            <Sparkles
-              size={25}
-              className="animate-pulse text-violet-400"
-            />
-          </div>
-
-          <div className="text-center">
-            <div className="text-lg font-semibold tracking-tight">
-              ZUQEN
-            </div>
-            <div className="mt-1 text-xs text-white/30">
-              Preparing your workspace...
-            </div>
-          </div>
-        </div>
-      </main>
+    await saveMessages(
+      activeChatId,
+      baseMessages
     );
-  }
+
+    setInput(text);
+
+    setTimeout(() => {
+      sendMessage(baseMessages);
+    }, 0);
+  };
+
+  const startRename = (chat: Chat) => {
+    setRenamingId(chat.id);
+    setRenameValue(chat.title);
+    setMenuId(null);
+  };
+
+  const startNewChat = () => {
+    setActiveChatId(null);
+    setMessages([]);
+    setInput("");
+    setAttachments([]);
+    setErrorMessage("");
+    setEditingId(null);
+    setRenamingId(null);
+    resetTextarea();
+  };
+
+  const navigateAgent = (
+    agent: (typeof AGENTS)[number]
+  ) => {
+    setSelectedAgent(agent.name);
+    setAgentOpen(false);
+
+    if (agent.route) {
+      window.location.href = agent.route;
+    }
+  };
+
+  const toggleTheme = () => {
+    setLightMode((previous) => {
+      const next = !previous;
+
+      if (typeof window !== "undefined") {
+        localStorage.setItem(
+          "zuqen-theme",
+          next ? "light" : "dark"
+        );
+      }
+
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const savedTheme =
+      localStorage.getItem("zuqen-theme");
+
+    if (savedTheme === "light") {
+      setLightMode(true);
+    }
+  }, []);
+
+  const homeSuggestions = [
+    {
+      title: "Write something",
+      text: "Help me write a professional email",
+      icon: "✎",
+    },
+    {
+      title: "Learn anything",
+      text: "Explain a difficult topic simply",
+      icon: "◎",
+    },
+    {
+      title: "Brainstorm ideas",
+      text: "Give me creative ideas for my project",
+      icon: "✦",
+    },
+    {
+      title: "Solve a problem",
+      text: "Help me solve a technical problem",
+      icon: "⌁",
+    },
+  ];
+
+  const accountLabel =
+    user?.is_anonymous
+      ? "Guest User"
+      : user?.email || "ZUQEN Account";
+
+  const accountStatus =
+    user?.is_anonymous
+      ? "Guest mode"
+      : "Signed in";
 
   return (
-    <main className="min-h-screen overflow-hidden bg-[#07080b] text-white">
-      <style jsx global>{`
+    <main
+      className={
+        lightMode
+          ? "zuqen-app light"
+          : "zuqen-app"
+      }
+    >
+      <style>{`
         * {
           box-sizing: border-box;
         }
@@ -924,369 +1463,1898 @@ export default function HomePage() {
         html,
         body {
           margin: 0;
+          padding: 0;
           min-height: 100%;
-          background: #07080b;
         }
 
         body {
-          font-family:
-            Inter,
-            ui-sans-serif,
-            system-ui,
-            -apple-system,
-            BlinkMacSystemFont,
-            "Segoe UI",
-            sans-serif;
+          background: #07080c;
         }
 
-        ::selection {
-          background: rgba(139, 92, 246, 0.3);
+        button,
+        input,
+        textarea {
+          font: inherit;
         }
 
-        ::-webkit-scrollbar {
+        button {
+          border: 0;
+        }
+.zuqen-top-action {
+  height: 40px;
+  padding: 0 13px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background .2s ease,
+    border-color .2s ease,
+    transform .2s ease,
+    box-shadow .2s ease;
+}
+
+.zuqen-top-action:hover {
+  background: var(--panel-3);
+  border-color: var(--border-strong);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 24px rgba(0,0,0,.12);
+}
+
+.zuqen-top-action span:first-child {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.templates-action span:first-child {
+  font-size: 16px;
+}
+
+.light .zuqen-top-action {
+  background: var(--panel-2);
+}
+
+@media (max-width: 900px) {
+  .zuqen-top-action {
+    width: 40px;
+    height: 38px;
+    padding: 0;
+  }
+
+  .zuqen-top-action span:last-child {
+    display: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .zuqen-top-right {
+    gap: 5px;
+  }
+
+  .zuqen-top-action {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+  }
+}
+        .zuqen-app {
+          --bg: #07080c;
+          --panel: #0c0e13;
+          --panel-2: #11141b;
+          --panel-3: #161a22;
+          --border: rgba(255,255,255,.075);
+          --border-strong: rgba(255,255,255,.12);
+          --text: #f5f7fb;
+          --muted: #8d94a3;
+          --muted-2: #646b79;
+          --accent: #ffffff;
+          --accent-text: #08090b;
+          --danger: #ff6f78;
+          --shadow: 0 24px 80px rgba(0,0,0,.35);
+
+          min-height: 100vh;
+          display: flex;
+          background:
+            radial-gradient(
+              circle at 60% 10%,
+              rgba(91,105,255,.07),
+              transparent 32%
+            ),
+            var(--bg);
+          color: var(--text);
+          overflow: hidden;
+        }
+
+        .zuqen-app.light {
+          --bg: #f5f6f8;
+          --panel: #ffffff;
+          --panel-2: #f0f2f5;
+          --panel-3: #e8ebef;
+          --border: rgba(10,15,25,.08);
+          --border-strong: rgba(10,15,25,.14);
+          --text: #111318;
+          --muted: #69707d;
+          --muted-2: #8b919d;
+          --accent: #111318;
+          --accent-text: #ffffff;
+          --shadow: 0 24px 80px rgba(25,35,50,.12);
+        }
+
+        .zuqen-sidebar {
+          width: 285px;
+          flex: 0 0 285px;
+          height: 100vh;
+          display: flex;
+          flex-direction: column;
+          background: rgba(10,12,17,.94);
+          border-right: 1px solid var(--border);
+          backdrop-filter: blur(24px);
+          transition: width .25s ease, flex-basis .25s ease;
+          z-index: 30;
+        }
+
+        .light .zuqen-sidebar {
+          background: rgba(255,255,255,.94);
+        }
+
+        .zuqen-sidebar.closed {
+          width: 0;
+          flex-basis: 0;
+          overflow: hidden;
+          border-right: 0;
+        }
+
+        .zuqen-brand {
+          height: 76px;
+          display: flex;
+          align-items: center;
+          padding: 0 20px;
+          gap: 12px;
+        }
+
+        .zuqen-logo {
+          width: 38px;
+          height: 38px;
+          border-radius: 12px;
+          display: grid;
+          place-items: center;
+          color: #fff;
+          background:
+            linear-gradient(145deg, #ffffff, #7e8490);
+          box-shadow:
+            0 8px 30px rgba(255,255,255,.1),
+            inset 0 1px 1px rgba(255,255,255,.6);
+          position: relative;
+          overflow: hidden;
+        }
+
+        .zuqen-logo::before {
+          content: "";
+          width: 17px;
+          height: 17px;
+          border: 2px solid #101216;
+          border-radius: 50%;
+          position: absolute;
+        }
+
+        .zuqen-logo::after {
+          content: "";
           width: 6px;
           height: 6px;
+          border-radius: 50%;
+          background: #101216;
+          position: absolute;
         }
 
-        ::-webkit-scrollbar-track {
+        .zuqen-brand-text {
+          display: flex;
+          flex-direction: column;
+          line-height: 1.05;
+        }
+
+        .zuqen-brand-name {
+          font-size: 18px;
+          font-weight: 800;
+          letter-spacing: -.5px;
+        }
+
+        .zuqen-brand-sub {
+          color: var(--muted);
+          font-size: 10px;
+          margin-top: 5px;
+          letter-spacing: 1.5px;
+          text-transform: uppercase;
+        }
+
+        .zuqen-sidebar-content {
+          padding: 4px 13px 15px;
+          display: flex;
+          flex-direction: column;
+          min-height: 0;
+          flex: 1;
+        }
+
+        .zuqen-new-chat {
+          width: 100%;
+          height: 46px;
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          padding: 0 14px;
+          border-radius: 13px;
+          color: var(--text);
+          background: var(--panel-2);
+          border: 1px solid var(--border);
+          cursor: pointer;
+          transition: .2s ease;
+        }
+
+        .zuqen-new-chat:hover {
+          background: var(--panel-3);
+          border-color: var(--border-strong);
+          transform: translateY(-1px);
+        }
+
+        .zuqen-new-chat span:last-child {
+          font-weight: 600;
+          font-size: 13px;
+        }
+
+        .zuqen-sidebar-section {
+          margin-top: 22px;
+          min-height: 0;
+          display: flex;
+          flex-direction: column;
+          flex: 1;
+        }
+
+        .zuqen-sidebar-heading {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 0 7px 9px;
+          color: var(--muted-2);
+          font-size: 10px;
+          text-transform: uppercase;
+          letter-spacing: 1.3px;
+          font-weight: 700;
+        }
+
+        .zuqen-sidebar-heading button {
+          color: var(--muted);
           background: transparent;
+          cursor: pointer;
+          padding: 4px;
         }
 
-        ::-webkit-scrollbar-thumb {
-          background: rgba(255, 255, 255, 0.12);
-          border-radius: 999px;
+        .zuqen-chat-list {
+          overflow-y: auto;
+          padding-right: 2px;
         }
 
-        ::-webkit-scrollbar-thumb:hover {
-          background: rgba(255, 255, 255, 0.2);
+        .zuqen-chat-list::-webkit-scrollbar,
+        .zuqen-messages::-webkit-scrollbar {
+          width: 5px;
         }
 
-        textarea {
-          field-sizing: content;
+        .zuqen-chat-list::-webkit-scrollbar-thumb,
+        .zuqen-messages::-webkit-scrollbar-thumb {
+          background: rgba(255,255,255,.08);
+          border-radius: 99px;
+        }
+
+        .zuqen-chat-item {
+          position: relative;
+          display: flex;
+          align-items: center;
+          width: 100%;
+          min-height: 46px;
+          padding: 7px 8px 7px 11px;
+          border-radius: 11px;
+          color: var(--muted);
+          background: transparent;
+          cursor: pointer;
+          text-align: left;
+          margin-bottom: 2px;
+          transition: .18s ease;
+        }
+
+        .zuqen-chat-item:hover {
+          color: var(--text);
+          background: var(--panel-2);
+        }
+
+        .zuqen-chat-item.active {
+          color: var(--text);
+          background: var(--panel-2);
+          box-shadow: inset 2px 0 0 rgba(255,255,255,.8);
+        }
+
+        .zuqen-chat-main {
+          min-width: 0;
+          flex: 1;
+        }
+
+        .zuqen-chat-title {
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          font-size: 12.5px;
+          font-weight: 500;
+        }
+
+        .zuqen-chat-date {
+          margin-top: 3px;
+          font-size: 9.5px;
+          color: var(--muted-2);
+        }
+
+        .zuqen-chat-menu-button {
+          width: 28px;
+          height: 28px;
+          flex: 0 0 28px;
+          display: grid;
+          place-items: center;
+          color: var(--muted-2);
+          background: transparent;
+          border-radius: 8px;
+          cursor: pointer;
+          opacity: 0;
+        }
+
+        .zuqen-chat-item:hover .zuqen-chat-menu-button,
+        .zuqen-chat-menu-button.open {
+          opacity: 1;
+        }
+
+        .zuqen-chat-menu-button:hover {
+          color: var(--text);
+          background: var(--panel-3);
+        }
+
+        .zuqen-rename {
+          width: 100%;
+          padding: 7px 8px;
+          border-radius: 8px;
+          border: 1px solid var(--border-strong);
+          outline: none;
+          background: var(--panel);
+          color: var(--text);
+          font-size: 12px;
+        }
+
+        .zuqen-floating-menu {
+          position: absolute;
+          right: 8px;
+          top: 40px;
+          width: 178px;
+          padding: 5px;
+          border-radius: 13px;
+          background: #14171e;
+          border: 1px solid var(--border-strong);
+          box-shadow: var(--shadow);
+          z-index: 50;
+        }
+
+        .light .zuqen-floating-menu {
+          background: #fff;
+        }
+
+        .zuqen-menu-item {
+          width: 100%;
+          display: flex;
+          align-items: center;
+          gap: 9px;
+          padding: 9px 10px;
+          border-radius: 9px;
+          background: transparent;
+          color: var(--muted);
+          text-align: left;
+          cursor: pointer;
+          font-size: 12px;
+        }
+
+        .zuqen-menu-item:hover {
+          background: var(--panel-3);
+          color: var(--text);
+        }
+
+        .zuqen-menu-item.danger:hover {
+          color: var(--danger);
+        }
+
+        .zuqen-sidebar-bottom {
+          padding-top: 12px;
+          border-top: 1px solid var(--border);
+          margin-top: auto;
+        }
+
+        .zuqen-sidebar-user {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          padding: 9px;
+          border-radius: 12px;
+        }
+
+        .zuqen-user-dot {
+          width: 30px;
+          height: 30px;
+          display: grid;
+          place-items: center;
+          flex: 0 0 30px;
+          border-radius: 10px;
+          background: var(--panel-3);
+          color: var(--text);
+          font-size: 12px;
+          font-weight: 800;
+        }
+
+        .zuqen-user-info {
+          min-width: 0;
+          flex: 1;
+        }
+
+        .zuqen-user-name {
+          font-size: 11px;
+          font-weight: 700;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .zuqen-user-status {
+          color: var(--muted-2);
+          font-size: 9px;
+          margin-top: 3px;
+        }
+
+        .zuqen-auth-button {
+          width: 100%;
+          min-height: 36px;
+          margin-top: 8px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 7px;
+          border-radius: 10px;
+          background: var(--panel-2);
+          border: 1px solid var(--border);
+          color: var(--text);
+          cursor: pointer;
+          font-size: 10px;
+          font-weight: 700;
+          transition: .2s ease;
+        }
+
+        .zuqen-auth-button:hover {
+          background: var(--panel-3);
+          border-color: var(--border-strong);
+        }
+
+        .zuqen-auth-button.primary {
+          background: var(--accent);
+          color: var(--accent-text);
+          border-color: transparent;
+        }
+
+        .zuqen-auth-button.primary:hover {
+          opacity: .9;
+          transform: translateY(-1px);
+        }
+
+        .zuqen-auth-button:disabled {
+          opacity: .5;
+          cursor: not-allowed;
+        }
+
+        .zuqen-main {
+          flex: 1;
+          min-width: 0;
+          height: 100vh;
+          display: flex;
+          flex-direction: column;
+          position: relative;
+        }
+
+        .zuqen-topbar {
+          height: 76px;
+          flex: 0 0 76px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 0 24px;
+          border-bottom: 1px solid var(--border);
+          background: rgba(7,8,12,.55);
+          backdrop-filter: blur(22px);
+          z-index: 20;
+        }
+
+        .light .zuqen-topbar {
+          background: rgba(245,246,248,.7);
+        }
+
+        .zuqen-top-left,
+        .zuqen-top-right {
+          display: flex;
+          align-items: center;
+          gap: 9px;
+        }
+
+        .zuqen-icon-button {
+          width: 38px;
+          height: 38px;
+          display: grid;
+          place-items: center;
+          border-radius: 11px;
+          color: var(--muted);
+          background: transparent;
+          border: 1px solid transparent;
+          cursor: pointer;
+          transition: .2s ease;
+        }
+
+        .zuqen-icon-button:hover {
+          color: var(--text);
+          background: var(--panel-2);
+          border-color: var(--border);
+        }
+
+        .zuqen-agent-selector {
+          position: relative;
+        }
+
+        .zuqen-agent-button {
+          min-width: 174px;
+          height: 40px;
+          padding: 0 11px;
+          display: flex;
+          align-items: center;
+          gap: 9px;
+          border: 1px solid var(--border);
+          background: var(--panel-2);
+          color: var(--text);
+          border-radius: 12px;
+          cursor: pointer;
+        }
+
+        .zuqen-agent-button-icon {
+          width: 25px;
+          height: 25px;
+          display: grid;
+          place-items: center;
+          border-radius: 8px;
+          background: var(--panel-3);
+          font-size: 11px;
+        }
+
+        .zuqen-agent-button-text {
+          min-width: 0;
+          flex: 1;
+          text-align: left;
+        }
+
+        .zuqen-agent-button-name {
+          font-size: 11px;
+          font-weight: 700;
+        }
+
+        .zuqen-agent-button-sub {
+          margin-top: 2px;
+          color: var(--muted-2);
+          font-size: 8px;
+        }
+
+        .zuqen-agent-dropdown {
+          position: absolute;
+          top: 47px;
+          left: 0;
+          width: 285px;
+          padding: 7px;
+          border-radius: 15px;
+          background: #11141a;
+          border: 1px solid var(--border-strong);
+          box-shadow: var(--shadow);
+          z-index: 60;
+        }
+
+        .light .zuqen-agent-dropdown {
+          background: #fff;
+        }
+
+        .zuqen-agent-option {
+          width: 100%;
+          display: flex;
+          align-items: center;
+          gap: 11px;
+          padding: 10px;
+          border-radius: 11px;
+          background: transparent;
+          color: var(--muted);
+          cursor: pointer;
+          text-align: left;
+        }
+
+        .zuqen-agent-option:hover,
+        .zuqen-agent-option.selected {
+          color: var(--text);
+          background: var(--panel-2);
+        }
+
+        .zuqen-agent-option-icon {
+          width: 33px;
+          height: 33px;
+          display: grid;
+          place-items: center;
+          flex: 0 0 33px;
+          border-radius: 10px;
+          background: var(--panel-3);
+          font-size: 13px;
+        }
+
+        .zuqen-agent-option-content {
+          flex: 1;
+          min-width: 0;
+        }
+
+        .zuqen-agent-option-name {
+          font-size: 12px;
+          font-weight: 700;
+        }
+
+        .zuqen-agent-option-description {
+          color: var(--muted-2);
+          margin-top: 3px;
+          font-size: 9px;
+        }
+
+        .zuqen-agent-check {
+          width: 22px;
+          height: 22px;
+          display: grid;
+          place-items: center;
+          color: var(--text);
+        }
+
+        .zuqen-credit-wrap {
+          position: relative;
+        }
+
+        .zuqen-credit-button {
+          height: 40px;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          padding: 0 12px;
+          border-radius: 12px;
+          border: 1px solid var(--border);
+          background: var(--panel-2);
+          color: var(--text);
+          cursor: pointer;
+        }
+
+        .zuqen-credit-icon {
+          width: 23px;
+          height: 23px;
+          display: grid;
+          place-items: center;
+          border-radius: 7px;
+          background: var(--panel-3);
+          font-size: 11px;
+        }
+
+        .zuqen-credit-count {
+          font-size: 11px;
+          font-weight: 800;
+        }
+
+        .zuqen-credit-label {
+          color: var(--muted);
+          font-size: 9px;
+        }
+
+        .zuqen-credit-dropdown {
+          position: absolute;
+          right: 0;
+          top: 47px;
+          width: 255px;
+          padding: 15px;
+          border-radius: 15px;
+          background: #11141a;
+          border: 1px solid var(--border-strong);
+          box-shadow: var(--shadow);
+          z-index: 60;
+        }
+
+        .light .zuqen-credit-dropdown {
+          background: #fff;
+        }
+
+        .zuqen-credit-dropdown-title {
+          font-size: 11px;
+          font-weight: 800;
+        }
+
+        .zuqen-credit-big {
+          margin-top: 8px;
+          font-size: 29px;
+          font-weight: 850;
+          letter-spacing: -1.5px;
+        }
+
+        .zuqen-credit-small {
+          margin-top: 4px;
+          color: var(--muted);
+          font-size: 9px;
+        }
+
+        .zuqen-credit-line {
+          height: 1px;
+          background: var(--border);
+          margin: 14px 0;
+        }
+
+        .zuqen-credit-row {
+          display: flex;
+          justify-content: space-between;
+          font-size: 10px;
+          color: var(--muted);
+          margin-top: 8px;
+        }
+
+        .zuqen-credit-row strong {
+          color: var(--text);
+        }
+
+        .zuqen-content {
+          flex: 1;
+          min-height: 0;
+          display: flex;
+          flex-direction: column;
+          position: relative;
+        }
+
+        .zuqen-home {
+          flex: 1;
+          overflow-y: auto;
+          padding: 64px 28px 45px;
+        }
+
+        .zuqen-home-inner {
+          width: min(950px, 100%);
+          margin: 0 auto;
+        }
+
+        .zuqen-welcome {
+          text-align: center;
+          max-width: 700px;
+          margin: 0 auto;
+        }
+
+        .zuqen-welcome-mark {
+          width: 58px;
+          height: 58px;
+          margin: 0 auto 21px;
+          display: grid;
+          place-items: center;
+          border-radius: 19px;
+          color: #0a0b0e;
+          background: linear-gradient(145deg, #fff, #9ea4ae);
+          box-shadow: 0 18px 60px rgba(255,255,255,.08);
+          position: relative;
+        }
+
+        .zuqen-welcome-mark::before {
+          content: "";
+          width: 24px;
+          height: 24px;
+          border: 3px solid #101217;
+          border-radius: 50%;
+        }
+
+        .zuqen-welcome-mark::after {
+          content: "";
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+          background: #101217;
+          position: absolute;
+        }
+
+        .zuqen-welcome h1 {
+          margin: 0;
+          font-size: clamp(32px, 5vw, 52px);
+          line-height: 1;
+          letter-spacing: -2.8px;
+          font-weight: 850;
+        }
+
+        .zuqen-welcome p {
+          margin: 17px auto 0;
+          max-width: 570px;
+          color: var(--muted);
+          font-size: 14px;
+          line-height: 1.7;
+        }
+
+        .zuqen-search-card {
+          margin: 42px auto 0;
+          width: min(700px, 100%);
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          min-height: 66px;
+          padding: 10px 12px;
+          border-radius: 18px;
+          background: var(--panel);
+          border: 1px solid var(--border-strong);
+          box-shadow: 0 20px 70px rgba(0,0,0,.18);
+        }
+
+        .zuqen-search-card-icon {
+          width: 43px;
+          height: 43px;
+          flex: 0 0 43px;
+          display: grid;
+          place-items: center;
+          border-radius: 13px;
+          background: var(--panel-3);
+          color: var(--muted);
+        }
+
+        .zuqen-search-card input {
+          flex: 1;
+          min-width: 0;
+          border: 0;
+          outline: 0;
+          background: transparent;
+          color: var(--text);
+          font-size: 13px;
+        }
+
+        .zuqen-search-card input::placeholder {
+          color: var(--muted-2);
+        }
+
+        .zuqen-search-shortcut {
+          color: var(--muted-2);
+          border: 1px solid var(--border);
+          background: var(--panel-2);
+          border-radius: 7px;
+          padding: 4px 7px;
+          font-size: 9px;
+        }
+
+        .zuqen-suggestion-grid {
+          margin-top: 18px;
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 10px;
+        }
+
+        .zuqen-suggestion {
+          min-height: 106px;
+          padding: 15px;
+          text-align: left;
+          border-radius: 15px;
+          border: 1px solid var(--border);
+          background: var(--panel);
+          color: var(--text);
+          cursor: pointer;
+          transition: .2s ease;
+        }
+
+        .zuqen-suggestion:hover {
+          transform: translateY(-2px);
+          border-color: var(--border-strong);
+          background: var(--panel-2);
+        }
+
+        .zuqen-suggestion-icon {
+          color: var(--muted);
+          font-size: 15px;
+        }
+
+        .zuqen-suggestion-title {
+          margin-top: 16px;
+          font-size: 11px;
+          font-weight: 800;
+        }
+
+        .zuqen-suggestion-text {
+          margin-top: 5px;
+          color: var(--muted-2);
+          font-size: 9px;
+          line-height: 1.4;
+        }
+
+        .zuqen-agent-strip {
+          margin-top: 42px;
+        }
+
+        .zuqen-strip-title {
+          color: var(--muted-2);
+          text-transform: uppercase;
+          letter-spacing: 1.2px;
+          font-size: 9px;
+          font-weight: 800;
+          text-align: center;
+        }
+
+        .zuqen-agent-cards {
+          margin-top: 12px;
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 10px;
+        }
+
+        .zuqen-mini-agent {
+          padding: 14px;
+          border: 1px solid var(--border);
+          background: var(--panel);
+          border-radius: 14px;
+          cursor: pointer;
+          color: var(--text);
+          text-align: left;
+          transition: .2s ease;
+        }
+
+        .zuqen-mini-agent:hover {
+          background: var(--panel-2);
+          transform: translateY(-2px);
+        }
+
+        .zuqen-mini-agent-icon {
+          width: 32px;
+          height: 32px;
+          display: grid;
+          place-items: center;
+          border-radius: 10px;
+          background: var(--panel-3);
+          color: var(--muted);
+          font-size: 12px;
+        }
+
+        .zuqen-mini-agent-name {
+          margin-top: 12px;
+          font-size: 10px;
+          font-weight: 750;
+        }
+
+        .zuqen-mini-agent-desc {
+          color: var(--muted-2);
+          font-size: 8px;
+          margin-top: 4px;
+        }
+
+        .zuqen-chat-view {
+          flex: 1;
+          min-height: 0;
+          display: flex;
+          flex-direction: column;
+        }
+
+        .zuqen-messages {
+          flex: 1;
+          overflow-y: auto;
+          padding: 40px 25px 28px;
+        }
+
+        .zuqen-message-list {
+          width: min(930px, 100%);
+          margin: 0 auto;
+        }
+
+        .zuqen-message-row {
+          display: flex;
+          margin-bottom: 31px;
+        }
+
+        .zuqen-message-row.user {
+          justify-content: flex-start;
+        }
+
+        .zuqen-message-row.assistant {
+          justify-content: flex-end;
+        }
+
+        .zuqen-message-block {
+          width: min(760px, 90%);
+        }
+
+        .zuqen-message-label {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          margin-bottom: 8px;
+          font-size: 10px;
+          font-weight: 800;
+          letter-spacing: .2px;
+        }
+
+        .user .zuqen-message-label {
+          justify-content: flex-start;
+          color: var(--muted);
+        }
+
+        .assistant .zuqen-message-label {
+          justify-content: flex-end;
+          color: var(--muted);
+        }
+
+        .zuqen-message-label-mark {
+          width: 22px;
+          height: 22px;
+          display: grid;
+          place-items: center;
+          border-radius: 7px;
+          background: var(--panel-3);
+          color: var(--text);
+          font-size: 9px;
+        }
+
+        .zuqen-message-bubble {
+          padding: 17px 19px;
+          border: 1px solid var(--border);
+          border-radius: 17px;
+          font-size: 14px;
+          line-height: 1.75;
+          white-space: pre-wrap;
+          word-break: break-word;
+        }
+
+        .user .zuqen-message-bubble {
+          background: var(--panel-2);
+          border-top-left-radius: 6px;
+        }
+
+        .assistant .zuqen-message-bubble {
+          background: rgba(255,255,255,.025);
+          border-color: var(--border-strong);
+          border-top-right-radius: 6px;
+        }
+
+        .light .assistant .zuqen-message-bubble {
+          background: rgba(0,0,0,.025);
+        }
+
+        .zuqen-message-actions {
+          display: flex;
+          align-items: center;
+          gap: 3px;
+          margin-top: 7px;
+        }
+
+        .user .zuqen-message-actions {
+          justify-content: flex-start;
+        }
+
+        .assistant .zuqen-message-actions {
+          justify-content: flex-end;
+        }
+
+        .zuqen-action {
+          width: 29px;
+          height: 29px;
+          display: grid;
+          place-items: center;
+          color: var(--muted-2);
+          background: transparent;
+          border-radius: 8px;
+          cursor: pointer;
+        }
+
+        .zuqen-action:hover {
+          color: var(--text);
+          background: var(--panel-2);
+        }
+
+        .zuqen-edit-box {
+          width: 100%;
+          padding: 12px;
+          border: 1px solid var(--border-strong);
+          border-radius: 15px;
+          background: var(--panel);
+        }
+
+        .zuqen-edit-box textarea {
+          width: 100%;
+          min-height: 100px;
+          resize: vertical;
+          border: 0;
+          outline: 0;
+          background: transparent;
+          color: var(--text);
+          line-height: 1.6;
+          font-size: 14px;
+        }
+
+        .zuqen-edit-actions {
+          display: flex;
+          justify-content: flex-end;
+          gap: 7px;
+          margin-top: 8px;
+        }
+
+        .zuqen-small-button {
+          height: 32px;
+          padding: 0 11px;
+          border-radius: 9px;
+          background: var(--panel-3);
+          color: var(--muted);
+          cursor: pointer;
+          font-size: 10px;
+          font-weight: 700;
+        }
+
+        .zuqen-small-button.primary {
+          color: var(--accent-text);
+          background: var(--accent);
+        }
+
+        .zuqen-typing {
+          display: inline-flex;
+          gap: 4px;
+          align-items: center;
+          min-height: 24px;
+        }
+
+        .zuqen-typing span {
+          width: 5px;
+          height: 5px;
+          border-radius: 50%;
+          background: var(--muted);
+          animation: zuqenTyping 1.1s infinite ease-in-out;
+        }
+
+        .zuqen-typing span:nth-child(2) {
+          animation-delay: .15s;
+        }
+
+        .zuqen-typing span:nth-child(3) {
+          animation-delay: .3s;
+        }
+
+        @keyframes zuqenTyping {
+          0%, 60%, 100% {
+            transform: translateY(0);
+            opacity: .4;
+          }
+
+          30% {
+            transform: translateY(-4px);
+            opacity: 1;
+          }
+        }
+
+        .zuqen-attachment-list {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 7px;
+          margin-top: 9px;
+        }
+
+        .zuqen-attachment-chip {
+          display: flex;
+          align-items: center;
+          gap: 7px;
+          max-width: 240px;
+          padding: 6px 8px 6px 10px;
+          border: 1px solid var(--border);
+          background: var(--panel-3);
+          border-radius: 9px;
+          font-size: 9px;
+          color: var(--muted);
+        }
+
+        .zuqen-attachment-chip-name {
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .zuqen-attachment-remove {
+          display: grid;
+          place-items: center;
+          color: var(--muted-2);
+          background: transparent;
+          cursor: pointer;
+        }
+
+        .zuqen-composer-area {
+          padding: 12px 24px 20px;
+          background: linear-gradient(
+            to top,
+            var(--bg) 75%,
+            transparent
+          );
+        }
+
+        .zuqen-composer {
+          width: min(900px, 100%);
+          margin: 0 auto;
+          padding: 9px;
+          border-radius: 19px;
+          background: var(--panel);
+          border: 1px solid var(--border-strong);
+          box-shadow: 0 15px 55px rgba(0,0,0,.2);
+        }
+
+        .zuqen-composer-row {
+          display: flex;
+          align-items: flex-end;
+          gap: 8px;
+        }
+
+        .zuqen-attach-label {
+          width: 39px;
+          height: 39px;
+          display: grid;
+          place-items: center;
+          flex: 0 0 39px;
+          color: var(--muted);
+          background: var(--panel-2);
+          border-radius: 11px;
+          cursor: pointer;
+        }
+
+        .zuqen-attach-label:hover {
+          color: var(--text);
+        }
+
+        .zuqen-attach-label input {
+          display: none;
+        }
+
+        .zuqen-composer textarea {
+          flex: 1;
+          min-width: 0;
+          max-height: 220px;
+          min-height: 39px;
+          resize: none;
+          outline: none;
+          border: 0;
+          background: transparent;
+          color: var(--text);
+          padding: 9px 5px;
+          line-height: 1.5;
+          font-size: 13px;
+        }
+
+        .zuqen-composer textarea::placeholder {
+          color: var(--muted-2);
+        }
+
+        .zuqen-send {
+          width: 39px;
+          height: 39px;
+          display: grid;
+          place-items: center;
+          flex: 0 0 39px;
+          border-radius: 11px;
+          background: var(--accent);
+          color: var(--accent-text);
+          cursor: pointer;
+          transition: .18s ease;
+        }
+
+        .zuqen-send:hover:not(:disabled) {
+          transform: translateY(-1px);
+        }
+
+        .zuqen-send:disabled {
+          opacity: .35;
+          cursor: not-allowed;
+        }
+
+        .zuqen-composer-footer {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 6px 6px 1px 49px;
+          color: var(--muted-2);
+          font-size: 8px;
+        }
+
+        .zuqen-error {
+          width: min(900px, calc(100% - 48px));
+          margin: 0 auto 10px;
+          padding: 10px 12px;
+          display: flex;
+          align-items: flex-start;
+          gap: 8px;
+          border-radius: 11px;
+          color: #ffb4b8;
+          background: rgba(255,75,85,.08);
+          border: 1px solid rgba(255,75,85,.18);
+          font-size: 10px;
+          line-height: 1.5;
+        }
+
+        .light .zuqen-error {
+          color: #a91e2b;
+          background: rgba(255,75,85,.07);
+        }
+
+        .zuqen-empty-chat {
+          height: 100%;
+          display: grid;
+          place-items: center;
+          text-align: center;
+          color: var(--muted);
+        }
+
+        .zuqen-empty-chat-inner {
+          max-width: 440px;
+          padding: 30px;
+        }
+
+        .zuqen-empty-chat-icon {
+          width: 52px;
+          height: 52px;
+          margin: 0 auto 16px;
+          display: grid;
+          place-items: center;
+          border-radius: 17px;
+          background: var(--panel-2);
+          color: var(--text);
+        }
+
+        .zuqen-empty-chat h2 {
+          color: var(--text);
+          font-size: 22px;
+          margin: 0;
+          letter-spacing: -.7px;
+        }
+
+        .zuqen-empty-chat p {
+          margin: 9px 0 0;
+          font-size: 12px;
+          line-height: 1.6;
+        }
+
+        .zuqen-search-overlay {
+          position: absolute;
+          left: 24px;
+          top: 76px;
+          width: min(430px, calc(100% - 48px));
+          padding: 10px;
+          border: 1px solid var(--border-strong);
+          background: #11141a;
+          border-radius: 15px;
+          box-shadow: var(--shadow);
+          z-index: 70;
+        }
+
+        .light .zuqen-search-overlay {
+          background: #fff;
+        }
+
+        .zuqen-search-input-wrap {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          padding: 8px 10px;
+          border-radius: 10px;
+          background: var(--panel-2);
+        }
+
+        .zuqen-search-input-wrap input {
+          flex: 1;
+          border: 0;
+          outline: 0;
+          background: transparent;
+          color: var(--text);
+          font-size: 11px;
+        }
+
+        .zuqen-mobile-overlay {
+          display: none;
+        }
+
+        @media (max-width: 900px) {
+          .zuqen-sidebar {
+            position: fixed;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            box-shadow: 30px 0 80px rgba(0,0,0,.25);
+          }
+
+          .zuqen-sidebar.closed {
+            transform: translateX(-100%);
+            width: 285px;
+            flex-basis: 285px;
+          }
+
+          .zuqen-mobile-overlay {
+            display: block;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,.45);
+            z-index: 25;
+          }
+
+          .zuqen-topbar {
+            padding: 0 14px;
+          }
+
+          .zuqen-home {
+            padding: 45px 17px 35px;
+          }
+
+          .zuqen-suggestion-grid {
+            grid-template-columns: repeat(2, 1fr);
+          }
+
+          .zuqen-agent-cards {
+            grid-template-columns: repeat(2, 1fr);
+          }
+
+          .zuqen-messages {
+            padding: 25px 14px;
+          }
+
+          .zuqen-composer-area {
+            padding: 10px 12px 15px;
+          }
+
+          .zuqen-credit-label {
+            display: none;
+          }
+        }
+
+        @media (max-width: 560px) {
+          .zuqen-agent-button {
+            min-width: 42px;
+            width: 42px;
+            padding: 0;
+            justify-content: center;
+          }
+
+          .zuqen-agent-button-text,
+          .zuqen-agent-button > svg {
+            display: none;
+          }
+
+          .zuqen-credit-button {
+            width: 42px;
+            padding: 0;
+            justify-content: center;
+          }
+
+          .zuqen-credit-count {
+            display: none;
+          }
+
+          .zuqen-suggestion-grid {
+            grid-template-columns: 1fr;
+          }
+
+          .zuqen-agent-cards {
+            grid-template-columns: 1fr 1fr;
+          }
+
+          .zuqen-welcome h1 {
+            letter-spacing: -1.8px;
+          }
+
+          .zuqen-message-block {
+            width: 94%;
+          }
+
+          .zuqen-message-bubble {
+            font-size: 13px;
+          }
+
+          .zuqen-composer-footer {
+            padding-left: 6px;
+          }
+
+          .zuqen-composer-footer span:first-child {
+            display: none;
+          }
         }
       `}</style>
 
-      {sidebarOpen && (
-        <button
-          aria-label="Close sidebar"
-          onClick={() => setSidebarOpen(false)}
-          className="fixed inset-0 z-40 bg-black/70 backdrop-blur-sm lg:hidden"
+      {!sidebarOpen && (
+        <div
+          className="zuqen-mobile-overlay"
+          onClick={() =>
+            setSidebarOpen(true)
+          }
         />
       )}
 
-      {/* SIDEBAR */}
       <aside
-        className={`fixed left-0 top-0 z-50 flex h-screen w-[292px] flex-col border-r border-white/[0.065] bg-[#0b0c10] transition-transform duration-300 lg:translate-x-0 ${
-          sidebarOpen ? "translate-x-0" : "-translate-x-full"
+        className={`zuqen-sidebar ${
+          sidebarOpen ? "" : "closed"
         }`}
       >
-        <div className="flex h-[76px] items-center justify-between px-5">
-          <button
-            onClick={() => {
-              setActiveAgent("chat");
-              setSidebarOpen(false);
-            }}
-            className="flex items-center gap-3"
-          >
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-white text-black shadow-xl shadow-white/[0.04]">
-              <Sparkles size={18} strokeWidth={2.5} />
+        <div className="zuqen-brand">
+          <div className="zuqen-logo" />
+
+          <div className="zuqen-brand-text">
+            <div className="zuqen-brand-name">
+              ZUQEN AI
             </div>
 
-            <div className="text-left">
-              <div className="text-[18px] font-bold tracking-[-0.045em]">
-                ZUQEN
-              </div>
-
-              <div className="mt-[-1px] text-[8px] font-medium uppercase tracking-[0.3em] text-white/30">
-                AI WORKSPACE
-              </div>
+            <div className="zuqen-brand-sub">
+              Intelligent workspace
             </div>
-          </button>
-
-          <button
-            onClick={() => setSidebarOpen(false)}
-            className="rounded-lg p-2 text-white/30 hover:bg-white/5 hover:text-white lg:hidden"
-          >
-            <X size={18} />
-          </button>
-        </div>
-
-        <div className="px-4">
-          <button
-            onClick={createNewChat}
-            className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-white text-sm font-semibold text-black transition hover:bg-white/90 active:scale-[0.99]"
-          >
-            <Plus size={17} />
-            New conversation
-          </button>
-        </div>
-
-        <div className="px-4 pb-4 pt-4">
-          <div className="relative">
-            <Search
-              size={15}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-white/25"
-            />
-
-            <input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search conversations"
-              className="h-10 w-full rounded-xl border border-white/[0.07] bg-white/[0.025] pl-9 pr-3 text-xs text-white outline-none placeholder:text-white/25 focus:border-white/[0.14]"
-            />
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-3">
-          <div className="mb-2 flex items-center justify-between px-2">
-            <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/25">
-              {showArchived ? "Archived" : "Conversations"}
-            </span>
+        <div className="zuqen-sidebar-content">
+          <button
+            className="zuqen-new-chat"
+            onClick={startNewChat}
+          >
+            <Icon name="plus" size={17} />
+            <span>New conversation</span>
+          </button>
 
-            <button
-              onClick={() => setShowArchived((value) => !value)}
-              className="text-[10px] text-white/25 hover:text-white/60"
-            >
-              {showArchived ? "Active" : "Archived"}
-            </button>
-          </div>
+          <div className="zuqen-sidebar-section">
+            <div className="zuqen-sidebar-heading">
+              <span>
+                {archivedOpen
+                  ? "Archived"
+                  : "Conversations"}
+              </span>
 
-          {visibleChats.length === 0 ? (
-            <div className="px-4 py-12 text-center">
-              <MessageSquare
-                size={22}
-                className="mx-auto mb-3 text-white/10"
-              />
-
-              <p className="text-xs text-white/25">
-                {showArchived
-                  ? "No archived conversations"
-                  : "No conversations found"}
-              </p>
+              <button
+                title="Toggle archived"
+                onClick={() =>
+                  setArchivedOpen(
+                    (previous) => !previous
+                  )
+                }
+              >
+                <Icon
+                  name={
+                    archivedOpen
+                      ? "restore"
+                      : "archive"
+                  }
+                  size={14}
+                />
+              </button>
             </div>
-          ) : (
-            <div className="space-y-1">
-              {visibleChats.map((chat) => {
-                const selected = chat.id === activeChatId;
 
-                return (
+            <div className="zuqen-chat-list">
+              {visibleChats.length === 0 ? (
+                <div
+                  style={{
+                    padding: "18px 9px",
+                    color: "var(--muted-2)",
+                    fontSize: 10,
+                    lineHeight: 1.6,
+                  }}
+                >
+                  {archivedOpen
+                    ? "No archived conversations."
+                    : search
+                    ? "No conversations found."
+                    : "Your conversations will appear here."}
+                </div>
+              ) : (
+                visibleChats.map((chat) => (
                   <div
                     key={chat.id}
-                    className={`group relative flex items-center rounded-xl transition ${
-                      selected
-                        ? "bg-white/[0.075]"
-                        : "hover:bg-white/[0.035]"
+                    className={`zuqen-chat-item ${
+                      activeChatId === chat.id
+                        ? "active"
+                        : ""
                     }`}
+                    onClick={() =>
+                      selectChat(chat)
+                    }
                   >
-                    {renamingChatId === chat.id ? (
-                      <input
-                        autoFocus
-                        value={renameText}
-                        onChange={(event) =>
-                          setRenameText(event.target.value)
-                        }
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter") {
-                            finishRename();
+                    <div className="zuqen-chat-main">
+                      {renamingId === chat.id ? (
+                        <input
+                          className="zuqen-rename"
+                          autoFocus
+                          value={renameValue}
+                          onChange={(event) =>
+                            setRenameValue(
+                              event.target.value
+                            )
                           }
+                          onClick={(event) =>
+                            event.stopPropagation()
+                          }
+                          onKeyDown={(event) => {
+                            if (
+                              event.key ===
+                              "Enter"
+                            ) {
+                              event.preventDefault();
 
-                          if (event.key === "Escape") {
-                            setRenamingChatId(null);
+                              renameChat(
+                                chat.id,
+                                renameValue
+                              );
+                            }
+
+                            if (
+                              event.key ===
+                              "Escape"
+                            ) {
+                              setRenamingId(
+                                null
+                              );
+                            }
+                          }}
+                          onBlur={() =>
+                            renameChat(
+                              chat.id,
+                              renameValue
+                            )
                           }
-                        }}
-                        onBlur={finishRename}
-                        className="mx-2 my-2 w-full rounded-lg border border-white/10 bg-black/20 px-2 py-1.5 text-xs text-white outline-none"
+                        />
+                      ) : (
+                        <>
+                          <div className="zuqen-chat-title">
+                            {chat.title}
+                          </div>
+
+                          <div className="zuqen-chat-date">
+                            {formatDate(
+                              chat.updated_at
+                            )}
+                          </div>
+                        </>
+                      )}
+                    </div>
+
+                    <button
+                      className={`zuqen-chat-menu-button ${
+                        menuId === chat.id
+                          ? "open"
+                          : ""
+                      }`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+
+                        setMenuId(
+                          (previous) =>
+                            previous === chat.id
+                              ? null
+                              : chat.id
+                        );
+                      }}
+                    >
+                      <Icon
+                        name="menu"
+                        size={17}
                       />
-                    ) : (
-                      <>
+                    </button>
+
+                    {menuId === chat.id && (
+                      <div
+                        className="zuqen-floating-menu"
+                        onClick={(event) =>
+                          event.stopPropagation()
+                        }
+                      >
                         <button
-                          onClick={() => selectChat(chat.id)}
-                          className="flex min-w-0 flex-1 items-center gap-3 px-3 py-2.5 text-left"
+                          className="zuqen-menu-item"
+                          onClick={() =>
+                            startRename(chat)
+                          }
                         >
-                          <MessageSquare
-                            size={15}
-                            className={`shrink-0 ${
-                              selected
-                                ? "text-white/70"
-                                : "text-white/25"
-                            }`}
+                          <Icon
+                            name="edit"
+                            size={14}
+                          />
+                          Rename
+                        </button>
+
+                        <button
+                          className="zuqen-menu-item"
+                          onClick={() =>
+                            archiveChat(
+                              chat.id,
+                              !chat.archived
+                            )
+                          }
+                        >
+                          <Icon
+                            name={
+                              chat.archived
+                                ? "restore"
+                                : "archive"
+                            }
+                            size={14}
                           />
 
-                          <span
-                            className={`truncate text-[13px] ${
-                              selected
-                                ? "font-medium text-white/85"
-                                : "text-white/45"
-                            }`}
-                          >
-                            {chat.title}
-                          </span>
+                          {chat.archived
+                            ? "Restore"
+                            : "Archive"}
                         </button>
 
                         <button
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            setMenuChatId(
-                              menuChatId === chat.id ? null : chat.id
-                            );
-                          }}
-                          className="mr-1 rounded-lg p-2 text-white/20 opacity-0 transition hover:bg-white/10 hover:text-white group-hover:opacity-100"
+                          className="zuqen-menu-item danger"
+                          onClick={() =>
+                            deleteChat(chat.id)
+                          }
                         >
-                          <MoreHorizontal size={15} />
+                          <Icon
+                            name="trash"
+                            size={14}
+                          />
+                          Delete
                         </button>
-
-                        {menuChatId === chat.id && (
-                          <div
-                            onClick={(event) => event.stopPropagation()}
-                            className="absolute right-2 top-[42px] z-50 w-40 rounded-xl border border-white/[0.08] bg-[#15161c] p-1.5 shadow-2xl shadow-black/50"
-                          >
-                            <button
-                              onClick={() => beginRename(chat)}
-                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-white/60 hover:bg-white/5 hover:text-white"
-                            >
-                              <Edit3 size={14} />
-                              Rename
-                            </button>
-
-                            <button
-                              onClick={() => archiveChat(chat.id)}
-                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-white/60 hover:bg-white/5 hover:text-white"
-                            >
-                              <Archive size={14} />
-                              {chat.archived ? "Restore" : "Archive"}
-                            </button>
-
-                            <button
-                              onClick={() => deleteChat(chat.id)}
-                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-red-400/70 hover:bg-red-500/10 hover:text-red-400"
-                            >
-                              <Trash2 size={14} />
-                              Delete
-                            </button>
-                          </div>
-                        )}
-                      </>
+                      </div>
                     )}
                   </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        <div className="border-t border-white/[0.06] p-4">
-          <div className="mb-3 rounded-xl border border-white/[0.07] bg-white/[0.025] p-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-500/10 text-violet-400">
-                  <Sparkles size={14} />
-                </div>
-
-                <div>
-                  <div className="text-[10px] text-white/30">
-                    ZUQEN Chat Credits
-                  </div>
-
-                  <div className="mt-0.5 text-sm font-semibold">
-                    {creditsLoading
-                      ? "..."
-                      : credits.toFixed(2)}
-                  </div>
-                </div>
-              </div>
-
-              <a
-                href="/pricing"
-                className="rounded-lg border border-white/10 px-2.5 py-1.5 text-[10px] font-medium text-white/55 transition hover:bg-white/5 hover:text-white"
-              >
-                Add
-              </a>
+                ))
+              )}
             </div>
           </div>
 
-          <button
-            onClick={logout}
-            className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-white/35 transition hover:bg-white/5 hover:text-white"
-          >
-            <Settings size={17} />
-            Account & Settings
-          </button>
+          <div className="zuqen-sidebar-bottom">
+            <div className="zuqen-sidebar-user">
+              <div className="zuqen-user-dot">
+                {user?.is_anonymous
+                  ? "G"
+                  : user?.email
+                  ? user.email
+                      .charAt(0)
+                      .toUpperCase()
+                  : "Z"}
+              </div>
+
+              <div className="zuqen-user-info">
+                <div className="zuqen-user-name">
+                  {accountLabel}
+                </div>
+
+                <div className="zuqen-user-status">
+                  {accountStatus}
+                </div>
+              </div>
+            </div>
+
+            {user?.is_anonymous ? (
+              <button
+                className="zuqen-auth-button primary"
+                onClick={handleAuthNavigation}
+              >
+                <Icon
+                  name="user"
+                  size={14}
+                />
+                Sign in / Create account
+              </button>
+            ) : (
+              <button
+                className="zuqen-auth-button"
+                onClick={handleSignOut}
+                disabled={signingOut}
+              >
+                <Icon
+                  name="logout"
+                  size={14}
+                />
+
+                {signingOut
+                  ? "Signing out..."
+                  : "Sign out"}
+              </button>
+            )}
+          </div>
         </div>
       </aside>
 
-      {/* MAIN */}
-      <section className="flex min-h-screen flex-col lg:pl-[292px]">
-        {/* TOP BAR */}
-        <header className="sticky top-0 z-30 flex h-[76px] items-center justify-between border-b border-white/[0.06] bg-[#07080b]/85 px-4 backdrop-blur-2xl sm:px-6">
-          <div className="flex items-center gap-3">
+      <section className="zuqen-main">
+        <header className="zuqen-topbar">
+          <div className="zuqen-top-left">
             <button
-              onClick={() => setSidebarOpen(true)}
-              className="rounded-xl border border-white/[0.07] bg-white/[0.025] p-2.5 text-white/45 hover:bg-white/5 hover:text-white lg:hidden"
+              className="zuqen-icon-button"
+              onClick={() =>
+                setSidebarOpen(
+                  (previous) => !previous
+                )
+              }
+              title="Toggle sidebar"
             >
-              <Menu size={18} />
+              <Icon
+                name="menu"
+                size={19}
+              />
             </button>
 
-            <div className="relative">
+            <button
+              className="zuqen-icon-button"
+              onClick={() =>
+                setSearchOpen(
+                  (previous) => !previous
+                )
+              }
+              title="Search conversations"
+            >
+              <Icon
+                name="search"
+                size={18}
+              />
+            </button>
+
+            <div className="zuqen-agent-selector">
               <button
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setAgentOpen((value) => !value);
-                  setTemplatesOpen(false);
-                }}
-                className="flex items-center gap-2.5 rounded-xl border border-white/[0.07] bg-white/[0.025] px-3 py-2.5 transition hover:bg-white/[0.05]"
+                className="zuqen-agent-button"
+                onClick={() =>
+                  setAgentOpen(
+                    (previous) => !previous
+                  )
+                }
               >
-                <span className="text-violet-400">
-                  {currentAgent.icon}
+                <span className="zuqen-agent-button-icon">
+                  ✦
                 </span>
 
-                <span className="hidden text-sm font-medium text-white/80 sm:block">
-                  {currentAgent.name}
+                <span className="zuqen-agent-button-text">
+                  <div className="zuqen-agent-button-name">
+                    {selectedAgent}
+                  </div>
+
+                  <div className="zuqen-agent-button-sub">
+                    Active agent
+                  </div>
                 </span>
 
-                <ChevronDown
-                  size={14}
-                  className="text-white/25"
+                <Icon
+                  name="chevron"
+                  size={13}
                 />
               </button>
 
               {agentOpen && (
-                <div
-                  onClick={(event) => event.stopPropagation()}
-                  className="absolute left-0 top-[52px] z-[60] w-[290px] rounded-2xl border border-white/[0.08] bg-[#111218] p-2 shadow-2xl shadow-black/60"
-                >
-                  <div className="px-3 pb-2 pt-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-white/25">
-                    ZUQEN Agents
-                  </div>
-
+                <div className="zuqen-agent-dropdown">
                   {AGENTS.map((agent) => (
                     <button
-                      key={agent.id}
-                      onClick={() => selectAgent(agent)}
-                      className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left transition ${
-                        currentAgent.id === agent.id
-                          ? "bg-white/[0.07]"
-                          : "hover:bg-white/[0.04]"
+                      key={agent.name}
+                      className={`zuqen-agent-option ${
+                        selectedAgent ===
+                        agent.name
+                          ? "selected"
+                          : ""
                       }`}
+                      onClick={() =>
+                        navigateAgent(agent)
+                      }
                     >
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/[0.045] text-violet-400">
+                      <span className="zuqen-agent-option-icon">
                         {agent.icon}
-                      </div>
+                      </span>
 
-                      <div className="min-w-0">
-                        <div className="text-sm font-medium text-white/85">
+                      <span className="zuqen-agent-option-content">
+                        <div className="zuqen-agent-option-name">
                           {agent.name}
                         </div>
 
-                        <div className="mt-0.5 truncate text-[11px] text-white/30">
+                        <div className="zuqen-agent-option-description">
                           {agent.description}
                         </div>
-                      </div>
+                      </span>
 
-                      {currentAgent.id === agent.id && (
-                        <Check
-                          size={15}
-                          className="ml-auto text-violet-400"
-                        />
+                      {selectedAgent ===
+                        agent.name && (
+                        <span className="zuqen-agent-check">
+                          <Icon
+                            name="check"
+                            size={14}
+                          />
+                        </span>
                       )}
                     </button>
                   ))}
@@ -1295,529 +3363,714 @@ export default function HomePage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <div className="relative">
+          <div className="zuqen-top-right">
+          <button
+  className="zuqen-top-action automation-action"
+  onClick={() => {
+    window.location.href = "/automation";
+  }}
+  title="Automation Mode"
+>
+  <span>⚡</span>
+  <span>Automation Mode</span>
+</button>
+
+<button
+  className="zuqen-top-action templates-action"
+  onClick={() => {
+    window.location.href = "/templates";
+  }}
+  title="Buy/Sell Templates"
+>
+  <span>▦</span>
+  <span>Buy/Sell Templates</span>
+</button>
+            <div className="zuqen-credit-wrap">
               <button
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setTemplatesOpen((value) => !value);
-                  setAgentOpen(false);
-                }}
-                className="flex items-center gap-2 rounded-xl border border-white/[0.07] bg-white/[0.025] px-3 py-2.5 text-sm text-white/50 transition hover:bg-white/[0.05] hover:text-white"
+                className="zuqen-credit-button"
+                onClick={() =>
+                  setCreditsOpen(
+                    (previous) => !previous
+                  )
+                }
               >
-                <LayoutTemplate size={16} />
-                <span className="hidden sm:block">
-                  Templates
+                <span className="zuqen-credit-icon">
+                  ◈
+                </span>
+
+                <span className="zuqen-credit-count">
+                  {chatCredits === null
+                    ? "..."
+                    : chatCredits.toLocaleString()}
+                </span>
+
+                <span className="zuqen-credit-label">
+                  Chat credits
                 </span>
               </button>
 
-              {templatesOpen && (
-                <div
-                  onClick={(event) => event.stopPropagation()}
-                  className="absolute right-0 top-[52px] z-[60] w-[260px] rounded-2xl border border-white/[0.08] bg-[#111218] p-2 shadow-2xl shadow-black/60"
-                >
-                  <div className="px-3 pb-2 pt-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-white/25">
-                    Templates
+              {creditsOpen && (
+                <div className="zuqen-credit-dropdown">
+                  <div className="zuqen-credit-dropdown-title">
+                    ZUQEN Chat Credits
                   </div>
 
-                  <button
-                    onClick={() => {
-                      setTemplatesOpen(false);
-                      setComposer(
-                        "I want to build a professional website for "
-                      );
-                      setActiveAgent("chat");
-                      textareaRef.current?.focus();
-                    }}
-                    className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left hover:bg-white/[0.05]"
-                  >
-                    <WandSparkles
-                      size={17}
-                      className="text-violet-400"
-                    />
+                  <div className="zuqen-credit-big">
+                    {chatCredits === null
+                      ? "..."
+                      : chatCredits.toLocaleString()}
+                  </div>
 
-                    <div>
-                      <div className="text-sm font-medium">
-                        Build
-                      </div>
+                  <div className="zuqen-credit-small">
+                    Available for AI conversations
+                  </div>
 
-                      <div className="text-[11px] text-white/30">
-                        Create something with AI
-                      </div>
-                    </div>
-                  </button>
+                  <div className="zuqen-credit-line" />
 
-                  <button
-                    onClick={() => {
-                      setTemplatesOpen(false);
-                      setComposer(
-                        "Help me create a product listing for "
-                      );
-                      setActiveAgent("chat");
-                      textareaRef.current?.focus();
-                    }}
-                    className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left hover:bg-white/[0.05]"
-                  >
-                    <FileText
-                      size={17}
-                      className="text-blue-400"
-                    />
+                  <div className="zuqen-credit-row">
+                    <span>Status</span>
 
-                    <div>
-                      <div className="text-sm font-medium">
-                        Sell
-                      </div>
+                    <strong>
+                      {chatCredits === null
+                        ? "Loading"
+                        : chatCredits > 0
+                        ? "Available"
+                        : "No credits"}
+                    </strong>
+                  </div>
 
-                      <div className="text-[11px] text-white/30">
-                        Create product content
-                      </div>
-                    </div>
-                  </button>
+                  <div className="zuqen-credit-row">
+                    <span>Feature</span>
+                    <strong>AI Chat</strong>
+                  </div>
 
-                  <button
-                    onClick={() => {
-                      setTemplatesOpen(false);
-                      setComposer(
-                        "Help me research products for "
-                      );
-                      setActiveAgent("chat");
-                      textareaRef.current?.focus();
-                    }}
-                    className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left hover:bg-white/[0.05]"
-                  >
-                    <Search
-                      size={17}
-                      className="text-emerald-400"
-                    />
-
-                    <div>
-                      <div className="text-sm font-medium">
-                        Buy
-                      </div>
-
-                      <div className="text-[11px] text-white/30">
-                        Research products
-                      </div>
-                    </div>
-                  </button>
+                  <div className="zuqen-credit-row">
+                    <span>Provider</span>
+                    <strong>Groq</strong>
+                  </div>
                 </div>
               )}
             </div>
 
             <button
-              onClick={() => setSearchOpen((value) => !value)}
-              className="rounded-xl border border-white/[0.07] bg-white/[0.025] p-2.5 text-white/35 hover:bg-white/5 hover:text-white"
+              className="zuqen-icon-button"
+              onClick={toggleTheme}
+              title="Toggle theme"
             >
-              <Search size={17} />
+              <Icon
+                name={
+                  lightMode
+                    ? "moon"
+                    : "sun"
+                }
+                size={18}
+              />
             </button>
           </div>
         </header>
 
         {searchOpen && (
-          <div className="border-b border-white/[0.06] bg-[#0a0b0f] px-4 py-3 lg:px-8">
-            <div className="mx-auto max-w-[900px]">
-              <div className="relative">
-                <Search
-                  size={16}
-                  className="absolute left-3 top-1/2 -translate-y-1/2 text-white/25"
-                />
+          <div className="zuqen-search-overlay">
+            <div className="zuqen-search-input-wrap">
+              <Icon
+                name="search"
+                size={15}
+              />
 
-                <input
-                  autoFocus
-                  value={search}
-                  onChange={(event) =>
-                    setSearch(event.target.value)
+              <input
+                autoFocus
+                value={search}
+                onChange={(event) =>
+                  setSearch(
+                    event.target.value
+                  )
+                }
+                placeholder="Search conversations..."
+              />
+
+              {search && (
+                <button
+                  onClick={() =>
+                    setSearch("")
                   }
-                  placeholder="Search your conversations..."
-                  className="h-11 w-full rounded-xl border border-white/[0.08] bg-white/[0.025] pl-10 pr-4 text-sm text-white outline-none placeholder:text-white/25"
-                />
-              </div>
+                  style={{
+                    background:
+                      "transparent",
+                    color:
+                      "var(--muted)",
+                    cursor:
+                      "pointer",
+                  }}
+                >
+                  <Icon
+                    name="close"
+                    size={14}
+                  />
+                </button>
+              )}
             </div>
           </div>
         )}
 
-        {/* CONTENT */}
-        <div className="flex min-h-0 flex-1 flex-col">
-          <div className="mx-auto flex w-full max-w-[960px] flex-1 flex-col px-4 sm:px-6">
-            {!activeChat || activeChat.messages.length === 0 ? (
-              <div className="flex flex-1 flex-col items-center justify-center py-12 sm:py-16">
-                <div className="relative mb-7">
-                  <div className="absolute inset-[-25px] rounded-full bg-violet-500/[0.08] blur-3xl" />
+        <div className="zuqen-content">
+          {errorMessage && (
+            <div
+              className="zuqen-error"
+              role="alert"
+            >
+              <span>!</span>
 
-                  <div className="relative flex h-[76px] w-[76px] items-center justify-center rounded-[25px] border border-white/[0.08] bg-white/[0.035] shadow-2xl shadow-black/40">
-                    <Sparkles
-                      size={30}
-                      className="text-violet-400"
-                    />
-                  </div>
+              <span>
+                {errorMessage}
+              </span>
+
+              <button
+                onClick={() =>
+                  setErrorMessage("")
+                }
+                style={{
+                  marginLeft:
+                    "auto",
+                  background:
+                    "transparent",
+                  color:
+                    "inherit",
+                  cursor:
+                    "pointer",
+                }}
+              >
+                <Icon
+                  name="close"
+                  size={13}
+                />
+              </button>
+            </div>
+          )}
+
+          {!authReady ? (
+            <div className="zuqen-empty-chat">
+              <div className="zuqen-empty-chat-inner">
+                <div className="zuqen-empty-chat-icon">
+                  <Icon
+                    name="spark"
+                    size={22}
+                  />
                 </div>
 
-                <h1 className="text-center text-[30px] font-semibold tracking-[-0.045em] sm:text-[38px]">
-                  What can I help you create?
-                </h1>
+                <h2>
+                  Starting ZUQEN AI
+                </h2>
 
-                <p className="mt-3 max-w-[570px] text-center text-sm leading-6 text-white/30">
-                  ZUQEN brings chat, websites, images, video and
-                  voice generation together in one AI workspace.
+                <p>
+                  Restoring your secure
+                  session and workspace...
                 </p>
-
-                <div className="mt-10 grid w-full max-w-[760px] grid-cols-1 gap-3 sm:grid-cols-2">
-                  {QUICK_PROMPTS.map((item) => (
-                    <button
-                      key={item.title}
-                      onClick={() => {
-                        setComposer(item.prompt);
-                        setActiveAgent("chat");
-                        setTimeout(
-                          () => textareaRef.current?.focus(),
-                          50
-                        );
-                      }}
-                      className="group flex items-center gap-4 rounded-2xl border border-white/[0.07] bg-white/[0.02] p-4 text-left transition duration-200 hover:-translate-y-0.5 hover:border-white/[0.12] hover:bg-white/[0.045]"
-                    >
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/[0.045] text-white/45 transition group-hover:bg-violet-500/10 group-hover:text-violet-400">
-                        {item.icon}
-                      </div>
-
-                      <div className="min-w-0">
-                        <div className="text-sm font-medium text-white/75">
-                          {item.title}
-                        </div>
-
-                        <div className="mt-1 text-xs text-white/25">
-                          {item.description}
-                        </div>
-                      </div>
-                    </button>
-                  ))}
-                </div>
               </div>
-            ) : (
-              <div className="flex-1 py-8 sm:py-10">
-                <div className="space-y-8">
-                  {activeChat.messages.map((message, index) => {
-                    const isUser = message.role === "user";
-
-                    return (
-                      <div
-                        key={message.id}
-                        className={`group flex gap-3 ${
-                          isUser
-                            ? "justify-end"
-                            : "justify-start"
-                        }`}
-                      >
-                        {!isUser && (
-                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-white/[0.07] bg-white/[0.035] text-violet-400">
-                            <Sparkles size={15} />
-                          </div>
-                        )}
-
-                        <div
-                          className={`min-w-0 max-w-[88%] ${
-                            isUser
-                              ? "sm:max-w-[75%]"
-                              : "sm:max-w-[82%]"
-                          }`}
-                        >
-                          {editingMessageId === message.id ? (
-                            <div className="rounded-2xl border border-white/[0.1] bg-white/[0.035] p-2">
-                              <textarea
-                                autoFocus
-                                value={editingText}
-                                onChange={(event) =>
-                                  setEditingText(
-                                    event.target.value
-                                  )
-                                }
-                                className="min-h-[100px] w-full resize-none bg-transparent p-2 text-sm leading-6 text-white outline-none"
-                              />
-
-                              <div className="flex justify-end gap-2">
-                                <button
-                                  onClick={() => {
-                                    setEditingMessageId(null);
-                                    setEditingText("");
-                                  }}
-                                  className="rounded-lg px-3 py-1.5 text-xs text-white/40 hover:bg-white/5 hover:text-white"
-                                >
-                                  Cancel
-                                </button>
-
-                                <button
-                                  onClick={submitEdit}
-                                  className="rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-black"
-                                >
-                                  Save & regenerate
-                                </button>
-                              </div>
-                            </div>
-                          ) : (
-                            <>
-                              <div
-                                className={`rounded-2xl px-4 py-3 text-[14px] leading-7 ${
-                                  isUser
-                                    ? "rounded-br-md bg-white text-black"
-                                    : "rounded-bl-md border border-white/[0.065] bg-white/[0.025] text-white/75"
-                                }`}
-                              >
-                                <div className="whitespace-pre-wrap break-words">
-                                  {message.content}
-                                </div>
-
-                                {message.attachments &&
-                                  message.attachments.length >
-                                    0 && (
-                                    <div className="mt-3 flex flex-wrap gap-2">
-                                      {message.attachments.map(
-                                        (file) => (
-                                          <div
-                                            key={`${message.id}-${file.name}`}
-                                            className={`flex items-center gap-2 rounded-lg border px-2.5 py-2 text-xs ${
-                                              isUser
-                                                ? "border-black/10 bg-black/5 text-black/60"
-                                                : "border-white/10 bg-white/5 text-white/45"
-                                            }`}
-                                          >
-                                            <File size={13} />
-                                            <span className="max-w-[160px] truncate">
-                                              {file.name}
-                                            </span>
-                                          </div>
-                                        )
-                                      )}
-                                    </div>
-                                  )}
-                              </div>
-
-                              <div
-                                className={`mt-1 flex items-center gap-1 opacity-0 transition group-hover:opacity-100 ${
-                                  isUser
-                                    ? "justify-end"
-                                    : "justify-start"
-                                }`}
-                              >
-                                <button
-                                  onClick={() =>
-                                    copyMessage(message)
-                                  }
-                                  className="rounded-lg p-1.5 text-white/20 hover:bg-white/5 hover:text-white/70"
-                                  title="Copy"
-                                >
-                                  {copiedId === message.id ? (
-                                    <Check size={13} />
-                                  ) : (
-                                    <Copy size={13} />
-                                  )}
-                                </button>
-
-                                {isUser && (
-                                  <button
-                                    onClick={() =>
-                                      editMessage(message)
-                                    }
-                                    className="rounded-lg p-1.5 text-white/20 hover:bg-white/5 hover:text-white/70"
-                                    title="Edit"
-                                  >
-                                    <Edit3 size={13} />
-                                  </button>
-                                )}
-
-                                {!isUser && (
-                                  <button
-                                    onClick={() =>
-                                      regenerate(index)
-                                    }
-                                    disabled={generating}
-                                    className="rounded-lg p-1.5 text-white/20 hover:bg-white/5 hover:text-white/70"
-                                    title="Regenerate"
-                                  >
-                                    <RotateCcw size={13} />
-                                  </button>
-                                )}
-                              </div>
-                            </>
-                          )}
+            </div>
+          ) : activeChatId &&
+            activeChat ? (
+            <div className="zuqen-chat-view">
+              <div className="zuqen-messages">
+                <div className="zuqen-message-list">
+                  {messages.length ===
+                  0 ? (
+                    <div className="zuqen-empty-chat">
+                      <div className="zuqen-empty-chat-inner">
+                        <div className="zuqen-empty-chat-icon">
+                          <Icon
+                            name="spark"
+                            size={22}
+                          />
                         </div>
 
-                        {isUser && (
-                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-white/[0.08] text-white/45">
-                            <User size={15} />
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
+                        <h2>
+                          Ready when you are
+                        </h2>
 
-                  {generating && (
-                    <div className="flex gap-3">
-                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-white/[0.07] bg-white/[0.035] text-violet-400">
-                        <Sparkles size={15} />
-                      </div>
-
-                      <div className="flex items-center gap-1 rounded-2xl rounded-bl-md border border-white/[0.065] bg-white/[0.025] px-4 py-4">
-                        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white/50" />
-                        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white/35 [animation-delay:150ms]" />
-                        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white/20 [animation-delay:300ms]" />
+                        <p>
+                          Start the
+                          conversation below.
+                        </p>
                       </div>
                     </div>
-                  )}
+                  ) : (
+                    messages.map(
+                      (message) => {
+                        const isEditing =
+                          editingId ===
+                          message.id;
 
-                  <div ref={bottomRef} />
+                        return (
+                          <div
+                            key={
+                              message.id
+                            }
+                            className={`zuqen-message-row ${message.role}`}
+                          >
+                            <div className="zuqen-message-block">
+                              <div className="zuqen-message-label">
+                                {message.role ===
+                                "assistant" ? (
+                                  <>
+                                    <span>
+                                      ZUQEN AI
+                                    </span>
+
+                                    <span className="zuqen-message-label-mark">
+                                      ✦
+                                    </span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <span className="zuqen-message-label-mark">
+                                      You
+                                    </span>
+
+                                    <span>
+                                      You
+                                    </span>
+                                  </>
+                                )}
+                              </div>
+
+                              {isEditing ? (
+                                <div className="zuqen-edit-box">
+                                  <textarea
+                                    value={
+                                      editingValue
+                                    }
+                                    onChange={(
+                                      event
+                                    ) =>
+                                      setEditingValue(
+                                        event
+                                          .target
+                                          .value
+                                      )
+                                    }
+                                    autoFocus
+                                  />
+
+                                  <div className="zuqen-edit-actions">
+                                    <button
+                                      className="zuqen-small-button"
+                                      onClick={
+                                        cancelEdit
+                                      }
+                                    >
+                                      Cancel
+                                    </button>
+
+                                    <button
+                                      className="zuqen-small-button primary"
+                                      onClick={() =>
+                                        saveEditedMessage(
+                                          message.id
+                                        )
+                                      }
+                                    >
+                                      Save &
+                                      regenerate
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <>
+                                  <div className="zuqen-message-bubble">
+                                    {message.content || (
+                                      <div className="zuqen-typing">
+                                        <span />
+                                        <span />
+                                        <span />
+                                      </div>
+                                    )}
+
+                                    {message.attachments &&
+                                      message
+                                        .attachments
+                                        .length >
+                                        0 && (
+                                        <div className="zuqen-attachment-list">
+                                          {message.attachments.map(
+                                            (
+                                              file
+                                            ) => (
+                                              <div
+                                                className="zuqen-attachment-chip"
+                                                key={
+                                                  file.id
+                                                }
+                                              >
+                                                <span>
+                                                  ◇
+                                                </span>
+
+                                                <span className="zuqen-attachment-chip-name">
+                                                  {
+                                                    file.name
+                                                  }
+                                                </span>
+
+                                                <span>
+                                                  {formatFileSize(
+                                                    file.size
+                                                  )}
+                                                </span>
+                                              </div>
+                                            )
+                                          )}
+                                        </div>
+                                      )}
+                                  </div>
+
+                                  <div className="zuqen-message-actions">
+                                    <button
+                                      className="zuqen-action"
+                                      title="Copy"
+                                      onClick={() =>
+                                        copyMessage(
+                                          message.content
+                                        )
+                                      }
+                                    >
+                                      <Icon
+                                        name="copy"
+                                        size={14}
+                                      />
+                                    </button>
+
+                                    {message.role ===
+                                      "user" && (
+                                      <button
+                                        className="zuqen-action"
+                                        title="Edit"
+                                        onClick={() =>
+                                          startEditMessage(
+                                            message
+                                          )
+                                        }
+                                      >
+                                        <Icon
+                                          name="edit"
+                                          size={14}
+                                        />
+                                      </button>
+                                    )}
+
+                                    {message.role ===
+                                      "assistant" &&
+                                      message.content && (
+                                        <button
+                                          className="zuqen-action"
+                                          title="Regenerate"
+                                          onClick={
+                                            regenerate
+                                          }
+                                          disabled={
+                                            loading
+                                          }
+                                        >
+                                          <Icon
+                                            name="refresh"
+                                            size={14}
+                                          />
+                                        </button>
+                                      )}
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      }
+                    )
+                  )}
                 </div>
               </div>
-            )}
 
-            {/* COMPOSER */}
-            <div className="sticky bottom-0 z-20 pb-4 pt-3 sm:pb-7">
-              <div className="rounded-[22px] border border-white/[0.09] bg-[#101116]/95 p-2 shadow-2xl shadow-black/40 backdrop-blur-2xl">
-                {attachments.length > 0 && (
-                  <div className="flex gap-2 overflow-x-auto px-2 pb-2 pt-1">
-                    {attachments.map((file, index) => (
-                      <div
-                        key={`${file.name}-${index}`}
-                        className="flex shrink-0 items-center gap-2 rounded-xl border border-white/[0.07] bg-white/[0.035] px-3 py-2"
-                      >
-                        {file.type.startsWith("image/") ? (
-                          <ImageIcon
-                            size={14}
-                            className="text-violet-400"
-                          />
-                        ) : (
-                          <File
-                            size={14}
-                            className="text-white/40"
-                          />
-                        )}
+              <div className="zuqen-composer-area">
+                {attachments.length >
+                  0 && (
+                  <div
+                    style={{
+                      width:
+                        "min(900px,100%)",
+                      margin:
+                        "0 auto 7px",
+                    }}
+                  >
+                    <div className="zuqen-attachment-list">
+                      {attachments.map(
+                        (file) => (
+                          <div
+                            className="zuqen-attachment-chip"
+                            key={file.id}
+                          >
+                            <span>
+                              ◇
+                            </span>
 
-                        <span className="max-w-[150px] truncate text-xs text-white/50">
-                          {file.name}
-                        </span>
+                            <span className="zuqen-attachment-chip-name">
+                              {file.name}
+                            </span>
 
-                        <button
-                          onClick={() =>
-                            removeAttachment(index)
-                          }
-                          className="text-white/20 hover:text-white"
-                        >
-                          <X size={13} />
-                        </button>
-                      </div>
-                    ))}
+                            <button
+                              className="zuqen-attachment-remove"
+                              onClick={() =>
+                                removeAttachment(
+                                  file.id
+                                )
+                              }
+                            >
+                              <Icon
+                                name="close"
+                                size={11}
+                              />
+                            </button>
+                          </div>
+                        )
+                      )}
+                    </div>
                   </div>
                 )}
 
-                <textarea
-                  ref={textareaRef}
-                  value={composer}
-                  onChange={(event) =>
-                    setComposer(event.target.value)
-                  }
-                  onKeyDown={(event) => {
-                    if (
-                      event.key === "Enter" &&
-                      !event.shiftKey
-                    ) {
-                      event.preventDefault();
-                      sendMessage();
-                    }
-                  }}
-                  placeholder={
-                    activeAgent === "chat"
-                      ? "Message ZUQEN..."
-                      : `Message ${currentAgent.name}...`
-                  }
-                  rows={1}
-                  className="max-h-[200px] min-h-[54px] w-full resize-none bg-transparent px-3 py-3 text-[14px] leading-6 text-white outline-none placeholder:text-white/22"
-                />
+                <div className="zuqen-composer">
+                  <div className="zuqen-composer-row">
+                    <label className="zuqen-attach-label">
+                      <Icon
+                        name="paperclip"
+                        size={17}
+                      />
 
-                <div className="flex items-center justify-between px-1 pb-1">
-                  <div className="flex items-center gap-1">
-                    <button
-                      onClick={() =>
-                        fileInputRef.current?.click()
-                      }
-                      className="rounded-xl p-2.5 text-white/30 transition hover:bg-white/5 hover:text-white"
-                      title="Attach files"
-                    >
-                      <Paperclip size={18} />
-                    </button>
+                      <input
+                        type="file"
+                        multiple
+                        onChange={
+                          handleAttachment
+                        }
+                      />
+                    </label>
 
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      multiple
-                      className="hidden"
+                    <textarea
+                      ref={textareaRef}
+                      value={input}
                       onChange={(event) => {
-                        handleFiles(event.target.files);
+                        setInput(
+                          event.currentTarget
+                            .value
+                        );
 
-                        event.currentTarget.value = "";
+                        event.currentTarget.style.height =
+                          "auto";
+
+                        event.currentTarget.style.height = `${Math.min(
+                          event.currentTarget
+                            .scrollHeight,
+                          220
+                        )}px`;
                       }}
+                      onKeyDown={
+                        handleKeyDown
+                      }
+                      placeholder="Message ZUQEN AI..."
+                      rows={1}
+                      disabled={loading}
                     />
 
                     <button
-                      onClick={() => {
-                        if (activeAgent === "voice") {
-                          window.location.href =
-                            "/generate-voice";
-                        }
-                      }}
-                      className="hidden rounded-xl p-2.5 text-white/30 transition hover:bg-white/5 hover:text-white sm:block"
-                      title="Voice"
+                      className="zuqen-send"
+                      disabled={
+                        loading ||
+                        !input.trim()
+                      }
+                      onClick={
+                        handleSubmit
+                      }
+                      title="Send message"
                     >
-                      <Mic size={18} />
+                      <Icon
+                        name="send"
+                        size={16}
+                      />
                     </button>
-
-                    <span className="ml-1 hidden text-[10px] text-white/20 md:block">
-                      Enter to send · Shift + Enter for new line
-                    </span>
                   </div>
 
-                  <button
-                    onClick={() => sendMessage()}
-                    disabled={
-                      generating ||
-                      !composer.trim() ||
-                      activeAgent !== "chat"
-                    }
-                    className={`flex h-10 w-10 items-center justify-center rounded-xl transition ${
-                      composer.trim() &&
-                      !generating &&
-                      activeAgent === "chat"
-                        ? "bg-white text-black hover:bg-white/90"
-                        : "bg-white/[0.055] text-white/15"
-                    }`}
-                    title={
-                      activeAgent !== "chat"
-                        ? "Open this agent from the agent selector"
-                        : "Send"
-                    }
-                  >
-                    <ArrowUp
-                      size={18}
-                      strokeWidth={2.5}
-                    />
-                  </button>
+                  <div className="zuqen-composer-footer">
+                    <span>
+                      ZUQEN AI can make
+                      mistakes. Check
+                      important information.
+                    </span>
+
+                    <span>
+                      Enter to send ·
+                      Shift + Enter for
+                      newline
+                    </span>
+                  </div>
                 </div>
               </div>
+            </div>
+          ) : (
+            <div className="zuqen-home">
+              <div className="zuqen-home-inner">
+                <div className="zuqen-welcome">
+                  <div className="zuqen-welcome-mark">
+                    <span />
+                  </div>
 
-              <div className="mt-3 flex items-center justify-center gap-2 text-[10px] text-white/18">
-                <Bot size={11} />
-                <span>
-                  ZUQEN AI may make mistakes. Verify important
-                  information.
-                </span>
+                  <h1>
+                    What can I help
+                    you
+                    <br />
+                    with today?
+                  </h1>
 
-                <span>·</span>
+                  <p>
+                    Meet ZUQEN AI —
+                    your intelligent
+                    workspace for
+                    thinking, creating,
+                    building and
+                    getting things done.
+                  </p>
+                </div>
 
-                <span>
-                  {creditsLoading
-                    ? "Loading credits..."
-                    : `${credits.toFixed(2)} credits`}
-                </span>
+                <div className="zuqen-search-card">
+                  <div className="zuqen-search-card-icon">
+                    <Icon
+                      name="search"
+                      size={18}
+                    />
+                  </div>
+
+                  <input
+                    value={input}
+                    onChange={(event) => {
+                      setInput(
+                        event.target.value
+                      );
+
+                      if (
+                        textareaRef.current
+                      ) {
+                        textareaRef.current.value =
+                          event.target.value;
+                      }
+                    }}
+                    onKeyDown={(event) => {
+                      if (
+                        event.key ===
+                          "Enter" &&
+                        !event.shiftKey
+                      ) {
+                        event.preventDefault();
+                        handleSubmit();
+                      }
+                    }}
+                    placeholder="Ask anything..."
+                  />
+
+                  <span className="zuqen-search-shortcut">
+                    Enter
+                  </span>
+                </div>
+
+                <div className="zuqen-suggestion-grid">
+                  {homeSuggestions.map(
+                    (suggestion) => (
+                      <button
+                        key={
+                          suggestion.title
+                        }
+                        className="zuqen-suggestion"
+                        onClick={() =>
+                          setInput(
+                            suggestion.text
+                          )
+                        }
+                      >
+                        <div className="zuqen-suggestion-icon">
+                          {
+                            suggestion.icon
+                          }
+                        </div>
+
+                        <div className="zuqen-suggestion-title">
+                          {
+                            suggestion.title
+                          }
+                        </div>
+
+                        <div className="zuqen-suggestion-text">
+                          {
+                            suggestion.text
+                          }
+                        </div>
+                      </button>
+                    )
+                  )}
+                </div>
+
+                <div className="zuqen-agent-strip">
+                  <div className="zuqen-strip-title">
+                    Explore ZUQEN agents
+                  </div>
+
+                  <div className="zuqen-agent-cards">
+                    {AGENTS.slice(
+                      1
+                    ).map((agent) => (
+                      <button
+                        key={
+                          agent.name
+                        }
+                        className="zuqen-mini-agent"
+                        onClick={() =>
+                          navigateAgent(
+                            agent
+                          )
+                        }
+                      >
+                        <div className="zuqen-mini-agent-icon">
+                          {
+                            agent.icon
+                          }
+                        </div>
+
+                        <div className="zuqen-mini-agent-name">
+                          {
+                            agent.name
+                          }
+                        </div>
+
+                        <div className="zuqen-mini-agent-desc">
+                          {
+                            agent.description
+                          }
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    marginTop: 38,
+                    textAlign: "center",
+                    color:
+                      "var(--muted-2)",
+                    fontSize: 9,
+                  }}
+                >
+                  {chatCredits ===
+                  null
+                    ? "Loading your Chat Credits..."
+                    : `${chatCredits.toLocaleString()} Chat Credits available`}
+                </div>
               </div>
             </div>
-          </div>
+          )}
         </div>
       </section>
     </main>
