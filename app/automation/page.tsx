@@ -360,7 +360,7 @@ export default function AutomationPage() {
               .maybeSingle();
 
           if (runData) {
-            run = runData as AutomationRun;
+            run = runData as unknown as AutomationRun;
           }
         } else {
           const { data: runData } =
@@ -385,7 +385,7 @@ export default function AutomationPage() {
               .maybeSingle();
 
           if (runData) {
-            run = runData as AutomationRun;
+run = runData as unknown as AutomationRun;
           }
         }
 
@@ -421,13 +421,12 @@ export default function AutomationPage() {
               });
 
           if (stepData) {
-            steps =
-              stepData as AutomationStep[];
+           steps = stepData as unknown as AutomationStep[];
           }
         }
 
         const nextState: AutomationState = {
-          task: task as AutomationTask,
+         task: task as unknown as AutomationTask,
           run,
           steps,
         };
@@ -943,32 +942,38 @@ export default function AutomationPage() {
                   </div>
 
                   <div className="space-y-3">
-                    {(
-                      state.steps.length >
-                      0
-                        ? state.steps
-                        : planSteps.map(
-                            (
-                              step
-                            ) => ({
-                              id: `plan-${step.step_number}`,
-                              step_number:
-                                step.step_number,
-                              name:
-                                step.name,
-                              description:
-                                step.description,
-                              tool_name:
-                                step.tool_name,
-                              status:
-                                "queued" as StepStatus,
-                              retry_count: 0,
-                              max_retries:
-                                step.max_retries ??
-                                2,
-                            })
-                          )
-                    ).map(
+                 {(
+  state.steps.length > 0
+    ? state.steps
+    : planSteps.map(
+        (
+          step
+        ): AutomationStep => ({
+          id: `plan-${step.step_number}`,
+          step_number:
+            step.step_number,
+          name:
+            step.name,
+          description:
+            step.description,
+          tool_name:
+            step.tool_name,
+          status:
+            "queued",
+          input:
+            step.input ?? null,
+          output: null,
+          dependencies: null,
+          retry_count: 0,
+          max_retries:
+            step.max_retries ?? 2,
+          error_code: null,
+          error_message: null,
+          started_at: null,
+          completed_at: null,
+        })
+      )
+).map(
                       (step) => (
                         <div
                           key={step.id}
