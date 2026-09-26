@@ -1,13 +1,30 @@
-
 import { NextResponse } from "next/server";
+import { createServerSupabaseClient } from "@/lib/supabase-server";
 import {
   createAutomationTask,
   type CreateAutomationInput,
 } from "@/lib/automation/orchestrator";
+import { planAutomationTask } from "@/lib/automation/planner";
 
 export const runtime = "nodejs";
 
 const MAX_BODY_SIZE = 12000;
+
+function getBearerToken(request: Request): string | undefined {
+  const authorization = request.headers.get("authorization");
+
+  if (!authorization) {
+    return undefined;
+  }
+
+  if (!authorization.startsWith("Bearer ")) {
+    return undefined;
+  }
+
+  const token = authorization.slice(7).trim();
+
+  return token || undefined;
+}
 
 export async function POST(request: Request) {
   try {
@@ -21,11 +38,89 @@ export async function POST(request: Request) {
           {
             success: false,
             error: "Request body is too large.",
+            errorCode: "REQUEST_TOO_LARGE",
           },
           { status: 413 }
         );
       }
     }
+
+    /*
+     * -------------------------------------------------------
+     * AUTHENTICATION
+     * -------------------------------------------------------
+     *
+     * The Automation UI sends:
+     *
+     * Authorization: Bearer <supabase_access_token>
+     *
+     * We authenticate the token here first.
+     *
+     * If a token is not present, we also support the normal
+     * Supabase SSR cookie session.
+     */
+
+    const accessToken = getBearerToken(request);
+
+    const supabase = await createServerSupabaseClient();
+
+    let user = null;
+
+    if (accessToken) {
+      const {
+        data,
+        error,
+      } = await supabase.auth.getUser(accessToken);
+
+      if (error) {
+        console.error(
+          "Automation bearer authentication error:",
+          error
+        );
+      }
+
+      user = data.user;
+    }
+
+    /*
+     * Cookie fallback.
+     *
+     * This keeps normal SSR authentication working as well.
+     */
+
+    if (!user) {
+      const {
+        data,
+        error,
+      } = await supabase.auth.getUser();
+
+      if (error) {
+        console.error(
+          "Automation cookie authentication error:",
+          error
+        );
+      }
+
+      user = data.user;
+    }
+
+    if (!user) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "Your ZUQEN session is not available. Please refresh the page and try again.",
+          errorCode: "AUTH_REQUIRED",
+        },
+        { status: 401 }
+      );
+    }
+
+    /*
+     * -------------------------------------------------------
+     * REQUEST BODY
+     * -------------------------------------------------------
+     */
 
     let body: unknown;
 
@@ -36,6 +131,7 @@ export async function POST(request: Request) {
         {
           success: false,
           error: "Invalid JSON request.",
+          errorCode: "INVALID_JSON",
         },
         { status: 400 }
       );
@@ -46,6 +142,7 @@ export async function POST(request: Request) {
         {
           success: false,
           error: "Invalid request body.",
+          errorCode: "INVALID_BODY",
         },
         { status: 400 }
       );
@@ -63,32 +160,129 @@ export async function POST(request: Request) {
         ? payload.title.trim()
         : undefined;
 
+    if (!prompt) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Automation request is required.",
+          errorCode: "PROMPT_REQUIRED",
+        },
+        { status: 400 }
+      );
+    }
+
+    if (prompt.length > 10000) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "Automation request cannot exceed 10000 characters.",
+          errorCode: "PROMPT_TOO_LONG",
+        },
+        { status: 400 }
+      );
+    }
+
     const input: CreateAutomationInput = {
       prompt,
       title,
     };
 
-    const result = await createAutomationTask(input);
+    /*
+     * -------------------------------------------------------
+     * CREATE TASK
+     * -------------------------------------------------------
+     *
+     * IMPORTANT:
+     * Pass the authenticated access token into the
+     * orchestrator.
+     *
+     * This prevents the orchestrator from depending only
+     * on the SSR cookie session.
+     */
 
-    if (!result.success) {
+    const created = await createAutomationTask(
+      input,
+      accessToken
+    );
+
+    if (!created.success) {
       const status =
-        result.error === "Authentication required."
+        created.error === "Authentication required."
           ? 401
-          : result.error?.includes("cannot exceed")
+          : created.error?.includes("cannot exceed")
             ? 400
             : 500;
 
-      return NextResponse.json(result, { status });
+      return NextResponse.json(
+        created,
+        { status }
+      );
     }
 
-    return NextResponse.json(result, { status: 201 });
+    if (!created.taskId) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "Automation task was created without a task ID.",
+          errorCode: "TASK_ID_MISSING",
+        },
+        { status: 500 }
+      );
+    }
+
+    /*
+     * -------------------------------------------------------
+     * PLAN TASK
+     * -------------------------------------------------------
+     *
+     * Pass the same access token to the planner.
+     */
+
+    const planned = await planAutomationTask(
+      created.taskId,
+      accessToken
+    );
+
+    if (!planned.success) {
+      return NextResponse.json(
+        {
+          success: false,
+          taskId: created.taskId,
+          runId: created.runId,
+          error: planned.error,
+          errorCode:
+            planned.errorCode ||
+            "AUTOMATION_PLANNING_FAILED",
+        },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json(
+      {
+        success: true,
+        taskId: created.taskId,
+        runId: created.runId,
+        status: "planned",
+        plan: planned.plan,
+        usage: planned.usage,
+      },
+      { status: 201 }
+    );
   } catch (error) {
-    console.error("Automation API error:", error);
+    console.error(
+      "Automation API error:",
+      error
+    );
 
     return NextResponse.json(
       {
         success: false,
-        error: "An unexpected automation error occurred.",
+        error:
+          "An unexpected automation error occurred.",
+        errorCode: "AUTOMATION_API_ERROR",
       },
       { status: 500 }
     );
@@ -100,6 +294,7 @@ export async function GET() {
     {
       success: false,
       error: "Method not allowed.",
+      errorCode: "METHOD_NOT_ALLOWED",
     },
     {
       status: 405,
@@ -109,4 +304,3 @@ export async function GET() {
     }
   );
 }
-

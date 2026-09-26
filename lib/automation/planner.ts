@@ -1,57 +1,40 @@
-import { createClient } from "@/lib/supabase";
-
-export type AutomationToolName =
-  | "web_search"
-  | "web_research"
-  | "browser"
-  | "email"
-  | "calendar"
-  | "file_read"
-  | "file_write"
-  | "document"
-  | "spreadsheet"
-  | "data_transform"
-  | "crm"
-  | "http_request"
-  | "notification";
+import { createServerSupabaseClient } from "@/lib/supabase-server";
 
 export type AutomationPlanStep = {
   step_number: number;
   name: string;
   description: string;
-  tool_name: AutomationToolName;
+  tool_name: string;
   input: Record<string, unknown>;
   dependencies: number[];
-  requires_approval: boolean;
-  max_retries: number;
+  requires_approval?: boolean;
 };
 
 export type AutomationPlan = {
-  goal: string;
-  summary: string;
+  objective: string;
   steps: AutomationPlanStep[];
 };
 
-type PlannerResult =
-  | {
-      success: true;
-      plan: AutomationPlan;
-      usage?: {
-        provider: string;
-        model: string;
-        input_tokens: number;
-        output_tokens: number;
-        total_tokens: number;
-      };
-    }
-  | {
-      success: false;
-      error: string;
-      errorCode?: string;
-    };
+export type AutomationPlannerResult = {
+  success: boolean;
+  plan?: AutomationPlan;
+  usage?: {
+    provider: string;
+    model: string;
+    input_tokens?: number;
+    output_tokens?: number;
+    total_tokens?: number;
+  };
+  error?: string;
+  errorCode?: string;
+};
 
-const MAX_STEPS = 30;
-const MAX_PROMPT_LENGTH = 10000;
+const DEFAULT_MODEL =
+  process.env.GROQ_AUTOMATION_PLANNER_MODEL ||
+  "llama-3.3-70b-versatile";
+
+const GROQ_API_URL =
+  "https://api.groq.com/openai/v1/chat/completions";
 
 const ALLOWED_TOOLS = [
   "web_search",
@@ -69,405 +52,313 @@ const ALLOWED_TOOLS = [
   "notification",
 ] as const;
 
-type AllowedTool = (typeof ALLOWED_TOOLS)[number];
+type AllowedTool =
+  (typeof ALLOWED_TOOLS)[number];
 
-function isAllowedTool(value: unknown): value is AllowedTool {
+function isAllowedTool(
+  value: unknown
+): value is AllowedTool {
   return (
     typeof value === "string" &&
-    (ALLOWED_TOOLS as readonly string[]).includes(value)
+    (ALLOWED_TOOLS as readonly string[]).includes(
+      value
+    )
   );
 }
 
-function cleanString(value: unknown, maxLength: number) {
-  if (typeof value !== "string") {
-    return "";
-  }
-
-  return value.trim().slice(0, maxLength);
-}
-
-function cleanRecord(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return {};
-  }
-
-  return value as Record<string, unknown>;
-}
-
-function normalizePlan(raw: unknown): AutomationPlan | null {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-    return null;
-  }
-
-  const source = raw as Record<string, unknown>;
-
-  const goal = cleanString(source.goal, 2000);
-  const summary = cleanString(source.summary, 4000);
-
-  if (!goal || !Array.isArray(source.steps)) {
-    return null;
-  }
-
-  if (source.steps.length === 0 || source.steps.length > MAX_STEPS) {
-    return null;
-  }
-
-  const steps: AutomationPlanStep[] = [];
-
-  for (let index = 0; index < source.steps.length; index += 1) {
-    const rawStep = source.steps[index];
-
-    if (
-      !rawStep ||
-      typeof rawStep !== "object" ||
-      Array.isArray(rawStep)
-    ) {
-      return null;
-    }
-
-    const step = rawStep as Record<string, unknown>;
-
-    const stepNumber =
-      typeof step.step_number === "number"
-        ? Math.floor(step.step_number)
-        : index + 1;
-
-    const name = cleanString(step.name, 200);
-    const description = cleanString(step.description, 2000);
-    const toolName = cleanString(step.tool_name, 100);
-
-    if (
-      stepNumber !== index + 1 ||
-      !name ||
-      !description ||
-      !isAllowedTool(toolName)
-    ) {
-      return null;
-    }
-
-    const dependencies = Array.isArray(step.dependencies)
-      ? Array.from(
-          new Set(
-            step.dependencies
-              .filter(
-                (dependency): dependency is number =>
-                  typeof dependency === "number" &&
-                  Number.isInteger(dependency) &&
-                  dependency >= 1 &&
-                  dependency < stepNumber
-              )
-              .slice(0, 10)
-          )
-        )
-      : [];
-
-    const requiresApproval =
-      typeof step.requires_approval === "boolean"
-        ? step.requires_approval
-        : false;
-
-    const maxRetries =
-      typeof step.max_retries === "number" &&
-      Number.isInteger(step.max_retries)
-        ? Math.min(Math.max(step.max_retries, 0), 5)
-        : 2;
-
-    steps.push({
-      step_number: stepNumber,
-      name,
-      description,
-      tool_name: toolName,
-      input: cleanRecord(step.input),
-      dependencies,
-      requires_approval: requiresApproval,
-      max_retries: maxRetries,
-    });
-  }
-
-  return {
-    goal,
-    summary: summary || goal,
-    steps,
-  };
-}
-
-function extractJson(text: string): unknown {
-  const cleaned = text
-    .replace(/```json/gi, "")
-    .replace(/```/g, "")
+function extractJson(
+  content: string
+): unknown {
+  const cleaned = content
+    .trim()
+    .replace(/^```json\s*/i, "")
+    .replace(/^```\s*/i, "")
+    .replace(/\s*```$/i, "")
     .trim();
 
   try {
     return JSON.parse(cleaned);
   } catch {
-    // Continue below and attempt to extract a JSON object.
+    const firstBrace =
+      cleaned.indexOf("{");
+
+    const lastBrace =
+      cleaned.lastIndexOf("}");
+
+    if (
+      firstBrace >= 0 &&
+      lastBrace > firstBrace
+    ) {
+      return JSON.parse(
+        cleaned.slice(
+          firstBrace,
+          lastBrace + 1
+        )
+      );
+    }
+
+    throw new Error(
+      "Planner returned invalid JSON."
+    );
+  }
+}
+
+function normalizePlan(
+  value: unknown
+): AutomationPlan {
+  if (
+    !value ||
+    typeof value !== "object"
+  ) {
+    throw new Error(
+      "Planner returned an invalid plan."
+    );
   }
 
-  const firstBrace = cleaned.indexOf("{");
-  const lastBrace = cleaned.lastIndexOf("}");
+  const raw =
+    value as Record<string, unknown>;
+
+  const objective =
+    typeof raw.objective === "string"
+      ? raw.objective.trim()
+      : "";
+
+  const rawSteps =
+    Array.isArray(raw.steps)
+      ? raw.steps
+      : [];
+
+  if (!objective) {
+    throw new Error(
+      "Planner returned no objective."
+    );
+  }
 
   if (
-    firstBrace === -1 ||
-    lastBrace === -1 ||
-    lastBrace <= firstBrace
+    rawSteps.length === 0
   ) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(
-      cleaned.slice(firstBrace, lastBrace + 1)
+    throw new Error(
+      "Planner returned no execution steps."
     );
-  } catch {
-    return null;
-  }
-}
-
-function buildPlannerSystemPrompt() {
-  return `
-You are the ZUQEN Automation Planner.
-
-You are NOT a general chat assistant.
-
-Your job is to convert a user's automation request into a precise,
-machine-executable plan for an independent automation engine.
-
-IMPORTANT ARCHITECTURE RULES:
-
-1. Do NOT use or reference existing ZUQEN agents.
-2. Do NOT use Website Builder.
-3. Do NOT use Image Generator.
-4. Do NOT use Video Generator.
-5. Do NOT use Voice Generator.
-6. Do NOT use ZUQEN Chat as a tool.
-7. Only use the independent Automation tools listed below.
-8. Never invent a tool that is not listed.
-9. Break complex tasks into small deterministic steps.
-10. Steps may depend on earlier steps.
-11. Independent steps should have no unnecessary dependencies.
-12. External side effects such as sending email, modifying calendar events,
-    writing files, CRM changes, or other consequential actions should normally
-    set requires_approval=true.
-13. Pure research, reading, transformation and analysis normally do not require
-    approval.
-14. Never claim that an action has already happened. You are only creating a plan.
-15. Every step must have a concrete tool and machine-readable input.
-16. Use max_retries between 0 and 5.
-17. Maximum 30 steps.
-18. For web_search, put the actual search query inside input.query.
-19. Use search_depth="advanced" only when deeper search is actually useful.
-20. Do not create unnecessary web_search steps.
-21. If multiple searches are independent, keep their dependencies empty so the
-    execution engine can run them in parallel.
-22. A dependency number must refer only to an earlier step number.
-
-AVAILABLE AUTOMATION TOOLS:
-
-- web_search
-  Search the public web for targeted information.
-
-  Expected input can include:
-  {
-    "query": "search query",
-    "search_depth": "basic" | "advanced",
-    "max_results": 5,
-    "topic": "general" | "news" | "finance",
-    "include_answer": true,
-    "include_raw_content": false,
-    "include_images": false,
-    "include_domains": [],
-    "exclude_domains": []
   }
 
-- web_research
-  Perform deeper multi-source research.
-
-- browser
-  Navigate and interact with websites.
-
-- email
-  Read, draft, send, reply to or manage email when the integration permits it.
-
-- calendar
-  Read, create, update or cancel calendar events when the integration permits it.
-
-- file_read
-  Read files supplied through connected storage.
-
-- file_write
-  Create or update files through connected storage.
-
-- document
-  Create or transform structured documents.
-
-- spreadsheet
-  Read, create or update spreadsheet data.
-
-- data_transform
-  Clean, filter, transform, aggregate or structure data.
-
-- crm
-  Read or update CRM/business records when the integration permits it.
-
-- http_request
-  Call an explicitly configured external API/integration.
-
-- notification
-  Deliver a notification through a configured notification integration.
-
-OUTPUT REQUIREMENTS:
-
-Return ONLY valid JSON.
-
-The JSON must have exactly this structure:
-
-{
-  "goal": "string",
-  "summary": "string",
-  "steps": [
-    {
-      "step_number": 1,
-      "name": "string",
-      "description": "string",
-      "tool_name": "one allowed tool",
-      "input": {},
-      "dependencies": [],
-      "requires_approval": false,
-      "max_retries": 2
-    }
-  ]
-}
-
-Do not wrap the JSON in markdown.
-`.trim();
-}
-
-async function callGroq(
-  systemPrompt: string,
-  userPrompt: string
-): Promise<{
-  text: string;
-  model: string;
-  inputTokens: number;
-  outputTokens: number;
-  totalTokens: number;
-}> {
-  const apiKey = process.env.GROQ_API_KEY;
-
-  if (!apiKey) {
-    throw new Error("GROQ_API_KEY is not configured.");
+  if (rawSteps.length > 50) {
+    throw new Error(
+      "Automation plan cannot contain more than 50 steps."
+    );
   }
 
-  const model =
-    process.env.AUTOMATION_PLANNER_MODEL ||
-    process.env.GROQ_MODEL ||
-    "llama-3.3-70b-versatile";
+  const steps: AutomationPlanStep[] =
+    rawSteps.map(
+      (rawStep, index) => {
+        if (
+          !rawStep ||
+          typeof rawStep !== "object"
+        ) {
+          throw new Error(
+            `Invalid automation step ${index + 1}.`
+          );
+        }
 
-  const response = await fetch(
-    "https://api.groq.com/openai/v1/chat/completions",
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model,
-        temperature: 0.1,
-        max_tokens: 5000,
-        messages: [
-          {
-            role: "system",
-            content: systemPrompt,
-          },
-          {
-            role: "user",
-            content: userPrompt,
-          },
-        ],
-      }),
-      signal: AbortSignal.timeout(60000),
-    }
-  );
+        const step =
+          rawStep as Record<
+            string,
+            unknown
+          >;
 
-  if (!response.ok) {
-    const errorText = await response.text().catch(() => "");
+        const stepNumber =
+          typeof step.step_number ===
+          "number"
+            ? Math.floor(
+                step.step_number
+              )
+            : index + 1;
 
-    console.error(
-      "Automation Planner provider error:",
-      {
-        status: response.status,
-        body: errorText.slice(0, 1000),
+        const name =
+          typeof step.name === "string"
+            ? step.name.trim()
+            : `Step ${stepNumber}`;
+
+        const description =
+          typeof step.description ===
+          "string"
+            ? step.description.trim()
+            : "";
+
+        const toolName =
+          typeof step.tool_name ===
+          "string"
+            ? step.tool_name.trim()
+            : "";
+
+        if (!isAllowedTool(toolName)) {
+          throw new Error(
+            `Unsupported automation tool: ${toolName || "unknown"}`
+          );
+        }
+
+        const input =
+          step.input &&
+          typeof step.input === "object" &&
+          !Array.isArray(step.input)
+            ? (step.input as Record<
+                string,
+                unknown
+              >)
+            : {};
+
+        const dependencies =
+          Array.isArray(
+            step.dependencies
+          )
+            ? step.dependencies
+                .filter(
+                  (dependency) =>
+                    typeof dependency ===
+                    "number" &&
+                    Number.isInteger(
+                      dependency
+                    )
+                )
+                .map((dependency) =>
+                  Math.floor(
+                    dependency
+                  )
+                )
+            : [];
+
+        const requiresApproval =
+          step.requires_approval === true;
+
+        return {
+          step_number: stepNumber,
+          name,
+          description,
+          tool_name: toolName,
+          input,
+          dependencies,
+          requires_approval:
+            requiresApproval,
+        };
       }
     );
 
-    throw new Error(
-      "Automation planner provider request failed."
-    );
-  }
+  /*
+   * Normalize step numbers.
+   */
 
-  const data = (await response.json()) as {
-    choices?: Array<{
-      message?: {
-        content?: string;
-      };
-    }>;
-    usage?: {
-      prompt_tokens?: number;
-      completion_tokens?: number;
-      total_tokens?: number;
-    };
-  };
-
-  const text =
-    data.choices?.[0]?.message?.content?.trim();
-
-  if (!text) {
-    throw new Error(
-      "Automation planner returned an empty response."
-    );
-  }
-
-  const inputTokens = Number(
-    data.usage?.prompt_tokens || 0
+  steps.forEach(
+    (step, index) => {
+      step.step_number =
+        index + 1;
+    }
   );
 
-  const outputTokens = Number(
-    data.usage?.completion_tokens || 0
-  );
+  /*
+   * Remove invalid/self/future dependencies.
+   */
 
-  const totalTokens =
-    Number(data.usage?.total_tokens || 0) ||
-    inputTokens + outputTokens;
+  for (
+    let index = 0;
+    index < steps.length;
+    index++
+  ) {
+    const currentStep =
+      steps[index];
+
+    currentStep.dependencies =
+      currentStep.dependencies.filter(
+        (dependency) =>
+          dependency >= 1 &&
+          dependency <= index &&
+          dependency !==
+            currentStep.step_number
+      );
+  }
 
   return {
-    text,
-    model,
-    inputTokens,
-    outputTokens,
-    totalTokens,
+    objective,
+    steps,
+  };
+}
+
+async function getAuthenticatedUser(
+  accessToken?: string
+) {
+  const supabase =
+    await createServerSupabaseClient();
+
+  /*
+   * Prefer explicit Bearer token.
+   */
+
+  if (accessToken) {
+    const {
+      data,
+      error,
+    } = await supabase.auth.getUser(
+      accessToken
+    );
+
+    if (!error && data.user) {
+      return {
+        supabase,
+        user: data.user,
+      };
+    }
+
+    if (error) {
+      console.error(
+        "Automation planner token authentication error:",
+        error
+      );
+    }
+  }
+
+  /*
+   * Cookie fallback.
+   */
+
+  const {
+    data,
+    error,
+  } = await supabase.auth.getUser();
+
+  if (error) {
+    console.error(
+      "Automation planner cookie authentication error:",
+      error
+    );
+  }
+
+  return {
+    supabase,
+    user: data.user,
   };
 }
 
 export async function planAutomationTask(
-  taskId: string
-): Promise<PlannerResult> {
-  if (!taskId || typeof taskId !== "string") {
+  taskId: string,
+  accessToken?: string
+): Promise<AutomationPlannerResult> {
+  if (!taskId) {
     return {
       success: false,
-      error: "Automation task ID is required.",
-      errorCode: "INVALID_TASK_ID",
+      error:
+        "Automation task ID is required.",
+      errorCode: "TASK_ID_REQUIRED",
     };
   }
 
-  const supabase = createClient();
-
   const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser();
+    supabase,
+    user,
+  } =
+    await getAuthenticatedUser(
+      accessToken
+    );
 
-  if (userError || !user) {
+  if (!user) {
     return {
       success: false,
       error: "Authentication required.",
@@ -475,484 +366,73 @@ export async function planAutomationTask(
     };
   }
 
+  /*
+   * -------------------------------------------------------
+   * LOAD TASK
+   * -------------------------------------------------------
+   */
+
   const {
     data: task,
     error: taskError,
   } = await supabase
     .from("automation_tasks")
-    .select("id, user_id, prompt, status")
+    .select(
+      "id, user_id, prompt, status, context"
+    )
     .eq("id", taskId)
     .eq("user_id", user.id)
     .single();
 
   if (taskError || !task) {
+    console.error(
+      "Automation planner task lookup failed:",
+      taskError
+    );
+
     return {
       success: false,
-      error: "Automation task not found.",
+      error:
+        "Automation task was not found.",
       errorCode: "TASK_NOT_FOUND",
     };
   }
 
-  const prompt = cleanString(
-    task.prompt,
-    MAX_PROMPT_LENGTH
-  );
+  /*
+   * -------------------------------------------------------
+   * UPDATE TASK TO PLANNING
+   * -------------------------------------------------------
+   */
 
-  if (!prompt) {
-    return {
-      success: false,
-      error: "Automation task has no valid prompt.",
-      errorCode: "INVALID_PROMPT",
-    };
-  }
+  const {
+    error: planningUpdateError,
+  } = await supabase
+    .from("automation_tasks")
+    .update({
+      status: "planning",
+    })
+    .eq("id", task.id)
+    .eq("user_id", user.id);
 
-  if (
-    task.status !== "queued" &&
-    task.status !== "planning"
-  ) {
-    return {
-      success: false,
-      error:
-        "Automation task is not available for planning.",
-      errorCode: "INVALID_TASK_STATUS",
-    };
-  }
-
-  const { error: planningError } =
-    await supabase
-      .from("automation_tasks")
-      .update({
-        status: "planning",
-        error_code: null,
-        error_message: null,
-      })
-      .eq("id", task.id)
-      .eq("user_id", user.id);
-
-  if (planningError) {
+  if (planningUpdateError) {
     console.error(
-      "Unable to mark automation task as planning:",
-      planningError
+      "Automation planning status update failed:",
+      planningUpdateError
     );
-
-    return {
-      success: false,
-      error:
-        "Unable to start automation planning.",
-      errorCode: "PLANNING_STATE_FAILED",
-    };
   }
 
-  try {
-    const providerResult = await callGroq(
-      buildPlannerSystemPrompt(),
-      prompt
-    );
+  const apiKey =
+    process.env.GROQ_API_KEY;
 
-    const rawPlan = extractJson(
-      providerResult.text
-    );
-
-    const plan = normalizePlan(rawPlan);
-
-    if (!plan) {
-      await supabase
-        .from("automation_tasks")
-        .update({
-          status: "failed",
-          error_code: "INVALID_PLAN",
-          error_message:
-            "Automation planner returned an invalid execution plan.",
-          completed_at:
-            new Date().toISOString(),
-        })
-        .eq("id", task.id)
-        .eq("user_id", user.id);
-
-      return {
-        success: false,
-        error:
-          "Automation planner returned an invalid plan.",
-        errorCode: "INVALID_PLAN",
-      };
-    }
-
-    const {
-      data: run,
-      error: runError,
-    } = await supabase
-      .from("automation_runs")
-      .select("id, status")
-      .eq("task_id", task.id)
-      .eq("user_id", user.id)
-      .eq("run_number", 1)
-      .single();
-
-    if (runError || !run?.id) {
-      console.error(
-        "Unable to find automation run:",
-        runError
-      );
-
-      await supabase
-        .from("automation_tasks")
-        .update({
-          status: "failed",
-          error_code: "RUN_NOT_FOUND",
-          error_message:
-            "Automation run could not be found.",
-          completed_at:
-            new Date().toISOString(),
-        })
-        .eq("id", task.id)
-        .eq("user_id", user.id);
-
-      return {
-        success: false,
-        error:
-          "Automation run could not be found.",
-        errorCode: "RUN_NOT_FOUND",
-      };
-    }
-
-    /*
-     * First save the plan itself.
-     */
-    const {
-      error: savePlanError,
-    } = await supabase
-      .from("automation_tasks")
-      .update({
-        status: "planned",
-        plan,
-        error_code: null,
-        error_message: null,
-      })
-      .eq("id", task.id)
-      .eq("user_id", user.id);
-
-    if (savePlanError) {
-      console.error(
-        "Unable to save automation plan:",
-        savePlanError
-      );
-
-      return {
-        success: false,
-        error:
-          "Unable to save automation plan.",
-        errorCode: "PLAN_SAVE_FAILED",
-      };
-    }
-
-    /*
-     * If steps already exist for this run, remove them before recreating
-     * the execution graph. This keeps planning idempotent for a queued/
-     * planning task and prevents duplicate step rows.
-     */
-    const {
-      data: existingSteps,
-      error: existingStepsError,
-    } = await supabase
-      .from("automation_steps")
-      .select("id")
-      .eq("task_id", task.id)
-      .eq("run_id", run.id);
-
-    if (existingStepsError) {
-      console.error(
-        "Unable to inspect existing automation steps:",
-        existingStepsError
-      );
-
-      return {
-        success: false,
-        error:
-          "Unable to initialize automation steps.",
-        errorCode: "STEP_INSPECTION_FAILED",
-      };
-    }
-
-    if (existingSteps && existingSteps.length > 0) {
-      const {
-        error: deleteStepsError,
-      } = await supabase
-        .from("automation_steps")
-        .delete()
-        .eq("task_id", task.id)
-        .eq("run_id", run.id);
-
-      if (deleteStepsError) {
-        console.error(
-          "Unable to replace automation steps:",
-          deleteStepsError
-        );
-
-        return {
-          success: false,
-          error:
-            "Unable to initialize automation steps.",
-          errorCode:
-            "STEP_REPLACEMENT_FAILED",
-        };
-      }
-    }
-
-    /*
-     * IMPORTANT:
-     *
-     * The planner uses dependency STEP NUMBERS:
-     * [1, 2, 3]
-     *
-     * The database column automation_steps.dependencies is UUID[].
-     *
-     * Therefore we insert all steps first with empty UUID dependencies,
-     * receive their database IDs, then map step numbers -> UUIDs and
-     * update each step.
-     */
-    const stepRows = plan.steps.map(
-      (step) => ({
-        task_id: task.id,
-        run_id: run.id,
-        step_number: step.step_number,
-        name: step.name,
-        description: step.description,
-        tool_name: step.tool_name,
-        status:
-          step.dependencies.length === 0
-            ? "ready"
-            : "queued",
-        input: step.input,
-        dependencies: [],
-        max_retries: step.max_retries,
-        retry_count: 0,
-      })
-    );
-
-    const {
-      data: insertedSteps,
-      error: stepsError,
-    } = await supabase
-      .from("automation_steps")
-      .insert(stepRows)
-      .select("id, step_number");
-
-    if (
-      stepsError ||
-      !insertedSteps ||
-      insertedSteps.length !==
-        plan.steps.length
-    ) {
-      console.error(
-        "Unable to create automation steps:",
-        stepsError
-      );
-
-      await supabase
-        .from("automation_tasks")
-        .update({
-          status: "failed",
-          error_code:
-            "STEP_CREATION_FAILED",
-          error_message:
-            "Automation plan was created but execution steps could not be initialized.",
-        })
-        .eq("id", task.id)
-        .eq("user_id", user.id);
-
-      return {
-        success: false,
-        error:
-          "Unable to initialize automation steps.",
-        errorCode:
-          "STEP_CREATION_FAILED",
-      };
-    }
-
-    const stepIdByNumber =
-      new Map<number, string>();
-
-    for (const insertedStep of insertedSteps) {
-      stepIdByNumber.set(
-        insertedStep.step_number,
-        insertedStep.id
-      );
-    }
-
-    /*
-     * Convert planner dependency numbers into actual step UUIDs.
-     */
-    for (const plannedStep of plan.steps) {
-      const currentStepId =
-        stepIdByNumber.get(
-          plannedStep.step_number
-        );
-
-      if (!currentStepId) {
-        await supabase
-          .from("automation_tasks")
-          .update({
-            status: "failed",
-            error_code:
-              "DEPENDENCY_MAPPING_FAILED",
-            error_message:
-              "Automation step dependency mapping failed.",
-            completed_at:
-              new Date().toISOString(),
-          })
-          .eq("id", task.id)
-          .eq("user_id", user.id);
-
-        return {
-          success: false,
-          error:
-            "Unable to configure automation dependencies.",
-          errorCode:
-            "DEPENDENCY_MAPPING_FAILED",
-        };
-      }
-
-      const dependencyIds =
-        plannedStep.dependencies
-          .map((dependencyNumber) =>
-            stepIdByNumber.get(
-              dependencyNumber
-            )
-          )
-          .filter(
-            (id): id is string =>
-              Boolean(id)
-          );
-
-      if (
-        dependencyIds.length !==
-        plannedStep.dependencies.length
-      ) {
-        await supabase
-          .from("automation_tasks")
-          .update({
-            status: "failed",
-            error_code:
-              "INVALID_DEPENDENCY_REFERENCE",
-            error_message:
-              "Automation plan contains an invalid dependency reference.",
-            completed_at:
-              new Date().toISOString(),
-          })
-          .eq("id", task.id)
-          .eq("user_id", user.id);
-
-        return {
-          success: false,
-          error:
-            "Automation plan contains an invalid dependency reference.",
-          errorCode:
-            "INVALID_DEPENDENCY_REFERENCE",
-        };
-      }
-
-      const {
-        error: dependencyError,
-      } = await supabase
-        .from("automation_steps")
-        .update({
-          dependencies: dependencyIds,
-        })
-        .eq("id", currentStepId)
-        .eq("task_id", task.id)
-        .eq("run_id", run.id);
-
-      if (dependencyError) {
-        console.error(
-          "Automation dependency update failed:",
-          dependencyError
-        );
-
-        await supabase
-          .from("automation_tasks")
-          .update({
-            status: "failed",
-            error_code:
-              "DEPENDENCY_CONFIGURATION_FAILED",
-            error_message:
-              "Unable to configure automation dependencies.",
-            completed_at:
-              new Date().toISOString(),
-          })
-          .eq("id", task.id)
-          .eq("user_id", user.id);
-
-        return {
-          success: false,
-          error:
-            "Unable to configure automation dependencies.",
-          errorCode:
-            "DEPENDENCY_CONFIGURATION_FAILED",
-        };
-      }
-    }
-
-    /*
-     * Record planner/provider usage.
-     */
-    const {
-      error: usageError,
-    } = await supabase
-      .from("automation_usage")
-      .insert({
-        user_id: user.id,
-        task_id: task.id,
-        run_id: run.id,
-        provider: "groq",
-        tool_name: "automation_planner",
-        model: providerResult.model,
-        input_tokens:
-          providerResult.inputTokens,
-        output_tokens:
-          providerResult.outputTokens,
-        total_tokens:
-          providerResult.totalTokens,
-        api_calls: 1,
-        metadata: {
-          phase: "planning",
-          step_count: plan.steps.length,
-        },
-      });
-
-    if (usageError) {
-      console.error(
-        "Unable to record automation planner usage:",
-        usageError
-      );
-    }
-
-    return {
-      success: true,
-      plan,
-      usage: {
-        provider: "groq",
-        model: providerResult.model,
-        input_tokens:
-          providerResult.inputTokens,
-        output_tokens:
-          providerResult.outputTokens,
-        total_tokens:
-          providerResult.totalTokens,
-      },
-    };
-  } catch (error) {
-    console.error(
-      "Automation planning failed:",
-      error
-    );
-
+  if (!apiKey) {
     await supabase
       .from("automation_tasks")
       .update({
         status: "failed",
-        error_code: "PLANNER_FAILED",
+        error_code:
+          "GROQ_API_KEY_MISSING",
         error_message:
-          "Automation planning failed.",
+          "Groq API key is not configured.",
         completed_at:
           new Date().toISOString(),
       })
@@ -961,8 +441,542 @@ export async function planAutomationTask(
 
     return {
       success: false,
-      error: "Automation planning failed.",
-      errorCode: "PLANNER_FAILED",
+      error:
+        "Groq API key is not configured.",
+      errorCode:
+        "GROQ_API_KEY_MISSING",
     };
   }
+
+  /*
+   * -------------------------------------------------------
+   * PLANNER SYSTEM PROMPT
+   * -------------------------------------------------------
+   */
+
+  const systemPrompt = `
+You are the ZUQEN Automation Planner.
+
+Your job is to convert a user's natural-language automation
+request into a safe, deterministic execution plan.
+
+Return ONLY valid JSON.
+
+Required JSON shape:
+
+{
+  "objective": "short description of the user's objective",
+  "steps": [
+    {
+      "step_number": 1,
+      "name": "short step name",
+      "description": "what this step does",
+      "tool_name": "one allowed tool",
+      "input": {},
+      "dependencies": [],
+      "requires_approval": false
+    }
+  ]
+}
+
+Allowed tools:
+
+${ALLOWED_TOOLS.join(", ")}
+
+Rules:
+
+1. Create only steps that are necessary.
+2. Step numbers must be sequential.
+3. Dependencies reference previous step numbers.
+4. Independent steps may have no dependencies and can execute in parallel.
+5. Do not invent tools.
+6. Do not claim an external action has already happened.
+7. For email sending, calendar changes, file writes, CRM mutations,
+   notifications, purchases, account changes, or other consequential
+   external actions, set requires_approval to true when appropriate.
+8. Reading/searching information normally does not require approval.
+9. Use web_search for a focused search.
+10. Use web_research when multiple searches or broader research are needed.
+11. Use browser for browser interaction when required.
+12. Use http_request only when an external HTTP API is explicitly needed.
+13. Keep each input object directly usable by the selected tool.
+14. Never include Markdown.
+15. Never include explanations outside the JSON object.
+16. Do not create fake successful results.
+17. If an action cannot be performed with the available tools,
+    do not pretend it can.
+18. Maximum 50 steps.
+`;
+
+  const userPrompt = `
+User automation request:
+
+${task.prompt}
+
+Create the execution plan now.
+`;
+
+  /*
+   * -------------------------------------------------------
+   * GROQ PLANNER REQUEST
+   * -------------------------------------------------------
+   */
+
+  let response: Response;
+
+  try {
+    response = await fetch(
+      GROQ_API_URL,
+      {
+        method: "POST",
+        headers: {
+          Authorization:
+            `Bearer ${apiKey}`,
+          "Content-Type":
+            "application/json",
+        },
+        body: JSON.stringify({
+          model: DEFAULT_MODEL,
+          temperature: 0,
+          max_tokens: 5000,
+          response_format: {
+            type: "json_object",
+          },
+          messages: [
+            {
+              role: "system",
+              content: systemPrompt,
+            },
+            {
+              role: "user",
+              content: userPrompt,
+            },
+          ],
+        }),
+        signal:
+          AbortSignal.timeout(60000),
+      }
+    );
+  } catch (error) {
+    console.error(
+      "Automation planner Groq request failed:",
+      error
+    );
+
+    await supabase
+      .from("automation_tasks")
+      .update({
+        status: "failed",
+        error_code:
+          "PLANNER_PROVIDER_ERROR",
+        error_message:
+          "Automation planner provider request failed.",
+        completed_at:
+          new Date().toISOString(),
+      })
+      .eq("id", task.id)
+      .eq("user_id", user.id);
+
+    return {
+      success: false,
+      error:
+        "Automation planner provider request failed.",
+      errorCode:
+        "PLANNER_PROVIDER_ERROR",
+    };
+  }
+
+  if (!response.ok) {
+    const providerText =
+      await response.text();
+
+    console.error(
+      "Automation planner Groq error:",
+      response.status,
+      providerText
+    );
+
+    await supabase
+      .from("automation_tasks")
+      .update({
+        status: "failed",
+        error_code:
+          "PLANNER_PROVIDER_ERROR",
+        error_message:
+          "Automation planner provider returned an error.",
+        completed_at:
+          new Date().toISOString(),
+      })
+      .eq("id", task.id)
+      .eq("user_id", user.id);
+
+    return {
+      success: false,
+      error:
+        "Automation planner provider returned an error.",
+      errorCode:
+        "PLANNER_PROVIDER_ERROR",
+    };
+  }
+
+  let providerData: any;
+
+  try {
+    providerData =
+      await response.json();
+  } catch {
+    await supabase
+      .from("automation_tasks")
+      .update({
+        status: "failed",
+        error_code:
+          "PLANNER_INVALID_PROVIDER_RESPONSE",
+        error_message:
+          "Automation planner returned an invalid response.",
+        completed_at:
+          new Date().toISOString(),
+      })
+      .eq("id", task.id)
+      .eq("user_id", user.id);
+
+    return {
+      success: false,
+      error:
+        "Automation planner returned an invalid response.",
+      errorCode:
+        "PLANNER_INVALID_PROVIDER_RESPONSE",
+    };
+  }
+
+  const content =
+    providerData?.choices?.[0]?.message
+      ?.content;
+
+  if (
+    typeof content !== "string" ||
+    !content.trim()
+  ) {
+    await supabase
+      .from("automation_tasks")
+      .update({
+        status: "failed",
+        error_code:
+          "PLANNER_EMPTY_RESPONSE",
+        error_message:
+          "Automation planner returned no plan.",
+        completed_at:
+          new Date().toISOString(),
+      })
+      .eq("id", task.id)
+      .eq("user_id", user.id);
+
+    return {
+      success: false,
+      error:
+        "Automation planner returned no plan.",
+      errorCode:
+        "PLANNER_EMPTY_RESPONSE",
+    };
+  }
+
+  /*
+   * -------------------------------------------------------
+   * PARSE PLAN
+   * -------------------------------------------------------
+   */
+
+  let plan: AutomationPlan;
+
+  try {
+    const parsed =
+      extractJson(content);
+
+    plan =
+      normalizePlan(parsed);
+  } catch (error) {
+    console.error(
+      "Automation planner JSON parsing failed:",
+      error
+    );
+
+    await supabase
+      .from("automation_tasks")
+      .update({
+        status: "failed",
+        error_code:
+          "PLANNER_INVALID_PLAN",
+        error_message:
+          error instanceof Error
+            ? error.message
+            : "Planner returned an invalid plan.",
+        completed_at:
+          new Date().toISOString(),
+      })
+      .eq("id", task.id)
+      .eq("user_id", user.id);
+
+    return {
+      success: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : "Planner returned an invalid plan.",
+      errorCode:
+        "PLANNER_INVALID_PLAN",
+    };
+  }
+
+  /*
+   * -------------------------------------------------------
+   * SAVE PLAN
+   * -------------------------------------------------------
+   */
+
+  const {
+    error: planUpdateError,
+  } = await supabase
+    .from("automation_tasks")
+    .update({
+      status: "planned",
+      plan,
+    })
+    .eq("id", task.id)
+    .eq("user_id", user.id);
+
+  if (planUpdateError) {
+    console.error(
+      "Automation plan save failed:",
+      planUpdateError
+    );
+
+    return {
+      success: false,
+      error:
+        "Unable to save automation plan.",
+      errorCode:
+        "PLAN_SAVE_FAILED",
+    };
+  }
+
+  /*
+   * -------------------------------------------------------
+   * CREATE AUTOMATION STEPS
+   * -------------------------------------------------------
+   *
+   * First create all steps without UUID dependencies.
+   * Then resolve dependency step numbers to UUIDs.
+   */
+
+  const stepRows = plan.steps.map(
+    (step) => ({
+      task_id: task.id,
+      step_number:
+        step.step_number,
+      name: step.name,
+      description:
+        step.description,
+      tool_name:
+        step.tool_name,
+      status: "queued",
+      input: step.input,
+      output: {},
+      dependencies: [],
+      retry_count: 0,
+      max_retries: 2,
+    })
+  );
+
+  const {
+    data: insertedSteps,
+    error: stepsError,
+  } = await supabase
+    .from("automation_steps")
+    .insert(stepRows)
+    .select(
+      "id, step_number"
+    );
+
+  if (
+    stepsError ||
+    !insertedSteps
+  ) {
+    console.error(
+      "Automation steps creation failed:",
+      stepsError
+    );
+
+    await supabase
+      .from("automation_tasks")
+      .update({
+        status: "failed",
+        error_code:
+          "STEPS_CREATION_FAILED",
+        error_message:
+          "Unable to create automation execution steps.",
+        completed_at:
+          new Date().toISOString(),
+      })
+      .eq("id", task.id)
+      .eq("user_id", user.id);
+
+    return {
+      success: false,
+      error:
+        "Unable to create automation execution steps.",
+      errorCode:
+        "STEPS_CREATION_FAILED",
+    };
+  }
+
+  /*
+   * -------------------------------------------------------
+   * RESOLVE DEPENDENCIES
+   * -------------------------------------------------------
+   */
+
+  const stepIdByNumber =
+    new Map<number, string>();
+
+  for (const step of insertedSteps) {
+    stepIdByNumber.set(
+      step.step_number,
+      step.id
+    );
+  }
+
+  for (const planStep of plan.steps) {
+    const stepId =
+      stepIdByNumber.get(
+        planStep.step_number
+      );
+
+    if (!stepId) {
+      continue;
+    }
+
+    const dependencyIds =
+      planStep.dependencies
+        .map(
+          (dependencyNumber) =>
+            stepIdByNumber.get(
+              dependencyNumber
+            )
+        )
+        .filter(
+          (
+            dependencyId
+          ): dependencyId is string =>
+            Boolean(dependencyId)
+        );
+
+    if (
+      dependencyIds.length === 0
+    ) {
+      continue;
+    }
+
+    const {
+      error:
+        dependencyUpdateError,
+    } = await supabase
+      .from("automation_steps")
+      .update({
+        dependencies:
+          dependencyIds,
+      })
+      .eq("id", stepId)
+      .eq("task_id", task.id);
+
+    if (
+      dependencyUpdateError
+    ) {
+      console.error(
+        "Automation dependency update failed:",
+        dependencyUpdateError
+      );
+
+      await supabase
+        .from("automation_tasks")
+        .update({
+          status: "failed",
+          error_code:
+            "DEPENDENCY_UPDATE_FAILED",
+          error_message:
+            "Unable to configure automation step dependencies.",
+          completed_at:
+            new Date().toISOString(),
+        })
+        .eq("id", task.id)
+        .eq("user_id", user.id);
+
+      return {
+        success: false,
+        error:
+          "Unable to configure automation step dependencies.",
+        errorCode:
+          "DEPENDENCY_UPDATE_FAILED",
+      };
+    }
+  }
+
+  /*
+   * -------------------------------------------------------
+   * USAGE
+   * -------------------------------------------------------
+   */
+
+  const usage = {
+    provider: "groq",
+    model: DEFAULT_MODEL,
+    input_tokens:
+      providerData?.usage?.prompt_tokens,
+    output_tokens:
+      providerData?.usage?.completion_tokens,
+    total_tokens:
+      providerData?.usage?.total_tokens,
+  };
+
+  /*
+   * Save planner usage.
+   *
+   * If usage logging fails, the actual automation plan
+   * should still remain valid, so this is intentionally
+   * non-fatal.
+   */
+
+  const {
+    error: usageError,
+  } = await supabase
+    .from("automation_usage")
+    .insert({
+      user_id: user.id,
+      task_id: task.id,
+      provider: "groq",
+      tool_name: "automation_planner",
+      model: DEFAULT_MODEL,
+      input_tokens:
+        usage.input_tokens || 0,
+      output_tokens:
+        usage.output_tokens || 0,
+      total_tokens:
+        usage.total_tokens || 0,
+      api_calls: 1,
+      duration_ms: null,
+      metadata: {
+        type: "planner",
+      },
+    });
+
+  if (usageError) {
+    console.error(
+      "Automation planner usage logging failed:",
+      usageError
+    );
+  }
+
+  return {
+    success: true,
+    plan,
+    usage,
+  };
 }
