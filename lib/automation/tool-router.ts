@@ -6,6 +6,10 @@ import {
   executeWebSearch,
 } from "@/lib/automation/tools/web-search";
 
+import {
+  executeWebResearch,
+} from "@/lib/automation/tools/web-research";
+
 export type ToolExecutionContext = {
   taskId: string;
   runId: string;
@@ -41,17 +45,28 @@ async function unavailableTool(
   };
 }
 
+function getInput(
+  step: AutomationPlanStep
+): Record<string, unknown> {
+  if (
+    step.input &&
+    typeof step.input === "object" &&
+    !Array.isArray(step.input)
+  ) {
+    return step.input as Record<
+      string,
+      unknown
+    >;
+  }
+
+  return {};
+}
+
 function getSearchInput(
   step: AutomationPlanStep
 ) {
   const input =
-    step.input &&
-    typeof step.input === "object"
-      ? step.input as Record<
-          string,
-          unknown
-        >
-      : {};
+    getInput(step);
 
   const query =
     typeof input.query === "string"
@@ -72,7 +87,8 @@ function getSearchInput(
     | "finance" =
     input.topic === "news"
       ? "news"
-      : input.topic === "finance"
+      : input.topic ===
+          "finance"
         ? "finance"
         : "general";
 
@@ -128,13 +144,119 @@ function getSearchInput(
 
   return {
     query,
-    search_depth: searchDepth,
-    max_results: maxResults,
+    search_depth:
+      searchDepth,
+    max_results:
+      maxResults,
     topic,
-    include_answer: includeAnswer,
+    include_answer:
+      includeAnswer,
     include_raw_content:
       includeRawContent,
-    include_images: includeImages,
+    include_images:
+      includeImages,
+    include_domains:
+      includeDomains,
+    exclude_domains:
+      excludeDomains,
+  };
+}
+
+function getResearchInput(
+  step: AutomationPlanStep
+) {
+  const input =
+    getInput(step);
+
+  const queries =
+    Array.isArray(
+      input.queries
+    )
+      ? input.queries.filter(
+          (
+            value
+          ): value is string =>
+            typeof value ===
+            "string" &&
+            value.trim()
+              .length > 0
+        )
+      : [];
+
+  const searchDepth:
+    | "basic"
+    | "advanced" =
+    input.search_depth ===
+    "advanced"
+      ? "advanced"
+      : "basic";
+
+  const topic:
+    | "general"
+    | "news"
+    | "finance" =
+    input.topic === "news"
+      ? "news"
+      : input.topic ===
+          "finance"
+        ? "finance"
+        : "general";
+
+  const maxResultsPerQuery =
+    typeof input.max_results_per_query ===
+    "number"
+      ? input.max_results_per_query
+      : 5;
+
+  const includeAnswer =
+    typeof input.include_answer ===
+    "boolean"
+      ? input.include_answer
+      : true;
+
+  const includeRawContent =
+    typeof input.include_raw_content ===
+    "boolean"
+      ? input.include_raw_content
+      : false;
+
+  const includeDomains =
+    Array.isArray(
+      input.include_domains
+    )
+      ? input.include_domains.filter(
+          (
+            value
+          ): value is string =>
+            typeof value ===
+            "string"
+        )
+      : undefined;
+
+  const excludeDomains =
+    Array.isArray(
+      input.exclude_domains
+    )
+      ? input.exclude_domains.filter(
+          (
+            value
+          ): value is string =>
+            typeof value ===
+            "string"
+        )
+      : undefined;
+
+  return {
+    queries,
+    search_depth:
+      searchDepth,
+    topic,
+    max_results_per_query:
+      maxResultsPerQuery,
+    include_answer:
+      includeAnswer,
+    include_raw_content:
+      includeRawContent,
     include_domains:
       includeDomains,
     exclude_domains:
@@ -150,8 +272,7 @@ const tools: Record<
     name: "web_search",
 
     execute: async (
-      step,
-      _context
+      step
     ) => {
       const input =
         getSearchInput(step);
@@ -164,17 +285,14 @@ const tools: Record<
       return {
         success:
           result.success,
-
         output:
           result.output
             ? {
                 ...result.output,
               }
             : undefined,
-
         error:
           result.error,
-
         errorCode:
           result.errorCode,
       };
@@ -184,10 +302,32 @@ const tools: Record<
   web_research: {
     name: "web_research",
 
-    execute: async () =>
-      unavailableTool(
-        "web_research"
-      ),
+    execute: async (
+      step
+    ) => {
+      const input =
+        getResearchInput(step);
+
+      const result =
+        await executeWebResearch(
+          input
+        );
+
+      return {
+        success:
+          result.success,
+        output:
+          result.output
+            ? {
+                ...result.output,
+              }
+            : undefined,
+        error:
+          result.error,
+        errorCode:
+          result.errorCode,
+      };
+    },
   },
 
   browser: {
@@ -317,9 +457,12 @@ export async function executeAutomationTool(
       "Automation tool execution error:",
       {
         tool: step.tool_name,
-        taskId: context.taskId,
-        runId: context.runId,
-        stepId: context.stepId,
+        taskId:
+          context.taskId,
+        runId:
+          context.runId,
+        stepId:
+          context.stepId,
         error,
       }
     );
@@ -336,7 +479,7 @@ export async function executeAutomationTool(
 
 export function isAutomationToolAvailable(
   toolName: string
-) {
+): boolean {
   return Boolean(
     tools[toolName]
   );

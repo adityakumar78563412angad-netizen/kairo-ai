@@ -117,9 +117,8 @@ export async function executeWebSearch(
     };
   }
 
-  const query = normalizeString(
-    input.query
-  );
+  const query =
+    normalizeString(input.query);
 
   if (!query) {
     return {
@@ -274,7 +273,9 @@ export async function executeWebSearch(
     const results: WebSearchResult[] =
       [];
 
-    for (const item of rawResults) {
+    for (
+      const item of rawResults
+    ) {
       if (
         !item ||
         typeof item !== "object"
@@ -349,15 +350,12 @@ export async function executeWebSearch(
       success: true,
       output: {
         query,
-
         answer:
           typeof payload.answer ===
           "string"
             ? payload.answer
             : null,
-
         results,
-
         response_time:
           typeof payload.response_time ===
           "string"
