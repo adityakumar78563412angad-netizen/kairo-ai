@@ -9,7 +9,7 @@ import {
 } from "react";
 import { createClient } from "@/lib/supabase";
 
-type TaskStatus =
+type AutomationStatus =
   | "queued"
   | "planning"
   | "planned"
@@ -29,67 +29,59 @@ type StepStatus =
   | "skipped"
   | "cancelled";
 
-type AutomationPlanStep = {
-  step_number: number;
-  name: string;
-  description: string;
-  tool_name: string;
-  input?: Record<string, unknown>;
-  dependencies?: number[];
-  requires_approval?: boolean;
-  max_retries?: number;
-};
-
 type AutomationTask = {
   id: string;
+  user_id: string;
   title: string;
   prompt: string;
-  status: TaskStatus;
-  plan?: {
-    goal?: string;
-    summary?: string;
-    steps?: AutomationPlanStep[];
-  } | null;
-  result?: Record<string, unknown> | null;
-  error_code?: string | null;
-  error_message?: string | null;
+  status: AutomationStatus;
+  priority?: string | null;
+  plan?: unknown;
+  context?: unknown;
+  result?: unknown;
+  errors?: unknown;
   created_at: string;
   updated_at: string;
-  started_at?: string | null;
-  completed_at?: string | null;
 };
 
 type AutomationRun = {
   id: string;
-  status: string;
+  task_id?: string;
+  user_id?: string;
   run_number: number;
-  trigger_type: string;
-  started_at?: string | null;
-  completed_at?: string | null;
+  status: AutomationStatus;
+  trigger_type?: string;
+  execution_context?: unknown;
+  result?: unknown;
+  errors?: unknown;
+  created_at: string;
+  updated_at: string;
 };
 
 type AutomationStep = {
   id: string;
+  task_id?: string;
+  run_id: string;
   step_number: number;
   name: string;
-  description: string;
-  tool_name: string;
+  description?: string | null;
+  tool_name?: string | null;
   status: StepStatus;
-  input?: Record<string, unknown> | null;
-  output?: Record<string, unknown> | null;
+  input?: unknown;
+  output?: unknown;
   dependencies?: string[] | null;
-  retry_count: number;
-  max_retries: number;
-  error_code?: string | null;
-  error_message?: string | null;
+  retries?: number | null;
+  errors?: unknown;
   started_at?: string | null;
   completed_at?: string | null;
 };
 
-type AutomationState = {
-  task: AutomationTask | null;
-  run: AutomationRun | null;
-  steps: AutomationStep[];
+type PlanStep = {
+  step_number?: number;
+  name?: string;
+  description?: string;
+  tool_name?: string;
+  dependencies?: number[];
 };
 
 type SessionResult = {
@@ -99,605 +91,581 @@ type SessionResult = {
 
 const supabase = createClient();
 
-const POLL_INTERVAL = 1500;
-const MAX_POLL_TIME = 5 * 60 * 1000;
+const TOOL_META: Record<
+  string,
+  {
+    label: string;
+    icon: string;
+    description: string;
+  }
+> = {
+  web_search: {
+    label: "Web Search",
+    icon: "⌕",
+    description: "Search the live web for relevant information.",
+  },
+  web_research: {
+    label: "Web Research",
+    icon: "◈",
+    description: "Run multi-query research and synthesize findings.",
+  },
+  browser: {
+    label: "Browser",
+    icon: "◎",
+    description: "Navigate and interact with web pages.",
+  },
+  email: {
+    label: "Email",
+    icon: "✉",
+    description: "Read, draft and send email when connected.",
+  },
+  calendar: {
+    label: "Calendar",
+    icon: "□",
+    description: "Create and manage calendar actions.",
+  },
+  file_read: {
+    label: "File Read",
+    icon: "▤",
+    description: "Read information from connected files.",
+  },
+  file_write: {
+    label: "File Write",
+    icon: "▥",
+    description: "Create or update connected files.",
+  },
+  document: {
+    label: "Document",
+    icon: "▧",
+    description: "Generate and transform documents.",
+  },
+  spreadsheet: {
+    label: "Spreadsheet",
+    icon: "▦",
+    description: "Work with structured spreadsheet data.",
+  },
+  data_transform: {
+    label: "Data Transform",
+    icon: "↗",
+    description: "Clean, transform and analyze structured data.",
+  },
+  crm: {
+    label: "CRM",
+    icon: "♙",
+    description: "Perform actions against connected CRM systems.",
+  },
+  http_request: {
+    label: "HTTP Request",
+    icon: "↔",
+    description: "Call authorized external APIs.",
+  },
+  notification: {
+    label: "Notification",
+    icon: "♢",
+    description: "Send supported notifications.",
+  },
+};
 
-const EXAMPLE_PROMPTS = [
-  "Research the latest developments in AI agents and summarize the most important findings with relevant sources.",
-  "Research the current AI automation market and identify the major technologies being used.",
-  "Research the latest advances in generative AI and create a concise research summary with sources.",
+const TOOL_NAMES = Object.keys(TOOL_META);
+
+const EXAMPLES = [
+  "Research the latest developments in AI agents and prepare a concise report with sources.",
+  "Search the web for the information I need and organize the findings into a structured summary.",
+  "Analyze the information available for a topic and turn it into a professional report.",
+  "Find relevant information online, compare the sources, and explain the important differences.",
 ];
 
-function statusLabel(status: string) {
-  switch (status) {
-    case "queued":
-      return "Queued";
-    case "planning":
-      return "Planning";
-    case "planned":
-      return "Plan ready";
-    case "running":
-      return "Running";
-    case "waiting_approval":
-      return "Waiting for approval";
-    case "completed":
-      return "Completed";
-    case "failed":
-      return "Failed";
-    case "cancelled":
-      return "Cancelled";
-    case "ready":
-      return "Ready";
-    case "skipped":
-      return "Skipped";
-    default:
-      return status.replace(/_/g, " ");
-  }
-}
+function formatDate(value?: string | null) {
+  if (!value) return "—";
 
-function statusIcon(status: string) {
-  switch (status) {
-    case "completed":
-      return "✓";
-    case "failed":
-      return "!";
-    case "cancelled":
-      return "×";
-    case "running":
-      return "●";
-    case "planning":
-    case "queued":
-    case "ready":
-    case "planned":
-    case "waiting_approval":
-      return "○";
-    case "skipped":
-      return "–";
-    default:
-      return "○";
+  try {
+    return new Date(value).toLocaleDateString("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
+  } catch {
+    return "—";
   }
 }
 
 function formatTime(value?: string | null) {
-  if (!value) return "";
+  if (!value) return "—";
 
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return "";
+  try {
+    return new Date(value).toLocaleTimeString("en-IN", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return "—";
   }
-
-  return date.toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function formatDate(value?: string | null) {
-  if (!value) return "";
-
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return "";
-  }
-
-  return date.toLocaleString([], {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
 }
 
 function safeJson(value: unknown) {
-  if (value === null || value === undefined) {
-    return "";
-  }
+  if (value === null || value === undefined) return "";
+
+  if (typeof value === "string") return value;
 
   try {
     return JSON.stringify(value, null, 2);
   } catch {
-    return "";
+    return String(value);
   }
 }
 
-function extractResearchSources(
-  result: Record<string, unknown> | null | undefined
-) {
-  if (!result || typeof result !== "object") {
-    return [];
+function getToolMeta(toolName?: string | null) {
+  if (!toolName) {
+    return {
+      label: "Automation",
+      icon: "✦",
+      description: "Automation step",
+    };
   }
 
-  const output =
-    result.output &&
-    typeof result.output === "object"
-      ? (result.output as Record<string, unknown>)
-      : result;
-
-  const sources = Array.isArray(output.sources)
-    ? output.sources
-    : [];
-
-  return sources.filter(
-    (source): source is Record<string, unknown> =>
-      Boolean(
-        source &&
-          typeof source === "object" &&
-          !Array.isArray(source)
-      )
-  );
-}
-
-function extractResearchAnswer(
-  result: Record<string, unknown> | null | undefined
-) {
-  if (!result || typeof result !== "object") {
-    return "";
-  }
-
-  const output =
-    result.output &&
-    typeof result.output === "object"
-      ? (result.output as Record<string, unknown>)
-      : result;
-
-  return typeof output.answer === "string"
-    ? output.answer
-    : "";
-}
-
-function isFinished(status?: string | null) {
   return (
-    status === "completed" ||
-    status === "failed" ||
-    status === "cancelled"
+    TOOL_META[toolName] || {
+      label: toolName.replaceAll("_", " "),
+      icon: "✦",
+      description: "Automation tool",
+    }
   );
 }
 
-async function getAutomationSession(): Promise<SessionResult> {
-  const {
-    data: { session },
-    error,
-  } = await supabase.auth.getSession();
-
-  if (error) {
-    console.error("Automation session error:", error);
-
-    throw new Error(
-      "Unable to read your ZUQEN session. Please refresh the page and try again."
-    );
-  }
-
-  if (!session?.access_token || !session.user?.id) {
-    throw new Error(
-      "Your ZUQEN session is not available. Please sign in again."
-    );
-  }
-
-  return {
-    accessToken: session.access_token,
-    userId: session.user.id,
-  };
+function statusLabel(status: AutomationStatus | StepStatus) {
+  return status.replaceAll("_", " ");
 }
 
-function automationHeaders(accessToken: string): HeadersInit {
-  return {
-    "Content-Type": "application/json",
-    Authorization: `Bearer ${accessToken}`,
-  };
+function statusClass(status: AutomationStatus | StepStatus) {
+  switch (status) {
+    case "completed":
+      return "text-emerald-300 bg-emerald-400/10 border-emerald-400/20";
+    case "running":
+      return "text-sky-300 bg-sky-400/10 border-sky-400/20";
+    case "planning":
+    case "planned":
+      return "text-violet-300 bg-violet-400/10 border-violet-400/20";
+    case "waiting_approval":
+      return "text-amber-300 bg-amber-400/10 border-amber-400/20";
+    case "failed":
+      return "text-red-300 bg-red-400/10 border-red-400/20";
+    case "cancelled":
+      return "text-zinc-300 bg-white/5 border-white/10";
+    default:
+      return "text-zinc-300 bg-white/5 border-white/10";
+  }
+}
+
+function statusIcon(status: AutomationStatus | StepStatus) {
+  switch (status) {
+    case "completed":
+      return "✓";
+    case "running":
+      return "◌";
+    case "planning":
+    case "planned":
+      return "✦";
+    case "waiting_approval":
+      return "!";
+    case "failed":
+      return "×";
+    case "cancelled":
+      return "—";
+    default:
+      return "○";
+  }
+}
+
+function extractPlanSteps(plan: unknown): PlanStep[] {
+  if (!plan || typeof plan !== "object") return [];
+
+  const source = plan as Record<string, unknown>;
+
+  const candidates = [
+    source.steps,
+    source.plan,
+    source.actions,
+    source.execution_plan,
+  ];
+
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) {
+      return candidate as PlanStep[];
+    }
+  }
+
+  return [];
+}
+
+function extractResultObject(result: unknown): Record<string, unknown> {
+  if (!result || typeof result !== "object") return {};
+
+  return result as Record<string, unknown>;
 }
 
 export default function AutomationPage() {
   const [input, setInput] = useState("");
-
-  const [state, setState] = useState<AutomationState>({
-    task: null,
-    run: null,
-    steps: [],
-  });
-
+  const [task, setTask] = useState<AutomationTask | null>(null);
+  const [run, setRun] = useState<AutomationRun | null>(null);
+  const [steps, setSteps] = useState<AutomationStep[]>([]);
   const [loading, setLoading] = useState(false);
-  const [loadingState, setLoadingState] = useState(false);
-  const [error, setError] = useState("");
+  const [polling, setPolling] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
   const [showExamples, setShowExamples] = useState(false);
+  const [showTools, setShowTools] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [detailsOpen, setDetailsOpen] = useState(true);
+  const [history, setHistory] = useState<AutomationTask[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [selectedTool, setSelectedTool] = useState<string | null>(null);
 
-  const pollTimerRef =
-    useRef<ReturnType<typeof setTimeout> | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const pollStartedRef = useRef<number>(0);
+  const getAutomationSession =
+    useCallback(async (): Promise<SessionResult> => {
+      const {
+        data: { session },
+        error,
+      } = await supabase.auth.getSession();
 
-  const textareaRef =
-    useRef<HTMLTextAreaElement | null>(null);
+      if (error) {
+        throw new Error(error.message);
+      }
 
-  const clearPolling = useCallback(() => {
-    if (pollTimerRef.current) {
-      clearTimeout(pollTimerRef.current);
-      pollTimerRef.current = null;
+      if (!session?.access_token || !session.user?.id) {
+        throw new Error(
+          "Your ZUQEN session is not available. Please refresh the page and try again."
+        );
+      }
+
+      return {
+        accessToken: session.access_token,
+        userId: session.user.id,
+      };
+    }, []);
+
+  const automationHeaders = useCallback((accessToken: string) => {
+    return {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${accessToken}`,
+    };
+  }, []);
+
+  const loadHistory = useCallback(async () => {
+    try {
+      setHistoryLoading(true);
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        setHistory([]);
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from("automation_tasks")
+        .select(
+          "id,user_id,title,prompt,status,priority,plan,context,result,errors,created_at,updated_at"
+        )
+        .eq("user_id", user.id)
+        .order("updated_at", { ascending: false })
+        .limit(30);
+
+      if (error) {
+        console.error("Automation history error:", error);
+        return;
+      }
+
+      setHistory((data || []) as AutomationTask[]);
+    } finally {
+      setHistoryLoading(false);
     }
   }, []);
 
-  useEffect(() => {
-    return () => {
-      clearPolling();
-    };
-  }, [clearPolling]);
-
   const loadAutomationState = useCallback(
-    async (
-      taskId: string,
-      runId?: string
-    ): Promise<AutomationState | null> => {
-      setLoadingState(true);
+    async (taskId: string, runId: string) => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
 
-      try {
-        const {
-          data: { user },
-          error: userError,
-        } = await supabase.auth.getUser();
+      if (!user) {
+        throw new Error("Authentication required.");
+      }
 
-        if (userError || !user) {
-          throw new Error(
-            "Please sign in to use Automation Mode."
-          );
-        }
-
-        const { data: task, error: taskError } =
-          await supabase
+      const [taskResponse, runResponse, stepsResponse] =
+        await Promise.all([
+          supabase
             .from("automation_tasks")
-            .select(
-              [
-                "id",
-                "title",
-                "prompt",
-                "status",
-                "plan",
-                "result",
-                "error_code",
-                "error_message",
-                "created_at",
-                "updated_at",
-                "started_at",
-                "completed_at",
-              ].join(", ")
-            )
+            .select("*")
             .eq("id", taskId)
             .eq("user_id", user.id)
-            .single();
+            .single(),
 
-        if (taskError || !task) {
-          throw new Error(
-            "Unable to load automation task."
-          );
-        }
+          supabase
+            .from("automation_runs")
+            .select("*")
+            .eq("id", runId)
+            .eq("task_id", taskId)
+            .eq("user_id", user.id)
+            .single(),
 
-        let run: AutomationRun | null = null;
+          supabase
+            .from("automation_steps")
+            .select("*")
+            .eq("run_id", runId)
+            .eq("task_id", taskId)
+            .order("step_number", { ascending: true }),
+        ]);
 
-        if (runId) {
-          const { data: runData, error: runError } =
-            await supabase
-              .from("automation_runs")
-              .select(
-                [
-                  "id",
-                  "status",
-                  "run_number",
-                  "trigger_type",
-                  "started_at",
-                  "completed_at",
-                ].join(", ")
-              )
-              .eq("id", runId)
-              .eq("task_id", taskId)
-              .eq("user_id", user.id)
-              .maybeSingle();
-
-          if (runError) {
-            console.error(
-              "Automation run load error:",
-              runError
-            );
-          }
-
-          if (runData) {
-            run = runData as unknown as AutomationRun;
-          }
-        } else {
-          const { data: runData, error: runError } =
-            await supabase
-              .from("automation_runs")
-              .select(
-                [
-                  "id",
-                  "status",
-                  "run_number",
-                  "trigger_type",
-                  "started_at",
-                  "completed_at",
-                ].join(", ")
-              )
-              .eq("task_id", taskId)
-              .eq("user_id", user.id)
-              .order("run_number", {
-                ascending: false,
-              })
-              .limit(1)
-              .maybeSingle();
-
-          if (runError) {
-            console.error(
-              "Automation latest run load error:",
-              runError
-            );
-          }
-
-          if (runData) {
-            run = runData as unknown as AutomationRun;
-          }
-        }
-
-        let steps: AutomationStep[] = [];
-
-        if (run?.id) {
-          const { data: stepData, error: stepError } =
-            await supabase
-              .from("automation_steps")
-              .select(
-                [
-                  "id",
-                  "step_number",
-                  "name",
-                  "description",
-                  "tool_name",
-                  "status",
-                  "input",
-                  "output",
-                  "dependencies",
-                  "retry_count",
-                  "max_retries",
-                  "error_code",
-                  "error_message",
-                  "started_at",
-                  "completed_at",
-                ].join(", ")
-              )
-              .eq("task_id", taskId)
-              .eq("run_id", run.id)
-              .order("step_number", {
-                ascending: true,
-              });
-
-          if (stepError) {
-            console.error(
-              "Automation step load error:",
-              stepError
-            );
-          }
-
-          if (stepData) {
-            steps =
-              stepData as unknown as AutomationStep[];
-          }
-        }
-
-        const nextState: AutomationState = {
-          task: task as unknown as AutomationTask,
-          run,
-          steps,
-        };
-
-        setState(nextState);
-
-        return nextState;
-      } catch (err) {
-        const message =
-          err instanceof Error
-            ? err.message
-            : "Unable to load automation state.";
-
-        setError(message);
-
-        return null;
-      } finally {
-        setLoadingState(false);
+      if (taskResponse.error) {
+        throw new Error(taskResponse.error.message);
       }
+
+      if (runResponse.error) {
+        throw new Error(runResponse.error.message);
+      }
+
+      if (stepsResponse.error) {
+        throw new Error(stepsResponse.error.message);
+      }
+
+      setTask(taskResponse.data as AutomationTask);
+      setRun(runResponse.data as AutomationRun);
+      setSteps((stepsResponse.data || []) as AutomationStep[]);
+
+      return {
+        task: taskResponse.data as AutomationTask,
+        run: runResponse.data as AutomationRun,
+        steps: (stepsResponse.data || []) as AutomationStep[],
+      };
     },
     []
   );
 
+  const stopPolling = useCallback(() => {
+    if (pollTimerRef.current) {
+      clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+
+    setPolling(false);
+  }, []);
+
   const startPolling = useCallback(
     (taskId: string, runId: string) => {
-      clearPolling();
+      stopPolling();
+      setPolling(true);
 
-      pollStartedRef.current = Date.now();
+      const startedAt = Date.now();
 
       const poll = async () => {
-        if (
-          Date.now() - pollStartedRef.current >
-          MAX_POLL_TIME
-        ) {
-          setError(
-            "Automation status polling timed out. The task may still be running."
-          );
+        try {
+          const state = await loadAutomationState(taskId, runId);
 
-          return;
+          const terminal =
+            state.task.status === "completed" ||
+            state.task.status === "failed" ||
+            state.task.status === "cancelled" ||
+            state.task.status === "waiting_approval";
+
+          if (terminal) {
+            stopPolling();
+            await loadHistory();
+            return;
+          }
+
+          if (Date.now() - startedAt > 5 * 60 * 1000) {
+            stopPolling();
+            return;
+          }
+        } catch (error) {
+          console.error("Automation polling error:", error);
         }
-
-        const nextState =
-          await loadAutomationState(
-            taskId,
-            runId
-          );
-
-        if (
-          nextState?.task &&
-          isFinished(nextState.task.status)
-        ) {
-          return;
-        }
-
-        if (
-          nextState?.task?.status ===
-          "waiting_approval"
-        ) {
-          return;
-        }
-
-        pollTimerRef.current = setTimeout(
-          poll,
-          POLL_INTERVAL
-        );
       };
 
       void poll();
+
+      pollTimerRef.current = setInterval(() => {
+        void poll();
+      }, 1500);
     },
-    [clearPolling, loadAutomationState]
+    [loadAutomationState, loadHistory, stopPolling]
   );
+
+  useEffect(() => {
+    void loadHistory();
+
+    return () => {
+      stopPolling();
+    };
+  }, [loadHistory, stopPolling]);
+
+  useEffect(() => {
+    if (!textareaRef.current) return;
+
+    textareaRef.current.style.height = "auto";
+    textareaRef.current.style.height = `${Math.min(
+      textareaRef.current.scrollHeight,
+      220
+    )}px`;
+  }, [input]);
 
   const runAutomation = useCallback(async () => {
     const prompt = input.trim();
 
     if (!prompt) {
-      setError(
-        "Tell ZUQEN what you want to automate."
-      );
-
+      setErrorMessage("Tell ZUQEN what you want to automate.");
       textareaRef.current?.focus();
-
       return;
     }
 
     if (prompt.length > 10000) {
-      setError(
-        "Automation request cannot exceed 10,000 characters."
-      );
-
+      setErrorMessage("Automation prompt cannot exceed 10,000 characters.");
       return;
     }
 
-    clearPolling();
-    setError("");
-    setLoading(true);
-
-    setState({
-      task: null,
-      run: null,
-      steps: [],
-    });
-
     try {
-      const { accessToken } =
-        await getAutomationSession();
+      setLoading(true);
+      setErrorMessage("");
+      stopPolling();
 
-      const response = await fetch(
-        "/api/automation",
-        {
-          method: "POST",
-          headers:
-            automationHeaders(accessToken),
-          body: JSON.stringify({
-            prompt,
-          }),
-        }
-      );
+      const { accessToken } = await getAutomationSession();
 
-      const data =
-        (await response.json().catch(
-          () => ({})
-        )) as {
-          success?: boolean;
-          taskId?: string;
-          runId?: string;
-          status?: TaskStatus;
-          plan?: AutomationTask["plan"];
-          error?: string;
-          errorCode?: string;
-        };
+      const response = await fetch("/api/automation", {
+        method: "POST",
+        headers: automationHeaders(accessToken),
+        body: JSON.stringify({
+          prompt,
+          title: prompt.length > 80 ? `${prompt.slice(0, 80)}…` : prompt,
+        }),
+      });
 
-      if (
-        !response.ok ||
-        !data.success ||
-        !data.taskId
-      ) {
+      const data = await response.json().catch(() => null);
+
+      if (!response.ok) {
         throw new Error(
-          data.error ||
-            "Unable to create automation."
+          data?.error ||
+            data?.message ||
+            "Unable to create the automation task."
         );
       }
 
-      await loadAutomationState(
-        data.taskId,
-        data.runId
-      );
+      const taskId = data?.taskId;
+      const runId = data?.runId;
 
-      if (!data.runId) {
+      if (!taskId || !runId) {
+        throw new Error("Automation API did not return taskId/runId.");
+      }
+
+      setInput("");
+
+      await loadAutomationState(taskId, runId);
+
+      const executeResponse = await fetch("/api/automation/execute", {
+        method: "POST",
+        headers: automationHeaders(accessToken),
+        body: JSON.stringify({
+          taskId,
+          runId,
+        }),
+      });
+
+      const executeData = await executeResponse.json().catch(() => null);
+
+      if (!executeResponse.ok) {
         throw new Error(
-          "Automation run was not initialized."
+          executeData?.error ||
+            executeData?.message ||
+            "Automation execution could not be started."
         );
       }
 
-      const executeResponse =
-        await fetch(
-          "/api/automation/execute",
-          {
-            method: "POST",
-            headers:
-              automationHeaders(
-                accessToken
-              ),
-            body: JSON.stringify({
-              taskId: data.taskId,
-              runId: data.runId,
-            }),
-          }
-        );
+      await loadAutomationState(taskId, runId);
+      startPolling(taskId, runId);
+      await loadHistory();
+    } catch (error) {
+      console.error("Automation error:", error);
 
-      const executeData =
-        (await executeResponse
-          .json()
-          .catch(() => ({}))) as {
-          success?: boolean;
-          error?: string;
-          errorCode?: string;
-        };
-
-      if (
-        !executeResponse.ok ||
-        !executeData.success
-      ) {
-        throw new Error(
-          executeData.error ||
-            "Automation execution failed to start."
-        );
-      }
-
-      startPolling(
-        data.taskId,
-        data.runId
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Something went wrong while starting automation."
       );
-    } catch (err) {
-      const message =
-        err instanceof Error
-          ? err.message
-          : "Unable to run automation.";
-
-      setError(message);
     } finally {
       setLoading(false);
     }
   }, [
-    clearPolling,
     input,
+    stopPolling,
+    getAutomationSession,
+    automationHeaders,
     loadAutomationState,
     startPolling,
+    loadHistory,
   ]);
 
+  const openHistoryTask = useCallback(
+    async (historyTask: AutomationTask) => {
+      try {
+        setErrorMessage("");
+
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+
+        if (!user) {
+          setErrorMessage("Authentication required.");
+          return;
+        }
+
+        const { data: runs, error } = await supabase
+          .from("automation_runs")
+          .select("*")
+          .eq("task_id", historyTask.id)
+          .eq("user_id", user.id)
+          .order("run_number", { ascending: false })
+          .limit(1);
+
+        if (error) {
+          throw new Error(error.message);
+        }
+
+        const latestRun = runs?.[0] as AutomationRun | undefined;
+
+        if (!latestRun) {
+          setTask(historyTask);
+          setRun(null);
+          setSteps([]);
+          return;
+        }
+
+        await loadAutomationState(historyTask.id, latestRun.id);
+
+        if (
+          historyTask.status !== "completed" &&
+          historyTask.status !== "failed" &&
+          historyTask.status !== "cancelled" &&
+          historyTask.status !== "waiting_approval"
+        ) {
+          startPolling(historyTask.id, latestRun.id);
+        }
+      } catch (error) {
+        setErrorMessage(
+          error instanceof Error
+            ? error.message
+            : "Unable to open automation task."
+        );
+      }
+    },
+    [loadAutomationState, startPolling]
+  );
+
   const handleKeyDown = useCallback(
-    (
-      event: React.KeyboardEvent<HTMLTextAreaElement>
-    ) => {
-      if (
-        event.key === "Enter" &&
-        !event.shiftKey
-      ) {
+    (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (event.key === "Enter" && !event.shiftKey) {
         event.preventDefault();
 
         if (!loading) {
@@ -708,822 +676,983 @@ export default function AutomationPage() {
     [loading, runAutomation]
   );
 
-  const currentStepNumber = useMemo(() => {
-    const runningStep =
-      state.steps.find(
-        (step) =>
-          step.status === "running"
-      );
+  const newAutomation = useCallback(() => {
+    stopPolling();
+    setTask(null);
+    setRun(null);
+    setSteps([]);
+    setInput("");
+    setErrorMessage("");
+    setSelectedTool(null);
 
-    if (runningStep) {
-      return runningStep.step_number;
-    }
+    window.setTimeout(() => {
+      textareaRef.current?.focus();
+    }, 50);
+  }, [stopPolling]);
 
-    const waitingStep =
-      state.steps.find(
-        (step) =>
-          step.status ===
-          "waiting_approval"
-      );
+  const planSteps = useMemo(() => {
+    return extractPlanSteps(task?.plan);
+  }, [task?.plan]);
 
-    if (waitingStep) {
-      return waitingStep.step_number;
-    }
+  const displaySteps = useMemo<AutomationStep[]>(() => {
+    if (steps.length > 0) return steps;
 
-    const readyStep =
-      state.steps.find(
-        (step) =>
-          step.status === "ready"
-      );
+    return planSteps.map((step, index) => ({
+      id: `plan-${index}`,
+      run_id: run?.id || "",
+      step_number: step.step_number || index + 1,
+      name: step.name || `Automation step ${index + 1}`,
+      description: step.description || "",
+      tool_name: step.tool_name || null,
+      status: "queued",
+      dependencies: [],
+      retries: 0,
+    }));
+  }, [steps, planSteps, run?.id]);
 
-    return readyStep?.step_number ?? 0;
-  }, [state.steps]);
-
-  const completedSteps =
-    state.steps.filter(
-      (step) =>
-        step.status === "completed"
-    ).length;
-
-  const progress =
-    state.steps.length > 0
-      ? Math.round(
-          (completedSteps /
-            state.steps.length) *
-            100
-        )
-      : state.task?.status === "completed"
-        ? 100
-        : 0;
-
-  const researchSources =
-    extractResearchSources(
-      state.task?.result
-    );
+  const resultObject = useMemo(
+    () => extractResultObject(task?.result || run?.result),
+    [task?.result, run?.result]
+  );
 
   const researchAnswer =
-    extractResearchAnswer(
-      state.task?.result
-    );
+    typeof resultObject.answer === "string"
+      ? resultObject.answer
+      : typeof resultObject.summary === "string"
+        ? resultObject.summary
+        : typeof resultObject.result === "string"
+          ? resultObject.result
+          : "";
 
-  const planSteps =
-    state.task?.plan?.steps ?? [];
+  const researchSources = Array.isArray(resultObject.sources)
+    ? resultObject.sources
+    : [];
 
-  const displaySteps: AutomationStep[] =
-    state.steps.length > 0
-      ? state.steps
-      : planSteps.map(
-          (step): AutomationStep => ({
-            id: `plan-${step.step_number}`,
-            step_number:
-              step.step_number,
-            name: step.name,
-            description:
-              step.description,
-            tool_name:
-              step.tool_name,
-            status: "queued",
-            input:
-              step.input ?? null,
-            output: null,
-            dependencies: null,
-            retry_count: 0,
-            max_retries:
-              step.max_retries ?? 2,
-            error_code: null,
-            error_message: null,
-            started_at: null,
-            completed_at: null,
-          })
-        );
+  const completedSteps = displaySteps.filter(
+    (step) => step.status === "completed"
+  ).length;
+
+  const runningStep = displaySteps.find(
+    (step) =>
+      step.status === "running" ||
+      step.status === "waiting_approval"
+  );
+
+  const activeTools = useMemo(() => {
+    const names = new Set<string>();
+
+    for (const step of displaySteps) {
+      if (step.tool_name) names.add(step.tool_name);
+    }
+
+    return Array.from(names);
+  }, [displaySteps]);
+
+  const pageHasTask = Boolean(task);
 
   return (
-    <main className="min-h-screen bg-[#07080b] text-white">
-      <div className="mx-auto flex min-h-screen w-full max-w-7xl flex-col px-4 py-6 sm:px-6 lg:px-8">
-        <header className="mb-8 flex items-center justify-between">
-          <div>
-            <div className="mb-2 flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/[0.06] text-lg font-semibold">
-                Z
-              </div>
+    <main className="min-h-screen bg-[#08090b] text-white">
+      <div className="flex min-h-screen">
+        {/* LEFT SIDEBAR */}
+        <aside
+          className={`${
+            sidebarOpen ? "w-[285px]" : "w-0"
+          } hidden overflow-hidden border-r border-white/[0.07] bg-[#0b0c0f] transition-all duration-300 lg:block`}
+        >
+          <div className="flex h-full min-w-[285px] flex-col">
+            <div className="flex h-[72px] items-center justify-between border-b border-white/[0.07] px-5">
+              <button
+                onClick={() => {
+                  window.location.href = "/";
+                }}
+                className="text-lg font-semibold tracking-tight"
+              >
+                ZUQEN
+                <span className="ml-1 text-white/30">AI</span>
+              </button>
 
-              <div>
-                <h1 className="text-xl font-semibold tracking-tight">
-                  ZUQEN Automation
-                </h1>
-
-                <p className="text-xs text-white/45">
-                  Independent AI automation engine
-                </p>
-              </div>
+              <button
+                onClick={newAutomation}
+                className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-xs text-white/70 transition hover:bg-white/[0.08] hover:text-white"
+              >
+                + New
+              </button>
             </div>
-          </div>
 
-          <a
-            href="/"
-            className="rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2 text-sm text-white/70 transition hover:bg-white/[0.08] hover:text-white"
-          >
-            Back to ZUQEN
-          </a>
-        </header>
-
-        <section className="grid flex-1 gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
-          <div className="flex min-h-[620px] flex-col rounded-3xl border border-white/10 bg-white/[0.025] shadow-2xl shadow-black/20">
-            <div className="border-b border-white/10 px-5 py-5 sm:px-7">
-              <div className="mb-2 flex items-center gap-2">
-                <span className="rounded-full border border-white/10 bg-white/[0.05] px-2.5 py-1 text-[11px] font-medium uppercase tracking-wider text-white/55">
-                  Automation Mode
+            <div className="p-4">
+              <button
+                onClick={newAutomation}
+                className="flex w-full items-center gap-3 rounded-xl border border-white/[0.08] bg-white/[0.035] px-4 py-3 text-left transition hover:bg-white/[0.07]"
+              >
+                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-white text-black">
+                  +
                 </span>
 
-                {state.task && (
-                  <span className="rounded-full border border-white/10 bg-white/[0.05] px-2.5 py-1 text-[11px] text-white/55">
-                    {statusLabel(
-                      state.task.status
-                    )}
+                <span>
+                  <span className="block text-sm font-medium">
+                    New Automation
+                  </span>
+                  <span className="block text-[11px] text-white/35">
+                    Start a new task
+                  </span>
+                </span>
+              </button>
+            </div>
+
+            <div className="px-4 pb-2">
+              <div className="flex items-center justify-between px-2 py-2">
+                <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/25">
+                  Recent
+                </span>
+
+                {historyLoading && (
+                  <span className="text-[10px] text-white/25">
+                    Loading
                   </span>
                 )}
               </div>
-
-              <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">
-                What do you want me to automate?
-              </h2>
-
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-white/45">
-                Describe the outcome you want. ZUQEN will
-                create an execution plan and run the available
-                automation tools.
-              </p>
             </div>
 
-            <div className="flex flex-1 flex-col p-5 sm:p-7">
-              {!state.task && (
-                <div className="mb-5 grid gap-3 sm:grid-cols-3">
-                  {EXAMPLE_PROMPTS.map(
-                    (example) => (
-                      <button
-                        key={example}
-                        type="button"
-                        onClick={() =>
-                          setInput(example)
-                        }
-                        className="rounded-2xl border border-white/10 bg-white/[0.025] p-4 text-left text-xs leading-5 text-white/55 transition hover:border-white/20 hover:bg-white/[0.05] hover:text-white/80"
-                      >
-                        {example}
-                      </button>
-                    )
-                  )}
+            <div className="flex-1 overflow-y-auto px-3 pb-4">
+              {history.length === 0 ? (
+                <div className="px-3 py-8 text-center text-xs text-white/25">
+                  No automation history yet.
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  {history.map((item) => (
+                    <button
+                      key={item.id}
+                      onClick={() => void openHistoryTask(item)}
+                      className={`w-full rounded-xl px-3 py-3 text-left transition ${
+                        task?.id === item.id
+                          ? "bg-white/[0.08]"
+                          : "hover:bg-white/[0.045]"
+                      }`}
+                    >
+                      <div className="flex items-start gap-3">
+                        <span
+                          className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[10px] ${statusClass(
+                            item.status
+                          )}`}
+                        >
+                          {statusIcon(item.status)}
+                        </span>
+
+                        <span className="min-w-0">
+                          <span className="block truncate text-xs font-medium text-white/80">
+                            {item.title || "Untitled automation"}
+                          </span>
+
+                          <span className="mt-1 block text-[10px] capitalize text-white/25">
+                            {statusLabel(item.status)} ·{" "}
+                            {formatDate(item.updated_at)}
+                          </span>
+                        </span>
+                      </div>
+                    </button>
+                  ))}
                 </div>
               )}
+            </div>
 
-              <div className="relative">
-                <textarea
-                  ref={textareaRef}
-                  value={input}
-                  onChange={(event) =>
-                    setInput(
-                      event.target.value
-                    )
-                  }
-                  onKeyDown={handleKeyDown}
-                  disabled={
-                    loading ||
-                    Boolean(
-                      state.task &&
-                        !isFinished(
-                          state.task.status
-                        ) &&
-                        state.task.status !==
-                          "waiting_approval"
-                    )
-                  }
-                  maxLength={10000}
-                  rows={7}
-                  placeholder="Example: Research the latest AI agent developments, compare the major approaches, and give me a concise source-backed summary."
-                  className="w-full resize-none rounded-3xl border border-white/10 bg-black/30 px-5 py-5 pr-5 text-sm leading-6 text-white outline-none placeholder:text-white/25 focus:border-white/25"
-                />
+            <div className="border-t border-white/[0.07] p-4">
+              <div className="rounded-xl border border-white/[0.06] bg-white/[0.025] p-3">
+                <div className="text-xs font-medium text-white/65">
+                  Automation Engine
+                </div>
 
-                <div className="pointer-events-none absolute bottom-4 right-4 text-[11px] text-white/25">
-                  {input.length}/10,000
+                <div className="mt-1 text-[10px] leading-4 text-white/25">
+                  Plan → Execute → Verify
                 </div>
               </div>
-
-              {error && (
-                <div className="mt-4 rounded-2xl border border-red-400/20 bg-red-400/[0.06] px-4 py-3 text-sm text-red-200">
-                  {error}
-                </div>
-              )}
-
-              <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-                <button
-                  type="button"
-                  onClick={() =>
-                    setShowExamples(
-                      (value) => !value
-                    )
-                  }
-                  className="text-xs text-white/40 transition hover:text-white/70"
-                >
-                  {showExamples
-                    ? "Hide examples"
-                    : "Need an example?"}
-                </button>
-
-                <button
-                  type="button"
-                  disabled={
-                    loading ||
-                    !input.trim()
-                  }
-                  onClick={() =>
-                    void runAutomation()
-                  }
-                  className="rounded-2xl bg-white px-6 py-3 text-sm font-semibold text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-35"
-                >
-                  {loading
-                    ? "Starting..."
-                    : "Run Automation"}
-                </button>
-              </div>
-
-              {showExamples && (
-                <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.025] p-4">
-                  <p className="mb-3 text-xs font-medium uppercase tracking-wider text-white/35">
-                    Examples
-                  </p>
-
-                  <div className="space-y-2">
-                    {EXAMPLE_PROMPTS.map(
-                      (example) => (
-                        <button
-                          key={`detail-${example}`}
-                          type="button"
-                          onClick={() => {
-                            setInput(
-                              example
-                            );
-                            setShowExamples(
-                              false
-                            );
-                            textareaRef.current?.focus();
-                          }}
-                          className="block w-full rounded-xl px-3 py-2 text-left text-sm text-white/55 transition hover:bg-white/[0.05] hover:text-white"
-                        >
-                          {example}
-                        </button>
-                      )
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {state.task && (
-                <div className="mt-8">
-                  <div className="mb-5 flex items-center justify-between">
-                    <div>
-                      <p className="text-xs uppercase tracking-wider text-white/35">
-                        Execution
-                      </p>
-
-                      <h3 className="mt-1 text-lg font-semibold">
-                        {state.task.title}
-                      </h3>
-
-                      <p className="mt-1 text-xs text-white/30">
-                        Created{" "}
-                        {formatDate(
-                          state.task.created_at
-                        )}
-                      </p>
-                    </div>
-
-                    <span className="text-sm text-white/45">
-                      {progress}%
-                    </span>
-                  </div>
-
-                  <div className="mb-6 h-1.5 overflow-hidden rounded-full bg-white/10">
-                    <div
-                      className="h-full rounded-full bg-white transition-all duration-500"
-                      style={{
-                        width: `${progress}%`,
-                      }}
-                    />
-                  </div>
-
-                  {currentStepNumber > 0 &&
-                    !isFinished(
-                      state.task.status
-                    ) && (
-                      <p className="mb-4 text-xs text-white/35">
-                        Current step:{" "}
-                        {currentStepNumber}
-                      </p>
-                    )}
-
-                  <div className="space-y-3">
-                    {displaySteps.map(
-                      (step) => (
-                        <div
-                          key={step.id}
-                          className={`rounded-2xl border px-4 py-4 transition ${
-                            step.status ===
-                            "running"
-                              ? "border-white/25 bg-white/[0.06]"
-                              : step.status ===
-                                  "completed"
-                                ? "border-white/10 bg-white/[0.025]"
-                                : step.status ===
-                                    "failed"
-                                  ? "border-red-400/20 bg-red-400/[0.04]"
-                                  : step.status ===
-                                      "waiting_approval"
-                                    ? "border-yellow-400/20 bg-yellow-400/[0.04]"
-                                    : "border-white/10 bg-white/[0.015]"
-                          }`}
-                        >
-                          <div className="flex gap-4">
-                            <div
-                              className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border text-sm ${
-                                step.status ===
-                                "completed"
-                                  ? "border-white/20 bg-white/10"
-                                  : step.status ===
-                                      "failed"
-                                    ? "border-red-400/30 bg-red-400/10 text-red-200"
-                                    : step.status ===
-                                        "running"
-                                      ? "border-white/30 bg-white/10"
-                                      : step.status ===
-                                          "waiting_approval"
-                                        ? "border-yellow-400/30 bg-yellow-400/10 text-yellow-200"
-                                        : "border-white/10 bg-white/[0.03] text-white/45"
-                              }`}
-                            >
-                              {statusIcon(
-                                step.status
-                              )}
-                            </div>
-
-                            <div className="min-w-0 flex-1">
-                              <div className="flex flex-wrap items-center justify-between gap-2">
-                                <div>
-                                  <p className="text-sm font-medium">
-                                    {step.step_number}.{" "}
-                                    {step.name}
-                                  </p>
-
-                                  <p className="mt-1 text-xs text-white/35">
-                                    {step.tool_name}
-                                  </p>
-                                </div>
-
-                                <span className="text-xs capitalize text-white/40">
-                                  {statusLabel(
-                                    step.status
-                                  )}
-                                </span>
-                              </div>
-
-                              <p className="mt-3 text-sm leading-6 text-white/45">
-                                {step.description}
-                              </p>
-
-                              {step.status ===
-                                "running" && (
-                                <div className="mt-3 flex items-center gap-2 text-xs text-white/40">
-                                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />
-                                  Executing step{" "}
-                                  {
-                                    step.step_number
-                                  }
-                                  ...
-                                </div>
-                              )}
-
-                              {step.status ===
-                                "waiting_approval" && (
-                                <div className="mt-3 rounded-xl border border-yellow-400/15 bg-yellow-400/[0.05] p-3">
-                                  <p className="text-xs font-medium text-yellow-100">
-                                    Approval required
-                                  </p>
-
-                                  <p className="mt-1 text-xs leading-5 text-yellow-100/60">
-                                    This step requires explicit approval before the automation can continue.
-                                  </p>
-                                </div>
-                              )}
-
-                              {step.status ===
-                                "failed" &&
-                                step.error_message && (
-                                  <div className="mt-3 rounded-xl border border-red-400/10 bg-red-400/[0.04] p-3 text-xs text-red-200/80">
-                                    {step.error_message}
-                                  </div>
-                                )}
-
-                              {step.status ===
-                                "completed" &&
-                                step.completed_at && (
-                                  <p className="mt-3 text-[11px] text-white/25">
-                                    Completed{" "}
-                                    {formatTime(
-                                      step.completed_at
-                                    )}
-                                  </p>
-                                )}
-
-                              {step.retry_count >
-                                0 && (
-                                <p className="mt-2 text-[11px] text-white/25">
-                                  Retries:{" "}
-                                  {
-                                    step.retry_count
-                                  }
-                                  /
-                                  {
-                                    step.max_retries
-                                  }
-                                </p>
-                              )}
-
-                              {step.output &&
-                                Object.keys(
-                                  step.output
-                                ).length >
-                                  0 && (
-                                  <details className="mt-3">
-                                    <summary className="cursor-pointer text-xs text-white/35 hover:text-white/60">
-                                      View step output
-                                    </summary>
-
-                                    <pre className="mt-2 max-h-64 overflow-auto rounded-xl border border-white/10 bg-black/30 p-3 text-[11px] leading-5 text-white/45">
-                                      {safeJson(
-                                        step.output
-                                      )}
-                                    </pre>
-                                  </details>
-                                )}
-                            </div>
-                          </div>
-                        </div>
-                      )
-                    )}
-                  </div>
-
-                  {state.task.plan && (
-                    <div className="mt-8 rounded-2xl border border-white/10 bg-white/[0.02] p-5">
-                      <p className="text-xs uppercase tracking-wider text-white/30">
-                        Execution plan
-                      </p>
-
-                      {state.task.plan.goal && (
-                        <div className="mt-3">
-                          <p className="text-xs text-white/30">
-                            Goal
-                          </p>
-
-                          <p className="mt-1 text-sm leading-6 text-white/65">
-                            {state.task.plan.goal}
-                          </p>
-                        </div>
-                      )}
-
-                      {state.task.plan.summary && (
-                        <div className="mt-4">
-                          <p className="text-xs text-white/30">
-                            Strategy
-                          </p>
-
-                          <p className="mt-1 text-sm leading-6 text-white/50">
-                            {
-                              state.task
-                                .plan
-                                .summary
-                            }
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {state.task.status ===
-                    "completed" &&
-                    (researchAnswer ||
-                      researchSources.length >
-                        0) && (
-                      <div className="mt-8 rounded-3xl border border-white/10 bg-white/[0.025] p-5 sm:p-6">
-                        <div className="mb-5">
-                          <p className="text-xs uppercase tracking-wider text-white/30">
-                            Result
-                          </p>
-
-                          <h3 className="mt-1 text-xl font-semibold">
-                            Automation completed
-                          </h3>
-                        </div>
-
-                        {researchAnswer && (
-                          <div className="whitespace-pre-wrap text-sm leading-7 text-white/70">
-                            {researchAnswer}
-                          </div>
-                        )}
-
-                        {researchSources.length >
-                          0 && (
-                          <div className="mt-7">
-                            <p className="mb-3 text-xs font-medium uppercase tracking-wider text-white/30">
-                              Sources
-                            </p>
-
-                            <div className="space-y-2">
-                              {researchSources.map(
-                                (
-                                  source,
-                                  index
-                                ) => {
-                                  const title =
-                                    typeof source.title ===
-                                    "string"
-                                      ? source.title
-                                      : `Source ${index + 1}`;
-
-                                  const url =
-                                    typeof source.url ===
-                                    "string"
-                                      ? source.url
-                                      : "";
-
-                                  const snippet =
-                                    typeof source.content ===
-                                    "string"
-                                      ? source.content
-                                      : typeof source.snippet ===
-                                          "string"
-                                        ? source.snippet
-                                        : "";
-
-                                  return (
-                                    <div
-                                      key={`${url}-${index}`}
-                                      className="rounded-2xl border border-white/10 bg-black/20 p-4"
-                                    >
-                                      <div className="flex flex-wrap items-start justify-between gap-3">
-                                        <div className="min-w-0">
-                                          <p className="text-sm font-medium text-white/75">
-                                            {title}
-                                          </p>
-
-                                          {url && (
-                                            <a
-                                              href={
-                                                url
-                                              }
-                                              target="_blank"
-                                              rel="noreferrer"
-                                              className="mt-1 block truncate text-xs text-white/35 hover:text-white/60"
-                                            >
-                                              {
-                                                url
-                                              }
-                                            </a>
-                                          )}
-                                        </div>
-
-                                        <span className="text-[11px] text-white/20">
-                                          {index +
-                                            1}
-                                        </span>
-                                      </div>
-
-                                      {snippet && (
-                                        <p className="mt-3 text-xs leading-5 text-white/40">
-                                          {
-                                            snippet
-                                          }
-                                        </p>
-                                      )}
-                                    </div>
-                                  );
-                                }
-                              )}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                  {state.task.status ===
-                    "completed" &&
-                    !researchAnswer &&
-                    researchSources.length ===
-                      0 &&
-                    state.task.result && (
-                      <div className="mt-8 rounded-3xl border border-white/10 bg-white/[0.025] p-5">
-                        <p className="mb-3 text-xs uppercase tracking-wider text-white/30">
-                          Result
-                        </p>
-
-                        <pre className="max-h-[500px] overflow-auto whitespace-pre-wrap break-words rounded-2xl bg-black/30 p-4 text-xs leading-6 text-white/50">
-                          {safeJson(
-                            state.task.result
-                          )}
-                        </pre>
-                      </div>
-                    )}
-
-                  {state.task.status ===
-                    "failed" && (
-                    <div className="mt-8 rounded-3xl border border-red-400/20 bg-red-400/[0.04] p-5">
-                      <p className="text-xs uppercase tracking-wider text-red-200/50">
-                        Automation failed
-                      </p>
-
-                      <h3 className="mt-1 text-lg font-semibold text-red-100">
-                        The automation could not complete.
-                      </h3>
-
-                      {state.task.error_code && (
-                        <p className="mt-3 text-xs text-red-200/40">
-                          Error code:{" "}
-                          {state.task.error_code}
-                        </p>
-                      )}
-
-                      {state.task.error_message && (
-                        <p className="mt-2 text-sm leading-6 text-red-200/70">
-                          {
-                            state.task
-                              .error_message
-                          }
-                        </p>
-                      )}
-                    </div>
-                  )}
-
-                  {state.task.status ===
-                    "cancelled" && (
-                    <div className="mt-8 rounded-3xl border border-white/10 bg-white/[0.025] p-5">
-                      <p className="text-xs uppercase tracking-wider text-white/30">
-                        Automation cancelled
-                      </p>
-
-                      <p className="mt-2 text-sm text-white/50">
-                        This automation run was cancelled before completion.
-                      </p>
-                    </div>
-                  )}
-
-                  {state.run && (
-                    <div className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-2 text-[11px] text-white/25">
-                      <span>
-                        Run #
-                        {state.run.run_number}
-                      </span>
-
-                      <span>
-                        Trigger:{" "}
-                        {state.run.trigger_type}
-                      </span>
-
-                      {state.run.started_at && (
-                        <span>
-                          Started{" "}
-                          {formatTime(
-                            state.run
-                              .started_at
-                          )}
-                        </span>
-                      )}
-
-                      {state.run.completed_at && (
-                        <span>
-                          Finished{" "}
-                          {formatTime(
-                            state.run
-                              .completed_at
-                          )}
-                        </span>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
             </div>
           </div>
+        </aside>
 
-          <aside className="space-y-6">
-            <div className="rounded-3xl border border-white/10 bg-white/[0.025] p-5">
-              <p className="text-xs uppercase tracking-wider text-white/30">
-                How it works
-              </p>
+        {/* MAIN */}
+        <section className="flex min-w-0 flex-1 flex-col">
+          {/* HEADER */}
+          <header className="flex h-[72px] items-center justify-between border-b border-white/[0.07] px-4 md:px-7">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setSidebarOpen((value) => !value)}
+                className="rounded-lg p-2 text-white/45 transition hover:bg-white/[0.06] hover:text-white lg:hidden"
+                aria-label="Toggle sidebar"
+              >
+                ☰
+              </button>
 
-              <div className="mt-5 space-y-4">
-                {[
-                  [
-                    "01",
-                    "Understand",
-                    "ZUQEN interprets your requested outcome.",
-                  ],
-                  [
-                    "02",
-                    "Plan",
-                    "The automation planner converts the request into executable steps.",
-                  ],
-                  [
-                    "03",
-                    "Execute",
-                    "The independent execution engine runs compatible tools.",
-                  ],
-                  [
-                    "04",
-                    "Verify",
-                    "Results and step states are recorded for inspection.",
-                  ],
-                ].map(
-                  ([number, title, description]) => (
-                    <div
-                      key={number}
-                      className="flex gap-3"
-                    >
-                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] text-[10px] text-white/40">
-                        {number}
-                      </span>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h1 className="text-sm font-semibold">
+                    Automation
+                  </h1>
 
-                      <div>
-                        <p className="text-sm font-medium text-white/70">
-                          {title}
-                        </p>
+                  <span className="rounded-full border border-violet-400/20 bg-violet-400/10 px-2 py-0.5 text-[9px] uppercase tracking-wider text-violet-300">
+                    Beta
+                  </span>
+                </div>
 
-                        <p className="mt-1 text-xs leading-5 text-white/35">
-                          {description}
-                        </p>
+                <p className="mt-0.5 text-[10px] text-white/25">
+                  Turn instructions into multi-step execution
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {pageHasTask && (
+                <button
+                  onClick={newAutomation}
+                  className="hidden rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-xs text-white/60 transition hover:bg-white/[0.08] hover:text-white sm:block"
+                >
+                  New Task
+                </button>
+              )}
+
+              <button
+                onClick={() => setDetailsOpen((value) => !value)}
+                className="rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-xs text-white/50 transition hover:bg-white/[0.07] hover:text-white"
+              >
+                {detailsOpen ? "Hide details" : "Details"}
+              </button>
+            </div>
+          </header>
+
+          {/* CONTENT */}
+          <div className="flex flex-1 overflow-hidden">
+            <div className="min-w-0 flex-1 overflow-y-auto">
+              <div className="mx-auto w-full max-w-[980px] px-4 py-8 md:px-8 md:py-12">
+                {!pageHasTask ? (
+                  <>
+                    {/* EMPTY STATE */}
+                    <div className="flex min-h-[calc(100vh-190px)] flex-col justify-center">
+                      <div className="mx-auto w-full max-w-[760px]">
+                        <div className="mb-8 text-center">
+                          <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.045] text-xl shadow-2xl shadow-black/30">
+                            ✦
+                          </div>
+
+                          <h2 className="text-3xl font-semibold tracking-tight md:text-4xl">
+                            What can I automate for you?
+                          </h2>
+
+                          <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-white/35">
+                            Describe the outcome you want. ZUQEN can plan
+                            the required steps, select tools and execute the
+                            workflow.
+                          </p>
+                        </div>
+
+                        {/* COMPOSER */}
+                        <div className="rounded-[24px] border border-white/[0.11] bg-[#101114] p-3 shadow-2xl shadow-black/30">
+                          <textarea
+                            ref={textareaRef}
+                            value={input}
+                            onChange={(event) =>
+                              setInput(event.target.value)
+                            }
+                            onKeyDown={handleKeyDown}
+                            disabled={loading}
+                            rows={3}
+                            maxLength={10000}
+                            placeholder="Tell ZUQEN what you want done..."
+                            className="max-h-[220px] min-h-[120px] w-full resize-none bg-transparent px-3 py-2 text-[15px] leading-7 text-white outline-none placeholder:text-white/20"
+                          />
+
+                          <div className="mt-2 flex items-center justify-between border-t border-white/[0.07] pt-3">
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() =>
+                                  setShowExamples((value) => !value)
+                                }
+                                className="rounded-lg px-3 py-2 text-xs text-white/40 transition hover:bg-white/[0.05] hover:text-white/75"
+                              >
+                                Examples
+                              </button>
+
+                              <button
+                                onClick={() =>
+                                  setShowTools((value) => !value)
+                                }
+                                className="rounded-lg px-3 py-2 text-xs text-white/40 transition hover:bg-white/[0.05] hover:text-white/75"
+                              >
+                                Tools
+                              </button>
+                            </div>
+
+                            <div className="flex items-center gap-3">
+                              <span className="hidden text-[10px] text-white/20 sm:block">
+                                {input.length.toLocaleString()}/10,000
+                              </span>
+
+                              <button
+                                onClick={() => void runAutomation()}
+                                disabled={loading || !input.trim()}
+                                className="flex h-10 items-center gap-2 rounded-xl bg-white px-4 text-xs font-semibold text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-30"
+                              >
+                                {loading ? (
+                                  <>
+                                    <span className="animate-spin">
+                                      ◌
+                                    </span>
+                                    Starting
+                                  </>
+                                ) : (
+                                  <>
+                                    Run
+                                    <span>↑</span>
+                                  </>
+                                )}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+
+                        {showExamples && (
+                          <div className="mt-3 grid gap-2 md:grid-cols-2">
+                            {EXAMPLES.map((example) => (
+                              <button
+                                key={example}
+                                onClick={() => {
+                                  setInput(example);
+                                  setShowExamples(false);
+                                  textareaRef.current?.focus();
+                                }}
+                                className="rounded-xl border border-white/[0.07] bg-white/[0.025] p-4 text-left text-xs leading-5 text-white/45 transition hover:border-white/[0.13] hover:bg-white/[0.05] hover:text-white/70"
+                              >
+                                {example}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+
+                        {showTools && (
+                          <div className="mt-3 rounded-2xl border border-white/[0.07] bg-white/[0.025] p-4">
+                            <div className="mb-3 flex items-center justify-between">
+                              <div>
+                                <div className="text-xs font-medium text-white/75">
+                                  Automation Toolset
+                                </div>
+                                <div className="mt-1 text-[10px] text-white/25">
+                                  The planner can select tools based on the
+                                  task.
+                                </div>
+                              </div>
+
+                              <span className="text-[10px] text-white/20">
+                                {TOOL_NAMES.length} tools
+                              </span>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
+                              {TOOL_NAMES.map((toolName) => {
+                                const meta = TOOL_META[toolName];
+
+                                return (
+                                  <button
+                                    key={toolName}
+                                    onClick={() =>
+                                      setSelectedTool(
+                                        selectedTool === toolName
+                                          ? null
+                                          : toolName
+                                      )
+                                    }
+                                    className={`rounded-xl border p-3 text-left transition ${
+                                      selectedTool === toolName
+                                        ? "border-white/15 bg-white/[0.08]"
+                                        : "border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.05]"
+                                    }`}
+                                  >
+                                    <div className="flex items-center gap-2">
+                                      <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-white/[0.06] text-xs text-white/65">
+                                        {meta.icon}
+                                      </span>
+
+                                      <span className="text-[11px] font-medium text-white/65">
+                                        {meta.label}
+                                      </span>
+                                    </div>
+
+                                    {selectedTool === toolName && (
+                                      <p className="mt-2 text-[9px] leading-4 text-white/25">
+                                        {meta.description}
+                                      </p>
+                                    )}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="mt-6 text-center text-[10px] text-white/15">
+                          Automation Mode is an independent execution
+                          system. It does not automatically orchestrate
+                          ZUQEN&apos;s Website Builder, Image Generator,
+                          Video Generator or Voice Generator.
+                        </div>
                       </div>
                     </div>
-                  )
+                  </>
+                ) : (
+                  <>
+                    {/* ACTIVE TASK */}
+                    <div className="mb-8">
+                      <div className="mb-3 flex items-center gap-2 text-[10px] uppercase tracking-[0.18em] text-white/20">
+                        <span>Automation Task</span>
+                        <span>•</span>
+                        <span>{formatDate(task.created_at)}</span>
+                      </div>
+
+                      <h2 className="max-w-4xl text-2xl font-semibold leading-tight tracking-tight md:text-3xl">
+                        {task.title}
+                      </h2>
+
+                      <p className="mt-4 max-w-4xl whitespace-pre-wrap text-sm leading-7 text-white/45">
+                        {task.prompt}
+                      </p>
+                    </div>
+
+                    {/* STATUS BAR */}
+                    <div className="mb-6 rounded-2xl border border-white/[0.08] bg-white/[0.025] p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-4">
+                        <div className="flex items-center gap-3">
+                          <span
+                            className={`flex h-9 w-9 items-center justify-center rounded-xl border text-sm ${statusClass(
+                              task.status
+                            )}`}
+                          >
+                            {statusIcon(task.status)}
+                          </span>
+
+                          <div>
+                            <div className="text-sm font-medium capitalize">
+                              {statusLabel(task.status)}
+                            </div>
+
+                            <div className="mt-0.5 text-[10px] text-white/25">
+                              {polling
+                                ? "Live execution updates"
+                                : "Automation state"}
+                            </div>
+                          </div>
+                        </div>
+
+                        {displaySteps.length > 0 && (
+                          <div className="text-right">
+                            <div className="text-sm font-medium">
+                              {completedSteps}/{displaySteps.length}
+                            </div>
+
+                            <div className="text-[10px] text-white/25">
+                              steps completed
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {displaySteps.length > 0 && (
+                        <div className="mt-4 h-1 overflow-hidden rounded-full bg-white/[0.06]">
+                          <div
+                            className="h-full rounded-full bg-white transition-all duration-500"
+                            style={{
+                              width: `${
+                                (completedSteps /
+                                  displaySteps.length) *
+                                100
+                              }%`,
+                            }}
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    {/* CURRENT STEP */}
+                    {runningStep && (
+                      <div className="mb-6 rounded-2xl border border-sky-400/15 bg-sky-400/[0.035] p-5">
+                        <div className="flex items-start gap-4">
+                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-sky-400/15 bg-sky-400/10 text-sky-300">
+                            {getToolMeta(runningStep.tool_name).icon}
+                          </div>
+
+                          <div className="min-w-0">
+                            <div className="text-[10px] uppercase tracking-[0.15em] text-sky-300/60">
+                              Current action
+                            </div>
+
+                            <h3 className="mt-1 text-sm font-semibold">
+                              {runningStep.name}
+                            </h3>
+
+                            <p className="mt-1 text-xs leading-5 text-white/35">
+                              {runningStep.description ||
+                                getToolMeta(runningStep.tool_name)
+                                  .description}
+                            </p>
+                          </div>
+
+                          <span className="ml-auto shrink-0 rounded-full border border-sky-400/20 bg-sky-400/10 px-2 py-1 text-[9px] uppercase tracking-wider text-sky-300">
+                            {statusLabel(runningStep.status)}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* EXECUTION STEPS */}
+                    {displaySteps.length > 0 && (
+                      <div className="mb-8">
+                        <div className="mb-3 flex items-center justify-between">
+                          <div>
+                            <h3 className="text-sm font-semibold">
+                              Execution
+                            </h3>
+                            <p className="mt-1 text-[10px] text-white/25">
+                              Planned actions and live tool state
+                            </p>
+                          </div>
+
+                          <span className="text-[10px] text-white/20">
+                            {displaySteps.length} steps
+                          </span>
+                        </div>
+
+                        <div className="space-y-2">
+                          {displaySteps.map((step, index) => {
+                            const meta = getToolMeta(step.tool_name);
+
+                            return (
+                              <div
+                                key={step.id}
+                                className={`rounded-2xl border p-4 transition ${
+                                  step.status === "running"
+                                    ? "border-sky-400/15 bg-sky-400/[0.025]"
+                                    : "border-white/[0.07] bg-white/[0.02]"
+                                }`}
+                              >
+                                <div className="flex items-start gap-3">
+                                  <div
+                                    className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border text-xs ${statusClass(
+                                      step.status
+                                    )}`}
+                                  >
+                                    {statusIcon(step.status)}
+                                  </div>
+
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <span className="text-[10px] text-white/20">
+                                        {String(
+                                          step.step_number || index + 1
+                                        ).padStart(2, "0")}
+                                      </span>
+
+                                      <h4 className="text-xs font-medium text-white/75">
+                                        {step.name}
+                                      </h4>
+
+                                      <span className="rounded-md border border-white/[0.06] bg-white/[0.025] px-2 py-0.5 text-[9px] text-white/30">
+                                        {meta.label}
+                                      </span>
+                                    </div>
+
+                                    {step.description && (
+                                      <p className="mt-2 text-[11px] leading-5 text-white/30">
+                                        {step.description}
+                                      </p>
+                                    )}
+
+                                    {step.status === "failed" &&
+                                      step.errors && (
+                                        <pre className="mt-3 overflow-x-auto rounded-xl border border-red-400/10 bg-red-400/[0.03] p-3 text-[10px] leading-5 text-red-300/70">
+                                          {safeJson(step.errors)}
+                                        </pre>
+                                      )}
+
+                                    {step.status === "completed" &&
+                                      step.output && (
+                                        <details className="mt-3">
+                                          <summary className="cursor-pointer text-[10px] text-white/25 hover:text-white/50">
+                                            View step output
+                                          </summary>
+
+                                          <pre className="mt-2 max-h-64 overflow-auto rounded-xl border border-white/[0.06] bg-black/20 p-3 text-[10px] leading-5 text-white/35">
+                                            {safeJson(step.output)}
+                                          </pre>
+                                        </details>
+                                      )}
+                                  </div>
+
+                                  <span
+                                    className={`shrink-0 rounded-full border px-2 py-1 text-[9px] capitalize ${statusClass(
+                                      step.status
+                                    )}`}
+                                  >
+                                    {statusLabel(step.status)}
+                                  </span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* PLAN */}
+                    {task.plan && (
+                      <details className="mb-8 rounded-2xl border border-white/[0.07] bg-white/[0.02]">
+                        <summary className="cursor-pointer list-none p-5">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <h3 className="text-sm font-semibold">
+                                Automation Plan
+                              </h3>
+                              <p className="mt-1 text-[10px] text-white/25">
+                                Planner output
+                              </p>
+                            </div>
+
+                            <span className="text-xs text-white/25">
+                              +
+                            </span>
+                          </div>
+                        </summary>
+
+                        <div className="border-t border-white/[0.06] p-5">
+                          <pre className="max-h-[500px] overflow-auto whitespace-pre-wrap break-words text-[11px] leading-6 text-white/35">
+                            {safeJson(task.plan)}
+                          </pre>
+                        </div>
+                      </details>
+                    )}
+
+                    {/* RESULT */}
+                    {(task.status === "completed" ||
+                      researchAnswer ||
+                      researchSources.length > 0) && (
+                      <div className="mb-8">
+                        <div className="mb-3">
+                          <h3 className="text-sm font-semibold">
+                            Result
+                          </h3>
+                          <p className="mt-1 text-[10px] text-white/25">
+                            Verified automation output
+                          </p>
+                        </div>
+
+                        <div className="rounded-2xl border border-white/[0.08] bg-white/[0.025] p-5">
+                          {researchAnswer ? (
+                            <div className="whitespace-pre-wrap text-sm leading-7 text-white/70">
+                              {researchAnswer}
+                            </div>
+                          ) : task.result ? (
+                            <pre className="max-h-[600px] overflow-auto whitespace-pre-wrap break-words text-xs leading-6 text-white/45">
+                              {safeJson(task.result)}
+                            </pre>
+                          ) : (
+                            <div className="text-sm text-white/25">
+                              Automation completed without a textual result.
+                            </div>
+                          )}
+
+                          {researchSources.length > 0 && (
+                            <div className="mt-7 border-t border-white/[0.07] pt-5">
+                              <div className="mb-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-white/25">
+                                Sources
+                              </div>
+
+                              <div className="space-y-2">
+                                {researchSources.map(
+                                  (source, index) => {
+                                    const item =
+                                      source &&
+                                      typeof source === "object"
+                                        ? (source as Record<
+                                            string,
+                                            unknown
+                                          >)
+                                        : {};
+
+                                    const title =
+                                      typeof item.title ===
+                                      "string"
+                                        ? item.title
+                                        : `Source ${index + 1}`;
+
+                                    const url =
+                                      typeof item.url ===
+                                      "string"
+                                        ? item.url
+                                        : "";
+
+                                    const snippet =
+                                      typeof item.content ===
+                                      "string"
+                                        ? item.content
+                                        : typeof item.snippet ===
+                                            "string"
+                                          ? item.snippet
+                                          : "";
+
+                                    return (
+                                      <div
+                                        key={`${url}-${index}`}
+                                        className="rounded-xl border border-white/[0.06] bg-black/10 p-4"
+                                      >
+                                        <div className="text-xs font-medium text-white/65">
+                                          {title}
+                                        </div>
+
+                                        {url && (
+                                          <div className="mt-1 truncate text-[10px] text-sky-300/50">
+                                            {url}
+                                          </div>
+                                        )}
+
+                                        {snippet && (
+                                          <p className="mt-2 line-clamp-3 text-[10px] leading-5 text-white/25">
+                                            {snippet}
+                                          </p>
+                                        )}
+                                      </div>
+                                    );
+                                  }
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* WAITING APPROVAL */}
+                    {task.status === "waiting_approval" && (
+                      <div className="mb-8 rounded-2xl border border-amber-400/15 bg-amber-400/[0.035] p-5">
+                        <div className="flex items-start gap-4">
+                          <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-amber-400/15 bg-amber-400/10 text-amber-300">
+                            !
+                          </div>
+
+                          <div>
+                            <h3 className="text-sm font-semibold">
+                              Approval required
+                            </h3>
+
+                            <p className="mt-1 text-xs leading-5 text-white/35">
+                              This automation is waiting for an approval
+                              step before continuing.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* FAILURE */}
+                    {task.status === "failed" && (
+                      <div className="mb-8 rounded-2xl border border-red-400/15 bg-red-400/[0.035] p-5">
+                        <div className="flex items-start gap-4">
+                          <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-red-400/15 bg-red-400/10 text-red-300">
+                            ×
+                          </div>
+
+                          <div className="min-w-0 flex-1">
+                            <h3 className="text-sm font-semibold">
+                              Automation failed
+                            </h3>
+
+                            <p className="mt-1 text-xs leading-5 text-white/35">
+                              The execution engine reported an error.
+                            </p>
+
+                            {task.errors && (
+                              <pre className="mt-4 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-xl border border-red-400/10 bg-black/20 p-3 text-[10px] leading-5 text-red-300/60">
+                                {safeJson(task.errors)}
+                              </pre>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* COMPOSER AGAIN */}
+                    {(task.status === "completed" ||
+                      task.status === "failed" ||
+                      task.status === "cancelled") && (
+                      <div className="mt-8">
+                        <div className="rounded-[22px] border border-white/[0.09] bg-[#101114] p-3">
+                          <textarea
+                            value={input}
+                            onChange={(event) =>
+                              setInput(event.target.value)
+                            }
+                            onKeyDown={handleKeyDown}
+                            disabled={loading}
+                            rows={2}
+                            maxLength={10000}
+                            placeholder="Run another automation..."
+                            className="min-h-[82px] w-full resize-none bg-transparent px-3 py-2 text-sm leading-6 text-white outline-none placeholder:text-white/20"
+                          />
+
+                          <div className="flex items-center justify-end border-t border-white/[0.07] pt-3">
+                            <button
+                              onClick={() => void runAutomation()}
+                              disabled={loading || !input.trim()}
+                              className="rounded-xl bg-white px-4 py-2.5 text-xs font-semibold text-black transition hover:bg-white/90 disabled:opacity-30"
+                            >
+                              Run automation ↑
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    <footer className="mt-10 border-t border-white/[0.06] pt-5 text-center text-[10px] text-white/15">
+                      ZUQEN Automation • Independent execution engine
+                    </footer>
+                  </>
                 )}
               </div>
             </div>
 
-            <div className="rounded-3xl border border-white/10 bg-white/[0.025] p-5">
-              <p className="text-xs uppercase tracking-wider text-white/30">
-                Current automation
-              </p>
-
-              {!state.task ? (
-                <p className="mt-4 text-sm leading-6 text-white/35">
-                  No automation is running. Describe the outcome you want and start a new run.
-                </p>
-              ) : (
-                <div className="mt-4 space-y-4">
-                  <div>
-                    <p className="text-[11px] text-white/25">
-                      Status
-                    </p>
-
-                    <p className="mt-1 text-sm text-white/65">
-                      {statusLabel(
-                        state.task.status
-                      )}
-                    </p>
-                  </div>
-
-                  <div>
-                    <p className="text-[11px] text-white/25">
-                      Steps
-                    </p>
-
-                    <p className="mt-1 text-sm text-white/65">
-                      {completedSteps} /{" "}
-                      {displaySteps.length}{" "}
-                      completed
-                    </p>
-                  </div>
-
-                  {loadingState && (
-                    <div className="flex items-center gap-2 text-xs text-white/35">
-                      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />
-                      Updating status...
+            {/* RIGHT DETAILS */}
+            {detailsOpen && pageHasTask && (
+              <aside className="hidden w-[285px] shrink-0 border-l border-white/[0.07] bg-[#0b0c0f] xl:block">
+                <div className="sticky top-0 p-5">
+                  <div className="mb-5">
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/20">
+                      Task Details
                     </div>
-                  )}
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3">
+                      <div className="text-[9px] uppercase tracking-wider text-white/20">
+                        Status
+                      </div>
+
+                      <div className="mt-2">
+                        <span
+                          className={`inline-flex rounded-full border px-2 py-1 text-[9px] capitalize ${statusClass(
+                            task.status
+                          )}`}
+                        >
+                          {statusLabel(task.status)}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3">
+                        <div className="text-[9px] uppercase tracking-wider text-white/20">
+                          Run
+                        </div>
+                        <div className="mt-1 text-sm text-white/70">
+                          #{run?.run_number || 1}
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3">
+                        <div className="text-[9px] uppercase tracking-wider text-white/20">
+                          Steps
+                        </div>
+                        <div className="mt-1 text-sm text-white/70">
+                          {displaySteps.length}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3">
+                      <div className="text-[9px] uppercase tracking-wider text-white/20">
+                        Created
+                      </div>
+
+                      <div className="mt-1 text-xs text-white/55">
+                        {formatDate(task.created_at)}
+                      </div>
+
+                      <div className="mt-0.5 text-[10px] text-white/20">
+                        {formatTime(task.created_at)}
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3">
+                      <div className="text-[9px] uppercase tracking-wider text-white/20">
+                        Tools selected
+                      </div>
+
+                      <div className="mt-3 space-y-2">
+                        {activeTools.length === 0 ? (
+                          <div className="text-[10px] text-white/20">
+                            Waiting for planner
+                          </div>
+                        ) : (
+                          activeTools.map((toolName) => {
+                            const meta = getToolMeta(toolName);
+
+                            return (
+                              <div
+                                key={toolName}
+                                className="flex items-center gap-2"
+                              >
+                                <span className="flex h-6 w-6 items-center justify-center rounded-md bg-white/[0.05] text-[10px] text-white/45">
+                                  {meta.icon}
+                                </span>
+
+                                <span className="text-[10px] text-white/40">
+                                  {meta.label}
+                                </span>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3">
+                      <div className="text-[9px] uppercase tracking-wider text-white/20">
+                        Task ID
+                      </div>
+
+                      <div className="mt-2 break-all font-mono text-[9px] leading-4 text-white/20">
+                        {task.id}
+                      </div>
+                    </div>
+
+                    {run?.id && (
+                      <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3">
+                        <div className="text-[9px] uppercase tracking-wider text-white/20">
+                          Run ID
+                        </div>
+
+                        <div className="mt-2 break-all font-mono text-[9px] leading-4 text-white/20">
+                          {run.id}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
-              )}
-            </div>
+              </aside>
+            )}
+          </div>
 
-            <div className="rounded-3xl border border-white/10 bg-white/[0.025] p-5">
-              <p className="text-xs uppercase tracking-wider text-white/30">
-                Important
-              </p>
+          {errorMessage && (
+            <div className="border-t border-red-400/10 bg-red-400/[0.025] px-5 py-3">
+              <div className="mx-auto flex max-w-[1200px] items-center justify-between gap-4">
+                <div className="text-xs text-red-300/75">
+                  {errorMessage}
+                </div>
 
-              <p className="mt-3 text-xs leading-6 text-white/35">
-                Automation Mode is an independent execution system. It does not automatically reuse or orchestrate the existing ZUQEN Website Builder, Image Generator, Video Generator, or Voice Generator agents.
-              </p>
+                <button
+                  onClick={() => setErrorMessage("")}
+                  className="text-xs text-white/25 hover:text-white/60"
+                >
+                  Dismiss
+                </button>
+              </div>
             </div>
-          </aside>
+          )}
         </section>
-
-        <footer className="mt-8 border-t border-white/10 pt-5 text-center text-[11px] text-white/20">
-          ZUQEN Automation • Independent automation engine
-        </footer>
       </div>
     </main>
   );
