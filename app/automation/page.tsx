@@ -372,16 +372,27 @@ function isTerminalTaskStatus(status: AutomationStatus) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* UNIVERSE BACKGROUND                                                         */
+/* UNIVERSE + STAR-TO-Z LOADING ANIMATION                                     */
 /* -------------------------------------------------------------------------- */
 
-function UniverseBackground() {
+function UniverseBackground({
+  formingZ,
+}: {
+  formingZ: boolean;
+}) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
   const pointerRef = useRef({
     x: -1000,
     y: -1000,
     active: false,
   });
+
+  const formingZRef = useRef(formingZ);
+
+  useEffect(() => {
+    formingZRef.current = formingZ;
+  }, [formingZ]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -397,34 +408,170 @@ function UniverseBackground() {
     let height = 0;
     let devicePixelRatio = 1;
 
+    let previousFormingZ = formingZ;
+    let transitionStartedAt = performance.now();
+    let transitionDirection: "forming" | "dispersing" | "none" =
+      formingZ ? "forming" : "none";
+
+    type Point = {
+      x: number;
+      y: number;
+    };
+
     type Star = {
       x: number;
       y: number;
+      homeX: number;
+      homeY: number;
       z: number;
       size: number;
       speed: number;
       phase: number;
       drift: number;
+      targetX: number;
+      targetY: number;
+      targetOffsetX: number;
+      targetOffsetY: number;
     };
 
     const stars: Star[] = [];
 
     const starCount = 420;
 
+    const getEaseOut = (value: number) => {
+      const clamped = Math.max(0, Math.min(1, value));
+      return 1 - Math.pow(1 - clamped, 3);
+    };
+
+    const getEaseInOut = (value: number) => {
+      const clamped = Math.max(0, Math.min(1, value));
+      return clamped < 0.5
+        ? 4 * clamped * clamped * clamped
+        : 1 - Math.pow(-2 * clamped + 2, 3) / 2;
+    };
+
+    const buildZTargets = (): Point[] => {
+      /*
+       * The Z is constructed geometrically instead of using a font/image.
+       * This guarantees that the loading logo is a large, unmistakable Z.
+       */
+
+      const left = width * 0.28;
+      const right = width * 0.72;
+      const top = height * 0.29;
+      const bottom = height * 0.71;
+
+      const points: Point[] = [];
+
+      const addSegment = (
+        x1: number,
+        y1: number,
+        x2: number,
+        y2: number,
+        density: number
+      ) => {
+        const distance = Math.sqrt(
+          Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2)
+        );
+
+        const count = Math.max(
+          2,
+          Math.floor(distance / density)
+        );
+
+        for (let index = 0; index <= count; index += 1) {
+          const progress = index / count;
+
+          points.push({
+            x: x1 + (x2 - x1) * progress,
+            y: y1 + (y2 - y1) * progress,
+          });
+        }
+      };
+
+      addSegment(left, top, right, top, 8);
+      addSegment(right, top, left, bottom, 8);
+      addSegment(left, bottom, right, bottom, 8);
+
+      /*
+       * Add thickness around the geometric Z so the formation feels like
+       * hundreds of stars converging into a luminous constellation.
+       */
+      const base = [...points];
+
+      for (const point of base) {
+        for (const offset of [
+          [-4, -2],
+          [4, 2],
+          [-2, 4],
+          [2, -4],
+        ]) {
+          points.push({
+            x: point.x + offset[0],
+            y: point.y + offset[1],
+          });
+        }
+      }
+
+      return points;
+    };
+
+    const assignZTargets = () => {
+      const targets = buildZTargets();
+
+      if (targets.length === 0) return;
+
+      stars.forEach((star, index) => {
+        const target = targets[index % targets.length];
+
+        star.targetX = target.x;
+        star.targetY = target.y;
+
+        /*
+         * Small deterministic-ish offsets keep the Z organic rather than
+         * looking like perfectly identical dots.
+         */
+        const angle =
+          star.phase +
+          index * 0.37;
+
+        const radius =
+          2 +
+          ((index * 17) % 11);
+
+        star.targetOffsetX =
+          Math.cos(angle) * radius;
+
+        star.targetOffsetY =
+          Math.sin(angle) * radius;
+      });
+    };
+
     const createStars = () => {
       stars.length = 0;
 
       for (let index = 0; index < starCount; index += 1) {
+        const x = Math.random() * width;
+        const y = Math.random() * height;
+
         stars.push({
-          x: Math.random() * width,
-          y: Math.random() * height,
+          x,
+          y,
+          homeX: x,
+          homeY: y,
           z: 0.2 + Math.random() * 0.8,
           size: 0.35 + Math.random() * 1.45,
           speed: 0.05 + Math.random() * 0.25,
           phase: Math.random() * Math.PI * 2,
           drift: 0.4 + Math.random() * 1.2,
+          targetX: x,
+          targetY: y,
+          targetOffsetX: 0,
+          targetOffsetY: 0,
         });
       }
+
+      assignZTargets();
     };
 
     const resize = () => {
@@ -432,10 +579,18 @@ function UniverseBackground() {
 
       width = Math.max(1, rect.width);
       height = Math.max(1, rect.height);
-      devicePixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+      devicePixelRatio = Math.min(
+        window.devicePixelRatio || 1,
+        2
+      );
 
-      canvas.width = Math.floor(width * devicePixelRatio);
-      canvas.height = Math.floor(height * devicePixelRatio);
+      canvas.width = Math.floor(
+        width * devicePixelRatio
+      );
+
+      canvas.height = Math.floor(
+        height * devicePixelRatio
+      );
 
       context.setTransform(
         devicePixelRatio,
@@ -449,7 +604,9 @@ function UniverseBackground() {
       createStars();
     };
 
-    const handlePointerMove = (event: PointerEvent) => {
+    const handlePointerMove = (
+      event: PointerEvent
+    ) => {
       pointerRef.current.x = event.clientX;
       pointerRef.current.y = event.clientY;
       pointerRef.current.active = true;
@@ -459,81 +616,409 @@ function UniverseBackground() {
       pointerRef.current.active = false;
     };
 
-    const draw = (time: number) => {
-      context.clearRect(0, 0, width, height);
-
-      const pointer = pointerRef.current;
-
-      const scrollY = window.scrollY || 0;
-
-      for (const star of stars) {
-        const twinkle =
-          0.55 +
-          Math.sin(time * 0.0015 * star.speed + star.phase) * 0.25;
-
-        let drawX = star.x;
-        let drawY = star.y - scrollY * 0.035 * star.z;
-
-        if (drawY < -10) {
-          drawY += height + 20;
-        }
-
-        if (drawY > height + 10) {
-          drawY -= height + 20;
-        }
-
-        if (pointer.active) {
-          const dx = pointer.x - drawX;
-          const dy = pointer.y - drawY;
-          const distance = Math.sqrt(dx * dx + dy * dy);
-
-          if (distance < 220) {
-            const influence = (1 - distance / 220) * star.z;
-
-            drawX += dx * influence * 0.045;
-            drawY += dy * influence * 0.045;
-          }
-        }
-
-        drawX += Math.sin(time * 0.00015 * star.drift + star.phase) * 0.8;
-        drawY += Math.cos(time * 0.00012 * star.drift + star.phase) * 0.6;
-
-        const alpha = Math.max(
-          0.12,
-          Math.min(0.9, twinkle * star.z)
-        );
-
+    const drawStar = (
+      x: number,
+      y: number,
+      radius: number,
+      alpha: number,
+      glow: boolean
+    ) => {
+      if (glow) {
         context.beginPath();
         context.arc(
-          drawX,
-          drawY,
-          star.size * star.z,
+          x,
+          y,
+          radius * 3.2,
           0,
           Math.PI * 2
         );
 
-        context.fillStyle = `rgba(255,255,255,${alpha})`;
+        context.fillStyle = `rgba(255,255,255,${alpha * 0.08})`;
         context.fill();
       }
 
-      animationFrame = requestAnimationFrame(draw);
+      context.beginPath();
+
+      context.arc(
+        x,
+        y,
+        radius,
+        0,
+        Math.PI * 2
+      );
+
+      context.fillStyle = `rgba(255,255,255,${alpha})`;
+      context.fill();
+    };
+
+    const draw = (time: number) => {
+      context.clearRect(
+        0,
+        0,
+        width,
+        height
+      );
+
+      const currentlyForming =
+        formingZRef.current;
+
+      /*
+       * Detect loading state transitions without recreating the canvas.
+       */
+      if (
+        currentlyForming !==
+        previousFormingZ
+      ) {
+        previousFormingZ =
+          currentlyForming;
+
+        transitionStartedAt =
+          time;
+
+        transitionDirection =
+          currentlyForming
+            ? "forming"
+            : "dispersing";
+
+        if (currentlyForming) {
+          assignZTargets();
+        }
+      }
+
+      let formationProgress = 0;
+
+      if (
+        transitionDirection ===
+        "forming"
+      ) {
+        formationProgress =
+          getEaseInOut(
+            (time -
+              transitionStartedAt) /
+              1550
+          );
+
+        if (
+          formationProgress >= 1
+        ) {
+          formationProgress = 1;
+        }
+      } else if (
+        transitionDirection ===
+        "dispersing"
+      ) {
+        const dispersalProgress =
+          getEaseInOut(
+            (time -
+              transitionStartedAt) /
+              1050
+          );
+
+        formationProgress =
+          1 -
+          Math.min(
+            1,
+            dispersalProgress
+          );
+
+        if (
+          dispersalProgress >=
+          1
+        ) {
+          formationProgress = 0;
+          transitionDirection =
+            "none";
+        }
+      } else {
+        formationProgress =
+          currentlyForming
+            ? 1
+            : 0;
+      }
+
+      const pointer =
+        pointerRef.current;
+
+      const scrollY =
+        window.scrollY || 0;
+
+      for (
+        let index = 0;
+        index < stars.length;
+        index += 1
+      ) {
+        const star = stars[index];
+
+        const twinkle =
+          0.55 +
+          Math.sin(
+            time *
+              0.0015 *
+              star.speed +
+              star.phase
+          ) *
+            0.25;
+
+        let universeX =
+          star.homeX;
+
+        let universeY =
+          star.homeY -
+          scrollY *
+            0.035 *
+            star.z;
+
+        if (
+          universeY <
+          -10
+        ) {
+          universeY +=
+            height + 20;
+        }
+
+        if (
+          universeY >
+          height + 10
+        ) {
+          universeY -=
+            height + 20;
+        }
+
+        universeX +=
+          Math.sin(
+            time *
+              0.00015 *
+              star.drift +
+              star.phase
+          ) *
+          0.8;
+
+        universeY +=
+          Math.cos(
+            time *
+              0.00012 *
+              star.drift +
+              star.phase
+          ) *
+          0.6;
+
+        /*
+         * Pointer parallax is only active in normal universe mode.
+         * During Z formation the constellation remains stable.
+         */
+        if (
+          formationProgress <
+          0.08 &&
+          pointer.active
+        ) {
+          const dx =
+            pointer.x -
+            universeX;
+
+          const dy =
+            pointer.y -
+            universeY;
+
+          const distance =
+            Math.sqrt(
+              dx * dx +
+                dy * dy
+            );
+
+          if (
+            distance < 220
+          ) {
+            const influence =
+              (1 -
+                distance /
+                  220) *
+              star.z;
+
+            universeX +=
+              dx *
+              influence *
+              0.045;
+
+            universeY +=
+              dy *
+              influence *
+              0.045;
+          }
+        }
+
+        const zX =
+          star.targetX +
+          star.targetOffsetX;
+
+        const zY =
+          star.targetY +
+          star.targetOffsetY;
+
+        /*
+         * The exact same stars move from their universe coordinates to
+         * the Z coordinates. No second loader canvas exists.
+         */
+        const drawX =
+          universeX +
+          (zX - universeX) *
+            formationProgress;
+
+        const drawY =
+          universeY +
+          (zY - universeY) *
+            formationProgress;
+
+        const pulse =
+          0.55 +
+          Math.sin(
+            time * 0.004 +
+              star.phase
+          ) *
+            0.35;
+
+        const alpha =
+          Math.max(
+            0.12,
+            Math.min(
+              0.98,
+              twinkle *
+                star.z +
+                formationProgress *
+                  0.25
+            )
+          );
+
+        const radius =
+          star.size *
+          star.z *
+          (1 +
+            formationProgress *
+              0.45);
+
+        drawStar(
+          drawX,
+          drawY,
+          radius *
+            (0.72 +
+              pulse *
+                0.32),
+          alpha,
+          formationProgress >
+            0.45
+        );
+      }
+
+      /*
+       * A subtle central glow is rendered by the same canvas only while
+       * the stars are forming the Z. There is no DOM overlay or loader box.
+       */
+      if (
+        formationProgress >
+        0.2
+      ) {
+        const glowProgress =
+          Math.min(
+            1,
+            formationProgress *
+              1.35
+          );
+
+        const gradient =
+          context.createRadialGradient(
+            width / 2,
+            height / 2,
+            0,
+            width / 2,
+            height / 2,
+            Math.min(
+              width,
+              height
+            ) *
+              0.42
+          );
+
+        gradient.addColorStop(
+          0,
+          `rgba(255,255,255,${
+            0.035 *
+            glowProgress
+          })`
+        );
+
+        gradient.addColorStop(
+          0.45,
+          `rgba(150,120,255,${
+            0.018 *
+            glowProgress
+          })`
+        );
+
+        gradient.addColorStop(
+          1,
+          "rgba(0,0,0,0)"
+        );
+
+        context.fillStyle =
+          gradient;
+
+        context.fillRect(
+          0,
+          0,
+          width,
+          height
+        );
+      }
+
+      animationFrame =
+        requestAnimationFrame(
+          draw
+        );
     };
 
     resize();
 
-    window.addEventListener("resize", resize);
-    window.addEventListener("pointermove", handlePointerMove, {
-      passive: true,
-    });
-    window.addEventListener("pointerleave", handlePointerLeave);
+    window.addEventListener(
+      "resize",
+      resize
+    );
 
-    animationFrame = requestAnimationFrame(draw);
+    window.addEventListener(
+      "pointermove",
+      handlePointerMove,
+      {
+        passive: true,
+      }
+    );
+
+    window.addEventListener(
+      "pointerleave",
+      handlePointerLeave
+    );
+
+    animationFrame =
+      requestAnimationFrame(
+        draw
+      );
 
     return () => {
-      cancelAnimationFrame(animationFrame);
-      window.removeEventListener("resize", resize);
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerleave", handlePointerLeave);
+      cancelAnimationFrame(
+        animationFrame
+      );
+
+      window.removeEventListener(
+        "resize",
+        resize
+      );
+
+      window.removeEventListener(
+        "pointermove",
+        handlePointerMove
+      );
+
+      window.removeEventListener(
+        "pointerleave",
+        handlePointerLeave
+      );
     };
   }, []);
 
@@ -547,475 +1032,412 @@ function UniverseBackground() {
 }
 
 /* -------------------------------------------------------------------------- */
-/* ZUQEN STAR LOADER                                                           */
-/* -------------------------------------------------------------------------- */
-
-function ZuqenStarLoader() {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-
-    if (!canvas) return;
-
-    const context = canvas.getContext("2d");
-
-    if (!context) return;
-
-    const width = 430;
-    const height = 150;
-
-    canvas.width = width * 2;
-    canvas.height = height * 2;
-
-    context.scale(2, 2);
-
-    const targetCanvas = document.createElement("canvas");
-    targetCanvas.width = width * 2;
-    targetCanvas.height = height * 2;
-
-    const targetContext = targetCanvas.getContext("2d");
-
-    if (!targetContext) return;
-
-    targetContext.scale(2, 2);
-    targetContext.clearRect(0, 0, width, height);
-
-    targetContext.fillStyle = "#ffffff";
-    targetContext.font =
-      '700 58px Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-    targetContext.textAlign = "center";
-    targetContext.textBaseline = "middle";
-    targetContext.letterSpacing = "2px";
-    targetContext.fillText("ZUQEN", width / 2, height / 2);
-
-    const imageData = targetContext.getImageData(
-      0,
-      0,
-      width * 2,
-      height * 2
-    );
-
-    const targetPoints: Array<{
-      x: number;
-      y: number;
-    }> = [];
-
-    for (
-      let y = 0;
-      y < height * 2;
-      y += 5
-    ) {
-      for (
-        let x = 0;
-        x < width * 2;
-        x += 5
-      ) {
-        const alpha =
-          imageData.data[
-            (y * width * 2 + x) * 4 + 3
-          ];
-
-        if (alpha > 100) {
-          targetPoints.push({
-            x: x / 2,
-            y: y / 2,
-          });
-        }
-      }
-    }
-
-    const particles = Array.from(
-      { length: 210 },
-      (_, index) => ({
-        x: Math.random() * width,
-        y: Math.random() * height,
-        vx: 0,
-        vy: 0,
-        target:
-          targetPoints[index % targetPoints.length],
-        phase: Math.random() * Math.PI * 2,
-        size: 0.5 + Math.random() * 1.3,
-      })
-    );
-
-    let frame = 0;
-    const startedAt = performance.now();
-
-    const animate = (now: number) => {
-      const elapsed = now - startedAt;
-
-      context.clearRect(0, 0, width, height);
-
-      const progress = Math.min(
-        1,
-        Math.max(0, (elapsed - 250) / 1500)
-      );
-
-      const eased =
-        1 - Math.pow(1 - progress, 3);
-
-      for (const particle of particles) {
-        const targetX = particle.target.x;
-        const targetY = particle.target.y;
-
-        const pull =
-          0.012 + eased * 0.12;
-
-        particle.vx +=
-          (targetX - particle.x) * pull;
-
-        particle.vy +=
-          (targetY - particle.y) * pull;
-
-        particle.vx *= 0.87;
-        particle.vy *= 0.87;
-
-        particle.x += particle.vx;
-        particle.y += particle.vy;
-
-        const pulse =
-          0.55 +
-          Math.sin(
-            now * 0.004 + particle.phase
-          ) *
-            0.35;
-
-        const alpha =
-          0.22 + eased * 0.7;
-
-        context.beginPath();
-
-        context.arc(
-          particle.x,
-          particle.y,
-          particle.size *
-            (0.7 + pulse * 0.45),
-          0,
-          Math.PI * 2
-        );
-
-        context.fillStyle = `rgba(255,255,255,${alpha})`;
-        context.fill();
-      }
-
-      frame = requestAnimationFrame(animate);
-    };
-
-    frame = requestAnimationFrame(animate);
-
-    return () => {
-      cancelAnimationFrame(frame);
-    };
-  }, []);
-
-  return (
-    <div className="relative flex h-[190px] w-[470px] max-w-[90vw] items-center justify-center">
-      <div className="absolute h-36 w-80 rounded-full bg-white/[0.025] blur-3xl" />
-
-      <canvas
-        ref={canvasRef}
-        width={860}
-        height={300}
-        className="relative h-[150px] w-[430px] max-w-full"
-        aria-hidden="true"
-      />
-    </div>
-  );
-}
-
-function LoadingOverlay({
-  label,
-}: {
-  label: string;
-}) {
-  return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#020305]/75 px-6 backdrop-blur-md">
-      <div className="flex flex-col items-center justify-center">
-        <ZuqenStarLoader />
-
-        <div className="mt-1 text-center">
-          <div className="text-sm font-medium tracking-wide text-white/80">
-            {label}
-          </div>
-
-          <div className="mt-2 text-[10px] uppercase tracking-[0.28em] text-white/25">
-            ZUQEN Automation Engine
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* -------------------------------------------------------------------------- */
 /* PAGE                                                                        */
 /* -------------------------------------------------------------------------- */
 
 export default function AutomationPage() {
-  const [input, setInput] = useState("");
-  const [task, setTask] = useState<AutomationTask | null>(null);
-  const [run, setRun] = useState<AutomationRun | null>(null);
-  const [steps, setSteps] = useState<AutomationStep[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [polling, setPolling] = useState(false);
-  const [errorMessage, setErrorMessage] = useState("");
-  const [showExamples, setShowExamples] = useState(false);
-  const [showTools, setShowTools] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [detailsOpen, setDetailsOpen] = useState(true);
-  const [history, setHistory] = useState<AutomationTask[]>([]);
-  const [historyLoading, setHistoryLoading] = useState(false);
-  const [selectedTool, setSelectedTool] = useState<string | null>(null);
-  const [deletingTaskId, setDeletingTaskId] = useState<string | null>(
-    null
-  );
+  const [input, setInput] =
+    useState("");
+
+  const [task, setTask] =
+    useState<AutomationTask | null>(
+      null
+    );
+
+  const [run, setRun] =
+    useState<AutomationRun | null>(
+      null
+    );
+
+  const [steps, setSteps] =
+    useState<AutomationStep[]>(
+      []
+    );
+
+  const [loading, setLoading] =
+    useState(false);
+
+  const [polling, setPolling] =
+    useState(false);
+
+  const [errorMessage, setErrorMessage] =
+    useState("");
+
+  const [showExamples, setShowExamples] =
+    useState(false);
+
+  const [showTools, setShowTools] =
+    useState(false);
+
+  const [sidebarOpen, setSidebarOpen] =
+    useState(true);
+
+  const [detailsOpen, setDetailsOpen] =
+    useState(true);
+
+  const [history, setHistory] =
+    useState<AutomationTask[]>(
+      []
+    );
+
+  const [historyLoading, setHistoryLoading] =
+    useState(false);
+
+  const [selectedTool, setSelectedTool] =
+    useState<string | null>(null);
+
+  const [deletingTaskId, setDeletingTaskId] =
+    useState<string | null>(null);
 
   const textareaRef =
-    useRef<HTMLTextAreaElement | null>(null);
+    useRef<HTMLTextAreaElement | null>(
+      null
+    );
 
   const pollTimerRef =
-    useRef<ReturnType<typeof setInterval> | null>(null);
+    useRef<ReturnType<
+      typeof setInterval
+    > | null>(null);
 
-  const getAutomationSession = useCallback(
-    async (): Promise<SessionResult> => {
-      const {
-        data: { session },
-        error,
-      } = await supabase.auth.getSession();
+  /*
+   * This is the ONLY visual loading state used by the universe animation.
+   * Background polling/history synchronization deliberately does not hide
+   * the UI because those operations are non-blocking background work.
+   */
+  const starLoading =
+    loading ||
+    deletingTaskId !== null;
 
-      if (error) {
-        throw new Error(error.message);
-      }
+  const getAutomationSession =
+    useCallback(
+      async (): Promise<SessionResult> => {
+        const {
+          data: { session },
+          error,
+        } =
+          await supabase.auth.getSession();
 
-      if (!session?.access_token || !session.user?.id) {
-        throw new Error(
-          "Your ZUQEN session is not available. Please refresh the page and try again."
-        );
-      }
-
-      return {
-        accessToken: session.access_token,
-        userId: session.user.id,
-      };
-    },
-    []
-  );
-
-  const automationHeaders = useCallback(
-    (accessToken: string) => {
-      return {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${accessToken}`,
-      };
-    },
-    []
-  );
-
-  const loadHistory = useCallback(async () => {
-    try {
-      setHistoryLoading(true);
-
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
-      if (!user) {
-        setHistory([]);
-        return;
-      }
-
-      const { data, error } = await supabase
-        .from("automation_tasks")
-        .select(
-          "id,user_id,title,prompt,status,priority,plan,context,result,errors,created_at,updated_at"
-        )
-        .eq("user_id", user.id)
-        .order("updated_at", {
-          ascending: false,
-        })
-        .limit(30);
-
-      if (error) {
-        console.error(
-          "Automation history error:",
-          error
-        );
-
-        setErrorMessage(
-          `Unable to load automation history: ${error.message}`
-        );
-
-        return;
-      }
-
-      setHistory(
-        (data || []) as AutomationTask[]
-      );
-    } finally {
-      setHistoryLoading(false);
-    }
-  }, []);
-
-  const loadAutomationState = useCallback(
-    async (
-      taskId: string,
-      runId: string
-    ) => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
-      if (!user) {
-        throw new Error(
-          "Authentication required."
-        );
-      }
-
-      const [
-        taskResponse,
-        runResponse,
-        stepsResponse,
-      ] = await Promise.all([
-        supabase
-          .from("automation_tasks")
-          .select("*")
-          .eq("id", taskId)
-          .eq("user_id", user.id)
-          .single(),
-
-        supabase
-          .from("automation_runs")
-          .select("*")
-          .eq("id", runId)
-          .eq("task_id", taskId)
-          .eq("user_id", user.id)
-          .single(),
-
-        supabase
-          .from("automation_steps")
-          .select("*")
-          .eq("run_id", runId)
-          .eq("task_id", taskId)
-          .order("step_number", {
-            ascending: true,
-          }),
-      ]);
-
-      if (taskResponse.error) {
-        throw new Error(
-          taskResponse.error.message
-        );
-      }
-
-      if (runResponse.error) {
-        throw new Error(
-          runResponse.error.message
-        );
-      }
-
-      if (stepsResponse.error) {
-        throw new Error(
-          stepsResponse.error.message
-        );
-      }
-
-      const nextTask =
-        taskResponse.data as AutomationTask;
-
-      const nextRun =
-        runResponse.data as AutomationRun;
-
-      const nextSteps =
-        (stepsResponse.data || []) as AutomationStep[];
-
-      setTask(nextTask);
-      setRun(nextRun);
-      setSteps(nextSteps);
-
-      return {
-        task: nextTask,
-        run: nextRun,
-        steps: nextSteps,
-      };
-    },
-    []
-  );
-
-  const stopPolling = useCallback(() => {
-    if (pollTimerRef.current) {
-      clearInterval(
-        pollTimerRef.current
-      );
-
-      pollTimerRef.current = null;
-    }
-
-    setPolling(false);
-  }, []);
-
-  const startPolling = useCallback(
-    (
-      taskId: string,
-      runId: string
-    ) => {
-      stopPolling();
-
-      setPolling(true);
-
-      const startedAt = Date.now();
-
-      const poll = async () => {
-        try {
-          const state =
-            await loadAutomationState(
-              taskId,
-              runId
-            );
-
-          if (
-            isTerminalTaskStatus(
-              state.task.status
-            )
-          ) {
-            stopPolling();
-
-            await loadHistory();
-
-            return;
-          }
-
-          if (
-            Date.now() - startedAt >
-            5 * 60 * 1000
-          ) {
-            stopPolling();
-
-            setErrorMessage(
-              "Automation is taking longer than expected. You can continue monitoring this task from history."
-            );
-          }
-        } catch (error) {
-          console.error(
-            "Automation polling error:",
-            error
+        if (error) {
+          throw new Error(
+            error.message
           );
         }
-      };
 
-      void poll();
+        if (
+          !session?.access_token ||
+          !session.user?.id
+        ) {
+          throw new Error(
+            "Your ZUQEN session is not available. Please refresh the page and try again."
+          );
+        }
 
-      pollTimerRef.current =
-        setInterval(() => {
-          void poll();
-        }, 1500);
-    },
-    [
-      loadAutomationState,
-      loadHistory,
-      stopPolling,
-    ]
-  );
+        return {
+          accessToken:
+            session.access_token,
+          userId:
+            session.user.id,
+        };
+      },
+      []
+    );
+
+  const automationHeaders =
+    useCallback(
+      (
+        accessToken: string
+      ) => {
+        return {
+          "Content-Type":
+            "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        };
+      },
+      []
+    );
+
+  const loadHistory =
+    useCallback(async () => {
+      try {
+        setHistoryLoading(
+          true
+        );
+
+        const {
+          data: { user },
+        } =
+          await supabase.auth.getUser();
+
+        if (!user) {
+          setHistory([]);
+          return;
+        }
+
+        const {
+          data,
+          error,
+        } =
+          await supabase
+            .from(
+              "automation_tasks"
+            )
+            .select(
+              "id,user_id,title,prompt,status,priority,plan,context,result,errors,created_at,updated_at"
+            )
+            .eq(
+              "user_id",
+              user.id
+            )
+            .order(
+              "updated_at",
+              {
+                ascending:
+                  false,
+              }
+            )
+            .limit(30);
+
+        if (error) {
+          console.error(
+            "Automation history error:",
+            error
+          );
+
+          setErrorMessage(
+            `Unable to load automation history: ${error.message}`
+          );
+
+          return;
+        }
+
+        setHistory(
+          (data ||
+            []) as AutomationTask[]
+        );
+      } finally {
+        setHistoryLoading(
+          false
+        );
+      }
+    }, []);
+
+  const loadAutomationState =
+    useCallback(
+      async (
+        taskId: string,
+        runId: string
+      ) => {
+        const {
+          data: { user },
+        } =
+          await supabase.auth.getUser();
+
+        if (!user) {
+          throw new Error(
+            "Authentication required."
+          );
+        }
+
+        const [
+          taskResponse,
+          runResponse,
+          stepsResponse,
+        ] =
+          await Promise.all([
+            supabase
+              .from(
+                "automation_tasks"
+              )
+              .select("*")
+              .eq(
+                "id",
+                taskId
+              )
+              .eq(
+                "user_id",
+                user.id
+              )
+              .single(),
+
+            supabase
+              .from(
+                "automation_runs"
+              )
+              .select("*")
+              .eq(
+                "id",
+                runId
+              )
+              .eq(
+                "task_id",
+                taskId
+              )
+              .eq(
+                "user_id",
+                user.id
+              )
+              .single(),
+
+            supabase
+              .from(
+                "automation_steps"
+              )
+              .select("*")
+              .eq(
+                "run_id",
+                runId
+              )
+              .eq(
+                "task_id",
+                taskId
+              )
+              .order(
+                "step_number",
+                {
+                  ascending:
+                    true,
+                }
+              ),
+          ]);
+
+        if (taskResponse.error) {
+          throw new Error(
+            taskResponse.error.message
+          );
+        }
+
+        if (runResponse.error) {
+          throw new Error(
+            runResponse.error.message
+          );
+        }
+
+        if (
+          stepsResponse.error
+        ) {
+          throw new Error(
+            stepsResponse.error.message
+          );
+        }
+
+        const nextTask =
+          taskResponse.data as AutomationTask;
+
+        const nextRun =
+          runResponse.data as AutomationRun;
+
+        const nextSteps =
+          (stepsResponse.data ||
+            []) as AutomationStep[];
+
+        setTask(
+          nextTask
+        );
+
+        setRun(
+          nextRun
+        );
+
+        setSteps(
+          nextSteps
+        );
+
+        return {
+          task: nextTask,
+          run: nextRun,
+          steps: nextSteps,
+        };
+      },
+      []
+    );
+
+  const stopPolling =
+    useCallback(() => {
+      if (
+        pollTimerRef.current
+      ) {
+        clearInterval(
+          pollTimerRef.current
+        );
+
+        pollTimerRef.current =
+          null;
+      }
+
+      setPolling(false);
+    }, []);
+
+  const startPolling =
+    useCallback(
+      (
+        taskId: string,
+        runId: string
+      ) => {
+        stopPolling();
+
+        setPolling(
+          true
+        );
+
+        const startedAt =
+          Date.now();
+
+        const poll =
+          async () => {
+            try {
+              const state =
+                await loadAutomationState(
+                  taskId,
+                  runId
+                );
+
+              if (
+                isTerminalTaskStatus(
+                  state.task.status
+                )
+              ) {
+                stopPolling();
+
+                await loadHistory();
+
+                return;
+              }
+
+              if (
+                Date.now() -
+                  startedAt >
+                5 * 60 * 1000
+              ) {
+                stopPolling();
+
+                setErrorMessage(
+                  "Automation is taking longer than expected. You can continue monitoring this task from history."
+                );
+              }
+            } catch (error) {
+              console.error(
+                "Automation polling error:",
+                error
+              );
+            }
+          };
+
+        void poll();
+
+        pollTimerRef.current =
+          setInterval(
+            () => {
+              void poll();
+            },
+            1500
+          );
+      },
+      [
+        loadAutomationState,
+        loadHistory,
+        stopPolling,
+      ]
+    );
 
   useEffect(() => {
     void loadHistory();
@@ -1029,7 +1451,9 @@ export default function AutomationPage() {
   ]);
 
   useEffect(() => {
-    if (!textareaRef.current) {
+    if (
+      !textareaRef.current
+    ) {
       return;
     }
 
@@ -1037,14 +1461,26 @@ export default function AutomationPage() {
       "auto";
 
     textareaRef.current.style.height = `${Math.min(
-      textareaRef.current.scrollHeight,
+      textareaRef.current
+        .scrollHeight,
       220
     )}px`;
   }, [input]);
 
+  /*
+   * When the UI disappears into the universe, remove keyboard focus from
+   * the textarea so invisible controls cannot continue receiving input.
+   */
+  useEffect(() => {
+    if (starLoading) {
+      textareaRef.current?.blur();
+    }
+  }, [starLoading]);
+
   const runAutomation =
     useCallback(async () => {
-      const prompt = input.trim();
+      const prompt =
+        input.trim();
 
       if (!prompt) {
         setErrorMessage(
@@ -1056,7 +1492,10 @@ export default function AutomationPage() {
         return;
       }
 
-      if (prompt.length > 10000) {
+      if (
+        prompt.length >
+        10000
+      ) {
         setErrorMessage(
           "Automation prompt cannot exceed 10,000 characters."
         );
@@ -1065,34 +1504,44 @@ export default function AutomationPage() {
       }
 
       try {
-        setLoading(true);
-        setErrorMessage("");
+        setLoading(
+          true
+        );
+
+        setErrorMessage(
+          ""
+        );
 
         stopPolling();
 
         const {
           accessToken,
-        } = await getAutomationSession();
+        } =
+          await getAutomationSession();
 
         const response =
           await fetch(
             "/api/automation",
             {
-              method: "POST",
+              method:
+                "POST",
               headers:
                 automationHeaders(
                   accessToken
                 ),
-              body: JSON.stringify({
-                prompt,
-                title:
-                  prompt.length > 80
-                    ? `${prompt.slice(
-                        0,
-                        80
-                      )}…`
-                    : prompt,
-              }),
+              body: JSON.stringify(
+                {
+                  prompt,
+                  title:
+                    prompt.length >
+                    80
+                      ? `${prompt.slice(
+                          0,
+                          80
+                        )}…`
+                      : prompt,
+                }
+              ),
             }
           );
 
@@ -1103,7 +1552,9 @@ export default function AutomationPage() {
               () => null
             );
 
-        if (!response.ok) {
+        if (
+          !response.ok
+        ) {
           const responseData =
             data &&
             typeof data ===
@@ -1144,7 +1595,10 @@ export default function AutomationPage() {
             ? responseData.runId
             : "";
 
-        if (!taskId || !runId) {
+        if (
+          !taskId ||
+          !runId
+        ) {
           throw new Error(
             "Automation API did not return taskId/runId."
           );
@@ -1161,15 +1615,18 @@ export default function AutomationPage() {
           await fetch(
             "/api/automation/execute",
             {
-              method: "POST",
+              method:
+                "POST",
               headers:
                 automationHeaders(
                   accessToken
                 ),
-              body: JSON.stringify({
-                taskId,
-                runId,
-              }),
+              body: JSON.stringify(
+                {
+                  taskId,
+                  runId,
+                }
+              ),
             }
           );
 
@@ -1180,7 +1637,28 @@ export default function AutomationPage() {
               () => null
             );
 
-        if (!executeResponse.ok) {
+        if (
+          !executeResponse.ok
+        ) {
+          /*
+           * Refresh the task before throwing so a backend failure becomes
+           * visible in the normal task UI after the star animation ends.
+           */
+          try {
+            await loadAutomationState(
+              taskId,
+              runId
+            );
+          } catch {
+            // Preserve the actual execution error below.
+          }
+
+          try {
+            await loadHistory();
+          } catch {
+            // Preserve the actual execution error below.
+          }
+
           const executeObject =
             executeData &&
             typeof executeData ===
@@ -1233,7 +1711,9 @@ export default function AutomationPage() {
             : "Something went wrong while starting automation."
         );
       } finally {
-        setLoading(false);
+        setLoading(
+          false
+        );
       }
     }, [
       input,
@@ -1264,7 +1744,9 @@ export default function AutomationPage() {
             historyTask.id
           );
 
-          setErrorMessage("");
+          setErrorMessage(
+            ""
+          );
 
           const {
             data: { user },
@@ -1294,8 +1776,8 @@ export default function AutomationPage() {
           }
 
           /*
-           * Delete children first so the operation also works
-           * when the database foreign keys do not use ON DELETE CASCADE.
+           * Children first so this also works when foreign keys are not
+           * configured with ON DELETE CASCADE.
            */
 
           const {
@@ -1312,7 +1794,9 @@ export default function AutomationPage() {
                 historyTask.id
               );
 
-          if (stepsDeleteError) {
+          if (
+            stepsDeleteError
+          ) {
             throw new Error(
               `Unable to delete automation steps: ${stepsDeleteError.message}`
             );
@@ -1336,7 +1820,9 @@ export default function AutomationPage() {
                 user.id
               );
 
-          if (runsDeleteError) {
+          if (
+            runsDeleteError
+          ) {
             throw new Error(
               `Unable to delete automation runs: ${runsDeleteError.message}`
             );
@@ -1360,7 +1846,9 @@ export default function AutomationPage() {
                 user.id
               );
 
-          if (taskDeleteError) {
+          if (
+            taskDeleteError
+          ) {
             throw new Error(
               `Unable to delete automation task: ${taskDeleteError.message}`
             );
@@ -1381,11 +1869,25 @@ export default function AutomationPage() {
           ) {
             stopPolling();
 
-            setTask(null);
-            setRun(null);
-            setSteps([]);
-            setSelectedTool(null);
-            setInput("");
+            setTask(
+              null
+            );
+
+            setRun(
+              null
+            );
+
+            setSteps(
+              []
+            );
+
+            setSelectedTool(
+              null
+            );
+
+            setInput(
+              ""
+            );
           }
         } catch (error) {
           console.error(
@@ -1399,7 +1901,9 @@ export default function AutomationPage() {
               : "Unable to delete automation task."
           );
         } finally {
-          setDeletingTaskId(null);
+          setDeletingTaskId(
+            null
+          );
         }
       },
       [
@@ -1414,7 +1918,9 @@ export default function AutomationPage() {
         historyTask: AutomationTask
       ) => {
         try {
-          setErrorMessage("");
+          setErrorMessage(
+            ""
+          );
 
           const {
             data: { user },
@@ -1472,8 +1978,13 @@ export default function AutomationPage() {
               historyTask
             );
 
-            setRun(null);
-            setSteps([]);
+            setRun(
+              null
+            );
+
+            setSteps(
+              []
+            );
 
             return;
           }
@@ -1534,18 +2045,44 @@ export default function AutomationPage() {
     useCallback(() => {
       stopPolling();
 
-      setTask(null);
-      setRun(null);
-      setSteps([]);
-      setInput("");
-      setErrorMessage("");
-      setSelectedTool(null);
-      setShowExamples(false);
-      setShowTools(false);
+      setTask(
+        null
+      );
 
-      window.setTimeout(() => {
-        textareaRef.current?.focus();
-      }, 50);
+      setRun(
+        null
+      );
+
+      setSteps(
+        []
+      );
+
+      setInput(
+        ""
+      );
+
+      setErrorMessage(
+        ""
+      );
+
+      setSelectedTool(
+        null
+      );
+
+      setShowExamples(
+        false
+      );
+
+      setShowTools(
+        false
+      );
+
+      window.setTimeout(
+        () => {
+          textareaRef.current?.focus();
+        },
+        50
+      );
     }, [stopPolling]);
 
   const planSteps =
@@ -1558,7 +2095,10 @@ export default function AutomationPage() {
   const displaySteps =
     useMemo<AutomationStep[]>(
       () => {
-        if (steps.length > 0) {
+        if (
+          steps.length >
+          0
+        ) {
           return steps;
         }
 
@@ -1569,7 +2109,8 @@ export default function AutomationPage() {
           ) => ({
             id: `plan-${index}`,
             run_id:
-              run?.id || "",
+              run?.id ||
+              "",
             step_number:
               step.step_number ||
               index + 1,
@@ -1652,32 +2193,49 @@ export default function AutomationPage() {
         new Set<string>();
 
       for (const step of displaySteps) {
-        if (step.tool_name) {
+        if (
+          step.tool_name
+        ) {
           names.add(
             step.tool_name
           );
         }
       }
 
-      return Array.from(names);
+      return Array.from(
+        names
+      );
     }, [displaySteps]);
 
   const pageHasTask =
     task !== null;
 
-  const showLoadingOverlay =
-    loading ||
-    historyLoading ||
-    deletingTaskId !== null;
-
   return (
     <main className="relative min-h-screen overflow-hidden bg-[#020305] text-white">
-      <UniverseBackground />
+      {/* ------------------------------------------------------------------ */}
+      {/* BACKGROUND                                                         */}
+      {/* ------------------------------------------------------------------ */}
 
-      {/* Deep-space atmosphere */}
+      <UniverseBackground
+        formingZ={starLoading}
+      />
+
       <div className="pointer-events-none fixed inset-0 z-[1] bg-[radial-gradient(circle_at_50%_18%,rgba(100,80,180,0.10),transparent_32%),radial-gradient(circle_at_12%_80%,rgba(40,100,180,0.07),transparent_30%),radial-gradient(circle_at_90%_65%,rgba(140,70,190,0.06),transparent_28%)]" />
 
-      <div className="relative z-10 flex min-h-screen">
+      {/* ------------------------------------------------------------------ */}
+      {/* NORMAL UI                                                           */}
+      {/* ------------------------------------------------------------------ */}
+
+      <div
+        className={`relative z-10 flex min-h-screen transition-opacity duration-300 ${
+          starLoading
+            ? "pointer-events-none select-none opacity-0"
+            : "opacity-100"
+        }`}
+        aria-hidden={
+          starLoading
+        }
+      >
         {/* LEFT SIDEBAR */}
         <aside
           className={`${
@@ -1827,8 +2385,8 @@ export default function AutomationPage() {
                         >
                           {deletingTaskId ===
                           item.id ? (
-                            <span className="animate-spin text-[11px]">
-                              ◌
+                            <span className="text-[11px]">
+                              ×
                             </span>
                           ) : (
                             "×"
@@ -1931,6 +2489,7 @@ export default function AutomationPage() {
                         <div className="mb-8 text-center">
                           <div className="relative mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.035] shadow-2xl shadow-black/40">
                             <span className="absolute inset-0 rounded-2xl bg-white/[0.03] blur-xl" />
+
                             <span className="relative text-2xl text-white">
                               ✦
                             </span>
@@ -2036,21 +2595,10 @@ export default function AutomationPage() {
                                 }
                                 className="flex h-10 items-center gap-2 rounded-xl bg-white px-4 text-xs font-semibold text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-30"
                               >
-                                {loading ? (
-                                  <>
-                                    <span className="animate-spin">
-                                      ◌
-                                    </span>
-                                    Running
-                                  </>
-                                ) : (
-                                  <>
-                                    Run
-                                    <span>
-                                      ↑
-                                    </span>
-                                  </>
-                                )}
+                                Run
+                                <span>
+                                  ↑
+                                </span>
                               </button>
                             </div>
                           </div>
@@ -2197,9 +2745,11 @@ export default function AutomationPage() {
                         <span>
                           Automation Task
                         </span>
+
                         <span>
                           •
                         </span>
+
                         <span>
                           {formatDate(
                             task.created_at
@@ -2942,23 +3492,12 @@ export default function AutomationPage() {
                         }
                         className="flex w-full items-center justify-center gap-2 rounded-xl border border-red-400/10 bg-red-400/[0.035] px-3 py-3 text-xs text-red-300/65 transition hover:border-red-400/20 hover:bg-red-400/[0.07] hover:text-red-300 disabled:opacity-40"
                       >
-                        {deletingTaskId ===
-                        task.id ? (
-                          <>
-                            <span className="animate-spin">
-                              ◌
-                            </span>
-                            Deleting...
-                          </>
-                        ) : (
-                          <>
-                            <span>
-                              ×
-                            </span>
-                            Delete
-                            automation
-                          </>
-                        )}
+                        <span>
+                          ×
+                        </span>
+
+                        Delete
+                        automation
                       </button>
                     </div>
                   </div>
@@ -2975,13 +3514,17 @@ export default function AutomationPage() {
                   </div>
 
                   <div className="mt-1 break-words text-xs text-red-300/80">
-                    {errorMessage}
+                    {
+                      errorMessage
+                    }
                   </div>
                 </div>
 
                 <button
                   onClick={() =>
-                    setErrorMessage("")
+                    setErrorMessage(
+                      ""
+                    )
                   }
                   className="shrink-0 text-xs text-white/25 hover:text-white/60"
                 >
@@ -2992,19 +3535,6 @@ export default function AutomationPage() {
           )}
         </section>
       </div>
-
-      {showLoadingOverlay && (
-        <LoadingOverlay
-          label={
-            deletingTaskId
-              ? "Deleting automation"
-              : historyLoading &&
-                  !loading
-                ? "Loading automation"
-                : "Executing automation"
-          }
-        />
-      )}
     </main>
   );
 }
