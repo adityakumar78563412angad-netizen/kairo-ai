@@ -2,6 +2,7 @@ import type {
   AutomationPlanStep,
 } from "@/lib/automation/planner";
 
+import { executeFileWrite } from "@/lib/automation/tools/file-write";
 import { executeFileRead } from "@/lib/automation/tools/file-read";
 
 import {
@@ -422,17 +423,14 @@ file_read: {
   },
 },
 
-  file_write: {
-    name: "file_write",
-
-    execute: async () => ({
-      success: false,
-      error:
-        'Automation tool "file_write" is not connected yet.',
-      errorCode:
-        "TOOL_NOT_CONNECTED",
-    }),
+ file_write: {
+  name: "file_write",
+  execute: async (input, context) => {
+    return executeFileWrite(input, {
+      userId: context.userId,
+    });
   },
+},
 
  document: {
   name: "document",
