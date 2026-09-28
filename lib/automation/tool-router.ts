@@ -3,12 +3,20 @@ import type {
 } from "@/lib/automation/planner";
 
 import {
+  executeDocument,
+} from "@/lib/automation/tools/document";
+
+import {
   executeWebSearch,
 } from "@/lib/automation/tools/web-search";
 
 import {
   executeWebResearch,
 } from "@/lib/automation/tools/web-research";
+
+import {
+  executeDataTransform,
+} from "@/lib/automation/tools/data-transform";
 
 export type ToolExecutionContext = {
   taskId: string;
@@ -25,25 +33,13 @@ export type ToolExecutionResult = {
 };
 
 export type AutomationTool = {
-  name: AutomationPlanStep["tool_name"];
+  name: string;
 
   execute: (
     step: AutomationPlanStep,
     context: ToolExecutionContext
   ) => Promise<ToolExecutionResult>;
 };
-
-async function unavailableTool(
-  toolName: string
-): Promise<ToolExecutionResult> {
-  return {
-    success: false,
-    error:
-      `Automation tool "${toolName}" is not connected yet.`,
-    errorCode:
-      "TOOL_NOT_CONNECTED",
-  };
-}
 
 function getInput(
   step: AutomationPlanStep
@@ -95,7 +91,15 @@ function getSearchInput(
   const maxResults =
     typeof input.max_results ===
     "number"
-      ? input.max_results
+      ? Math.max(
+          1,
+          Math.min(
+            10,
+            Math.floor(
+              input.max_results
+            )
+          )
+        )
       : 5;
 
   const includeAnswer =
@@ -143,6 +147,7 @@ function getSearchInput(
       : undefined;
 
   return {
+    ...input,
     query,
     search_depth:
       searchDepth,
@@ -205,7 +210,15 @@ function getResearchInput(
   const maxResultsPerQuery =
     typeof input.max_results_per_query ===
     "number"
-      ? input.max_results_per_query
+      ? Math.max(
+          1,
+          Math.min(
+            10,
+            Math.floor(
+              input.max_results_per_query
+            )
+          )
+        )
       : 5;
 
   const includeAnswer =
@@ -247,6 +260,7 @@ function getResearchInput(
       : undefined;
 
   return {
+    ...input,
     queries,
     search_depth:
       searchDepth,
@@ -330,103 +344,170 @@ const tools: Record<
     },
   },
 
+  data_transform: {
+    name: "data_transform",
+
+    execute: async (
+      step
+    ) => {
+      const input =
+        getInput(step);
+
+      const result =
+        await executeDataTransform(
+          input
+        );
+
+      return {
+        success:
+          result.success,
+        output:
+          result.output,
+        error:
+          result.error,
+        errorCode:
+          result.errorCode,
+      };
+    },
+  },
+
   browser: {
     name: "browser",
 
-    execute: async () =>
-      unavailableTool(
-        "browser"
-      ),
+    execute: async () => ({
+      success: false,
+      error:
+        'Automation tool "browser" is not connected yet.',
+      errorCode:
+        "TOOL_NOT_CONNECTED",
+    }),
   },
 
   email: {
     name: "email",
 
-    execute: async () =>
-      unavailableTool(
-        "email"
-      ),
+    execute: async () => ({
+      success: false,
+      error:
+        'Automation tool "email" is not connected yet.',
+      errorCode:
+        "TOOL_NOT_CONNECTED",
+    }),
   },
 
   calendar: {
     name: "calendar",
 
-    execute: async () =>
-      unavailableTool(
-        "calendar"
-      ),
+    execute: async () => ({
+      success: false,
+      error:
+        'Automation tool "calendar" is not connected yet.',
+      errorCode:
+        "TOOL_NOT_CONNECTED",
+    }),
   },
 
   file_read: {
     name: "file_read",
 
-    execute: async () =>
-      unavailableTool(
-        "file_read"
-      ),
+    execute: async () => ({
+      success: false,
+      error:
+        'Automation tool "file_read" is not connected yet.',
+      errorCode:
+        "TOOL_NOT_CONNECTED",
+    }),
   },
 
   file_write: {
     name: "file_write",
 
-    execute: async () =>
-      unavailableTool(
-        "file_write"
-      ),
+    execute: async () => ({
+      success: false,
+      error:
+        'Automation tool "file_write" is not connected yet.',
+      errorCode:
+        "TOOL_NOT_CONNECTED",
+    }),
   },
 
-  document: {
-    name: "document",
+ document: {
+  name: "document",
 
-    execute: async () =>
-      unavailableTool(
-        "document"
-      ),
+  execute: async (
+    step
+  ) => {
+    const input =
+      getInput(step);
+
+    const result =
+      await executeDocument(
+        input
+      );
+
+    return {
+      success:
+        result.success,
+      output:
+        result.output
+          ? {
+              ...result.output,
+            }
+          : undefined,
+      error:
+        result.error,
+      errorCode:
+        result.errorCode,
+    };
   },
+},
 
   spreadsheet: {
     name: "spreadsheet",
 
-    execute: async () =>
-      unavailableTool(
-        "spreadsheet"
-      ),
-  },
-
-  data_transform: {
-    name: "data_transform",
-
-    execute: async () =>
-      unavailableTool(
-        "data_transform"
-      ),
+    execute: async () => ({
+      success: false,
+      error:
+        'Automation tool "spreadsheet" is not connected yet.',
+      errorCode:
+        "TOOL_NOT_CONNECTED",
+    }),
   },
 
   crm: {
     name: "crm",
 
-    execute: async () =>
-      unavailableTool(
-        "crm"
-      ),
+    execute: async () => ({
+      success: false,
+      error:
+        'Automation tool "crm" is not connected yet.',
+      errorCode:
+        "TOOL_NOT_CONNECTED",
+    }),
   },
 
   http_request: {
     name: "http_request",
 
-    execute: async () =>
-      unavailableTool(
-        "http_request"
-      ),
+    execute: async () => ({
+      success: false,
+      error:
+        'Automation tool "http_request" is not connected yet.',
+      errorCode:
+        "TOOL_NOT_CONNECTED",
+    }),
   },
 
   notification: {
     name: "notification",
 
-    execute: async () =>
-      unavailableTool(
-        "notification"
-      ),
+    execute: async () => ({
+      success: false,
+      error:
+        'Automation tool "notification" is not connected yet.',
+      errorCode:
+        "TOOL_NOT_CONNECTED",
+    }),
   },
 };
 
@@ -456,13 +537,16 @@ export async function executeAutomationTool(
     console.error(
       "Automation tool execution error:",
       {
-        tool: step.tool_name,
+        tool:
+          step.tool_name,
         taskId:
           context.taskId,
         runId:
           context.runId,
         stepId:
           context.stepId,
+        userId:
+          context.userId,
         error,
       }
     );
@@ -470,7 +554,9 @@ export async function executeAutomationTool(
     return {
       success: false,
       error:
-        `Tool "${step.tool_name}" failed unexpectedly.`,
+        error instanceof Error
+          ? error.message
+          : `Tool "${step.tool_name}" failed unexpectedly.`,
       errorCode:
         "TOOL_EXECUTION_FAILED",
     };
