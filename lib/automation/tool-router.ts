@@ -3,6 +3,10 @@ import type {
 } from "@/lib/automation/planner";
 
 import {
+  executeHttpRequest,
+} from "@/lib/automation/tools/http-request";
+
+import {
   executeDocument,
 } from "@/lib/automation/tools/document";
 
@@ -486,17 +490,38 @@ const tools: Record<
     }),
   },
 
-  http_request: {
-    name: "http_request",
+ http_request: {
+  name: "http_request",
 
-    execute: async () => ({
-      success: false,
+  execute: async (
+    step
+  ) => {
+    const input =
+      getInput(step);
+
+    const result =
+      await executeHttpRequest(
+        input as Parameters<
+          typeof executeHttpRequest
+        >[0]
+      );
+
+    return {
+      success:
+        result.success,
+      output:
+        result.output
+          ? {
+              ...result.output,
+            }
+          : undefined,
       error:
-        'Automation tool "http_request" is not connected yet.',
+        result.error,
       errorCode:
-        "TOOL_NOT_CONNECTED",
-    }),
+        result.errorCode,
+    };
   },
+},
 
   notification: {
     name: "notification",
