@@ -2,8 +2,21 @@ import type {
   AutomationPlanStep,
 } from "@/lib/automation/planner";
 
-import { executeFileWrite } from "@/lib/automation/tools/file-write";
-import { executeFileRead } from "@/lib/automation/tools/file-read";
+import {
+  executeSpreadsheet,
+} from "@/lib/automation/tools/spreadsheet";
+
+import {
+  executeFileWrite,
+} from "@/lib/automation/tools/file-write";
+
+import {
+  executeFileRead,
+} from "@/lib/automation/tools/file-read";
+
+import {
+  executeNotification,
+} from "@/lib/automation/tools/notification";
 
 import {
   executeHttpRequest,
@@ -68,8 +81,7 @@ function getInput(
 function getSearchInput(
   step: AutomationPlanStep
 ) {
-  const input =
-    getInput(step);
+  const input = getInput(step);
 
   const query =
     typeof input.query === "string"
@@ -79,8 +91,7 @@ function getSearchInput(
   const searchDepth:
     | "basic"
     | "advanced" =
-    input.search_depth ===
-    "advanced"
+    input.search_depth === "advanced"
       ? "advanced"
       : "basic";
 
@@ -90,14 +101,12 @@ function getSearchInput(
     | "finance" =
     input.topic === "news"
       ? "news"
-      : input.topic ===
-          "finance"
+      : input.topic === "finance"
         ? "finance"
         : "general";
 
   const maxResults =
-    typeof input.max_results ===
-    "number"
+    typeof input.max_results === "number"
       ? Math.max(
           1,
           Math.min(
@@ -110,96 +119,76 @@ function getSearchInput(
       : 5;
 
   const includeAnswer =
-    typeof input.include_answer ===
-    "boolean"
+    typeof input.include_answer === "boolean"
       ? input.include_answer
       : true;
 
   const includeRawContent =
     typeof input.include_raw_content ===
-    "boolean"
+      "boolean"
       ? input.include_raw_content
       : false;
 
   const includeImages =
-    typeof input.include_images ===
-    "boolean"
+    typeof input.include_images === "boolean"
       ? input.include_images
       : false;
 
   const includeDomains =
-    Array.isArray(
-      input.include_domains
-    )
+    Array.isArray(input.include_domains)
       ? input.include_domains.filter(
           (
             value
           ): value is string =>
-            typeof value ===
-            "string"
+            typeof value === "string"
         )
       : undefined;
 
   const excludeDomains =
-    Array.isArray(
-      input.exclude_domains
-    )
+    Array.isArray(input.exclude_domains)
       ? input.exclude_domains.filter(
           (
             value
           ): value is string =>
-            typeof value ===
-            "string"
+            typeof value === "string"
         )
       : undefined;
 
   return {
     ...input,
     query,
-    search_depth:
-      searchDepth,
-    max_results:
-      maxResults,
+    search_depth: searchDepth,
+    max_results: maxResults,
     topic,
-    include_answer:
-      includeAnswer,
+    include_answer: includeAnswer,
     include_raw_content:
       includeRawContent,
-    include_images:
-      includeImages,
-    include_domains:
-      includeDomains,
-    exclude_domains:
-      excludeDomains,
+    include_images: includeImages,
+    include_domains: includeDomains,
+    exclude_domains: excludeDomains,
   };
 }
 
 function getResearchInput(
   step: AutomationPlanStep
 ) {
-  const input =
-    getInput(step);
+  const input = getInput(step);
 
   const queries =
-    Array.isArray(
-      input.queries
-    )
+    Array.isArray(input.queries)
       ? input.queries.filter(
           (
             value
           ): value is string =>
-            typeof value ===
-            "string" &&
-            value.trim()
-              .length > 0
+            typeof value === "string" &&
+            value.trim().length > 0
         )
       : [];
 
   const searchDepth:
     | "basic"
     | "advanced" =
-    input.search_depth ===
-    "advanced"
+    input.search_depth === "advanced"
       ? "advanced"
       : "basic";
 
@@ -209,8 +198,7 @@ function getResearchInput(
     | "finance" =
     input.topic === "news"
       ? "news"
-      : input.topic ===
-          "finance"
+      : input.topic === "finance"
         ? "finance"
         : "general";
 
@@ -229,59 +217,48 @@ function getResearchInput(
       : 5;
 
   const includeAnswer =
-    typeof input.include_answer ===
-    "boolean"
+    typeof input.include_answer === "boolean"
       ? input.include_answer
       : true;
 
   const includeRawContent =
     typeof input.include_raw_content ===
-    "boolean"
+      "boolean"
       ? input.include_raw_content
       : false;
 
   const includeDomains =
-    Array.isArray(
-      input.include_domains
-    )
+    Array.isArray(input.include_domains)
       ? input.include_domains.filter(
           (
             value
           ): value is string =>
-            typeof value ===
-            "string"
+            typeof value === "string"
         )
       : undefined;
 
   const excludeDomains =
-    Array.isArray(
-      input.exclude_domains
-    )
+    Array.isArray(input.exclude_domains)
       ? input.exclude_domains.filter(
           (
             value
           ): value is string =>
-            typeof value ===
-            "string"
+            typeof value === "string"
         )
       : undefined;
 
   return {
     ...input,
     queries,
-    search_depth:
-      searchDepth,
+    search_depth: searchDepth,
     topic,
     max_results_per_query:
       maxResultsPerQuery,
-    include_answer:
-      includeAnswer,
+    include_answer: includeAnswer,
     include_raw_content:
       includeRawContent,
-    include_domains:
-      includeDomains,
-    exclude_domains:
-      excludeDomains,
+    include_domains: includeDomains,
+    exclude_domains: excludeDomains,
   };
 }
 
@@ -292,30 +269,25 @@ const tools: Record<
   web_search: {
     name: "web_search",
 
-    execute: async (
-      step
-    ) => {
+    execute: async (step) => {
       const input =
         getSearchInput(step);
 
       const result =
-        await executeWebSearch(
-          input
-        );
+        await executeWebSearch(input);
 
       return {
-        success:
-          result.success,
+        success: result.success,
+
         output:
           result.output
             ? {
                 ...result.output,
               }
             : undefined,
-        error:
-          result.error,
-        errorCode:
-          result.errorCode,
+
+        error: result.error,
+        errorCode: result.errorCode,
       };
     },
   },
@@ -323,30 +295,25 @@ const tools: Record<
   web_research: {
     name: "web_research",
 
-    execute: async (
-      step
-    ) => {
+    execute: async (step) => {
       const input =
         getResearchInput(step);
 
       const result =
-        await executeWebResearch(
-          input
-        );
+        await executeWebResearch(input);
 
       return {
-        success:
-          result.success,
+        success: result.success,
+
         output:
           result.output
             ? {
                 ...result.output,
               }
             : undefined,
-        error:
-          result.error,
-        errorCode:
-          result.errorCode,
+
+        error: result.error,
+        errorCode: result.errorCode,
       };
     },
   },
@@ -354,9 +321,7 @@ const tools: Record<
   data_transform: {
     name: "data_transform",
 
-    execute: async (
-      step
-    ) => {
+    execute: async (step) => {
       const input =
         getInput(step);
 
@@ -366,14 +331,183 @@ const tools: Record<
         );
 
       return {
+        success: result.success,
+        output: result.output,
+        error: result.error,
+        errorCode: result.errorCode,
+      };
+    },
+  },
+
+  document: {
+    name: "document",
+
+    execute: async (step) => {
+      const input =
+        getInput(step);
+
+      const result =
+        await executeDocument(input);
+
+      return {
+        success: result.success,
+
+        output:
+          result.output
+            ? {
+                ...result.output,
+              }
+            : undefined,
+
+        error: result.error,
+        errorCode: result.errorCode,
+      };
+    },
+  },
+
+  http_request: {
+    name: "http_request",
+
+    execute: async (step) => {
+      const input =
+        getInput(step);
+
+      const result =
+        await executeHttpRequest(
+          input as Parameters<
+            typeof executeHttpRequest
+          >[0]
+        );
+
+      return {
+        success: result.success,
+
+        output:
+          result.output
+            ? {
+                ...result.output,
+              }
+            : undefined,
+
+        error: result.error,
+        errorCode: result.errorCode,
+      };
+    },
+  },
+
+  file_read: {
+    name: "file_read",
+
+    execute: async (
+      step,
+      context
+    ) => {
+      const result =
+        await executeFileRead(
+          step,
+          {
+            userId:
+              context.userId,
+          }
+        );
+
+      return {
         success:
           result.success,
-        output:
-          result.output,
-        error:
-          result.error,
-        errorCode:
-          result.errorCode,
+
+        output: {
+          ...result,
+        },
+      };
+    },
+  },
+
+  file_write: {
+    name: "file_write",
+
+    execute: async (
+      step,
+      context
+    ) => {
+      const result =
+        await executeFileWrite(
+          step,
+          {
+            userId:
+              context.userId,
+          }
+        );
+
+      return {
+        success:
+          result.success,
+
+        output: {
+          ...result,
+        },
+      };
+    },
+  },
+
+  spreadsheet: {
+    name: "spreadsheet",
+
+    execute: async (
+      step,
+      context
+    ) => {
+      const result =
+        await executeSpreadsheet(
+          step,
+          {
+            userId:
+              context.userId,
+          }
+        );
+
+      return {
+        success:
+          result.success,
+
+        output: {
+          ...result,
+        },
+      };
+    },
+  },
+
+  notification: {
+    name: "notification",
+
+    execute: async (
+      step,
+      context
+    ) => {
+      const result =
+        await executeNotification(
+          step,
+          {
+            userId:
+              context.userId,
+
+            taskId:
+              context.taskId,
+
+            runId:
+              context.runId,
+
+            stepId:
+              context.stepId,
+          }
+        );
+
+      return {
+        success:
+          result.success,
+
+        output: {
+          ...result,
+        },
       };
     },
   },
@@ -383,8 +517,10 @@ const tools: Record<
 
     execute: async () => ({
       success: false,
+
       error:
         'Automation tool "browser" is not connected yet.',
+
       errorCode:
         "TOOL_NOT_CONNECTED",
     }),
@@ -395,8 +531,10 @@ const tools: Record<
 
     execute: async () => ({
       success: false,
+
       error:
         'Automation tool "email" is not connected yet.',
+
       errorCode:
         "TOOL_NOT_CONNECTED",
     }),
@@ -407,69 +545,10 @@ const tools: Record<
 
     execute: async () => ({
       success: false,
+
       error:
         'Automation tool "calendar" is not connected yet.',
-      errorCode:
-        "TOOL_NOT_CONNECTED",
-    }),
-  },
 
-file_read: {
-  name: "file_read",
-  execute: async (input, context) => {
-    return executeFileRead(input, {
-      userId: context.userId,
-    });
-  },
-},
-
- file_write: {
-  name: "file_write",
-  execute: async (input, context) => {
-    return executeFileWrite(input, {
-      userId: context.userId,
-    });
-  },
-},
-
- document: {
-  name: "document",
-
-  execute: async (
-    step
-  ) => {
-    const input =
-      getInput(step);
-
-    const result =
-      await executeDocument(
-        input
-      );
-
-    return {
-      success:
-        result.success,
-      output:
-        result.output
-          ? {
-              ...result.output,
-            }
-          : undefined,
-      error:
-        result.error,
-      errorCode:
-        result.errorCode,
-    };
-  },
-},
-
-  spreadsheet: {
-    name: "spreadsheet",
-
-    execute: async () => ({
-      success: false,
-      error:
-        'Automation tool "spreadsheet" is not connected yet.',
       errorCode:
         "TOOL_NOT_CONNECTED",
     }),
@@ -480,53 +559,10 @@ file_read: {
 
     execute: async () => ({
       success: false,
+
       error:
         'Automation tool "crm" is not connected yet.',
-      errorCode:
-        "TOOL_NOT_CONNECTED",
-    }),
-  },
 
- http_request: {
-  name: "http_request",
-
-  execute: async (
-    step
-  ) => {
-    const input =
-      getInput(step);
-
-    const result =
-      await executeHttpRequest(
-        input as Parameters<
-          typeof executeHttpRequest
-        >[0]
-      );
-
-    return {
-      success:
-        result.success,
-      output:
-        result.output
-          ? {
-              ...result.output,
-            }
-          : undefined,
-      error:
-        result.error,
-      errorCode:
-        result.errorCode,
-    };
-  },
-},
-
-  notification: {
-    name: "notification",
-
-    execute: async () => ({
-      success: false,
-      error:
-        'Automation tool "notification" is not connected yet.',
       errorCode:
         "TOOL_NOT_CONNECTED",
     }),
@@ -543,8 +579,10 @@ export async function executeAutomationTool(
   if (!tool) {
     return {
       success: false,
+
       error:
         `Unknown automation tool: ${step.tool_name}`,
+
       errorCode:
         "UNKNOWN_TOOL",
     };
@@ -561,24 +599,31 @@ export async function executeAutomationTool(
       {
         tool:
           step.tool_name,
+
         taskId:
           context.taskId,
+
         runId:
           context.runId,
+
         stepId:
           context.stepId,
+
         userId:
           context.userId,
+
         error,
       }
     );
 
     return {
       success: false,
+
       error:
         error instanceof Error
           ? error.message
           : `Tool "${step.tool_name}" failed unexpectedly.`,
+
       errorCode:
         "TOOL_EXECUTION_FAILED",
     };
