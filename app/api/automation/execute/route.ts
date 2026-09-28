@@ -1,221 +1,131 @@
-
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { createServerSupabaseClient } from "@/lib/supabase-server";
 import { executeAutomationRun } from "@/lib/automation/execution-engine";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
-const MAX_BODY_SIZE = 12000;
-
-function getBearerToken(request: Request): string | undefined {
-  const authorization = request.headers.get("authorization");
-
-  if (!authorization) {
-    return undefined;
-  }
-
-  if (!authorization.startsWith("Bearer ")) {
-    return undefined;
-  }
-
-  const token = authorization.slice(7).trim();
-
-  return token || undefined;
-}
-
-function getString(value: unknown): string | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-
-  const trimmed = value.trim();
-
-  return trimmed || undefined;
-}
-
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   let taskId: string | undefined;
   let runId: string | undefined;
 
   try {
-    /*
-     * -------------------------------------------------------
-     * REQUEST SIZE
-     * -------------------------------------------------------
-     */
+    const supabase = await createServerSupabaseClient();
 
-    const contentLength = request.headers.get("content-length");
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
 
-    if (contentLength) {
-      const size = Number(contentLength);
-
-      if (
-        Number.isFinite(size) &&
-        size > MAX_BODY_SIZE
-      ) {
-        return NextResponse.json(
-          {
-            success: false,
-            error: "Request body is too large.",
-            errorCode: "REQUEST_TOO_LARGE",
-          },
-          { status: 413 }
-        );
-      }
-    }
-
-    /*
-     * -------------------------------------------------------
-     * AUTHENTICATION
-     * -------------------------------------------------------
-     *
-     * The execution engine supports both:
-     *
-     * Authorization: Bearer <supabase_access_token>
-     *
-     * and the normal Supabase cookie session.
-     */
-
-    const accessToken = getBearerToken(request);
-
-    /*
-     * -------------------------------------------------------
-     * REQUEST BODY
-     * -------------------------------------------------------
-     */
-
-    let body: unknown;
-
-    try {
-      body = await request.json();
-    } catch {
+    if (authError || !user) {
       return NextResponse.json(
         {
           success: false,
-          error: "Invalid JSON request.",
-          errorCode: "INVALID_JSON",
-        },
-        { status: 400 }
-      );
-    }
-
-    if (
-      !body ||
-      typeof body !== "object" ||
-      Array.isArray(body)
-    ) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Invalid request body.",
-          errorCode: "INVALID_BODY",
-        },
-        { status: 400 }
-      );
-    }
-
-    const payload = body as Record<string, unknown>;
-
-    /*
-     * -------------------------------------------------------
-     * TASK / RUN IDENTIFIERS
-     * -------------------------------------------------------
-     */
-
-    taskId =
-      getString(payload.taskId) ??
-      getString(payload.task_id);
-
-    runId =
-      getString(payload.runId) ??
-      getString(payload.run_id);
-
-    if (!taskId) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Automation task ID is required.",
-          errorCode: "TASK_ID_REQUIRED",
-        },
-        { status: 400 }
-      );
-    }
-
-    if (!runId) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Automation run ID is required.",
-          errorCode: "RUN_ID_REQUIRED",
-        },
-        { status: 400 }
-      );
-    }
-
-    /*
-     * -------------------------------------------------------
-     * EXECUTION
-     * -------------------------------------------------------
-     */
-
-    const result = await executeAutomationRun(
-      taskId,
-      runId,
-      accessToken
-    );
-
-    return NextResponse.json(result, {
-      status: result.success ? 200 : 422,
-    });
-  } catch (error) {
-    console.error(
-      "ZUQEN Automation execution API error:",
-      error
-    );
-
-    const message =
-      error instanceof Error
-        ? error.message
-        : "An unexpected automation execution error occurred.";
-
-    if (message === "Authentication required.") {
-      return NextResponse.json(
-        {
-          success: false,
-          error: message,
-          errorCode: "AUTH_REQUIRED",
-          ...(taskId ? { taskId } : {}),
-          ...(runId ? { runId } : {}),
+          error: "Authentication required",
+          code: "AUTH_REQUIRED",
         },
         { status: 401 }
       );
     }
 
+    const body = await request.json();
+
+    taskId =
+      typeof body?.taskId === "string" && body.taskId.trim()
+        ? body.taskId.trim()
+        : undefined;
+
+    runId =
+      typeof body?.runId === "string" && body.runId.trim()
+        ? body.runId.trim()
+        : undefined;
+
+    if (!taskId || !runId) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "taskId and runId are required",
+          code: "INVALID_EXECUTION_REQUEST",
+          taskId: taskId ?? null,
+          runId: runId ?? null,
+        },
+        { status: 400 }
+      );
+    }
+
+    console.log("[Automation Execute] Starting execution", {
+      userId: user.id,
+      taskId,
+      runId,
+    });
+
+    const result = await executeAutomationRun(
+      taskId,
+      runId,
+      request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ??
+        undefined
+    );
+
+    console.log("[Automation Execute] Engine result", {
+      taskId,
+      runId,
+      success: result?.success,
+      status: result?.status,
+      message: result?.message,
+      result,
+    });
+
+    if (!result?.success) {
+      const failureMessage =
+        typeof result?.message === "string" && result.message.trim()
+          ? result.message
+          : "Automation execution failed";
+
+      return NextResponse.json(
+        {
+          success: false,
+          error: failureMessage,
+          code: "AUTOMATION_EXECUTION_FAILED",
+          taskId,
+          runId,
+          result,
+        },
+        { status: 422 }
+      );
+    }
+
+    return NextResponse.json(
+      {
+        success: true,
+        taskId,
+        runId,
+        result,
+      },
+      { status: 200 }
+    );
+  } catch (error) {
+    console.error("[Automation Execute] Unexpected error", {
+      taskId,
+      runId,
+      error,
+    });
+
+    const message =
+      error instanceof Error
+        ? error.message
+        : typeof error === "string"
+          ? error
+          : "Unknown automation execution error";
+
     return NextResponse.json(
       {
         success: false,
         error: message,
-        errorCode: "AUTOMATION_EXECUTION_ERROR",
-        ...(taskId ? { taskId } : {}),
-        ...(runId ? { runId } : {}),
+        code: "AUTOMATION_EXECUTION_EXCEPTION",
+        taskId: taskId ?? null,
+        runId: runId ?? null,
       },
       { status: 500 }
     );
   }
 }
-
-export async function GET() {
-  return NextResponse.json(
-    {
-      success: false,
-      error: "Method not allowed.",
-      errorCode: "METHOD_NOT_ALLOWED",
-    },
-    {
-      status: 405,
-      headers: {
-        Allow: "POST",
-      },
-    }
-  );
-}
-
