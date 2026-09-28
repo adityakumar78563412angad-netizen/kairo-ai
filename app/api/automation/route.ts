@@ -45,20 +45,9 @@ export async function POST(request: Request) {
       }
     }
 
-    /*
-     * -------------------------------------------------------
-     * AUTHENTICATION
-     * -------------------------------------------------------
-     *
-     * The Automation UI sends:
-     *
-     * Authorization: Bearer <supabase_access_token>
-     *
-     * We authenticate the token here first.
-     *
-     * If a token is not present, we also support the normal
-     * Supabase SSR cookie session.
-     */
+    // =====================================================
+    // AUTHENTICATION
+    // =====================================================
 
     const accessToken = getBearerToken(request);
 
@@ -67,10 +56,8 @@ export async function POST(request: Request) {
     let user = null;
 
     if (accessToken) {
-      const {
-        data,
-        error,
-      } = await supabase.auth.getUser(accessToken);
+      const { data, error } =
+        await supabase.auth.getUser(accessToken);
 
       if (error) {
         console.error(
@@ -82,17 +69,10 @@ export async function POST(request: Request) {
       user = data.user;
     }
 
-    /*
-     * Cookie fallback.
-     *
-     * This keeps normal SSR authentication working as well.
-     */
-
+    // Cookie fallback
     if (!user) {
-      const {
-        data,
-        error,
-      } = await supabase.auth.getUser();
+      const { data, error } =
+        await supabase.auth.getUser();
 
       if (error) {
         console.error(
@@ -116,11 +96,9 @@ export async function POST(request: Request) {
       );
     }
 
-    /*
-     * -------------------------------------------------------
-     * REQUEST BODY
-     * -------------------------------------------------------
-     */
+    // =====================================================
+    // REQUEST BODY
+    // =====================================================
 
     let body: unknown;
 
@@ -188,18 +166,9 @@ export async function POST(request: Request) {
       title,
     };
 
-    /*
-     * -------------------------------------------------------
-     * CREATE TASK
-     * -------------------------------------------------------
-     *
-     * IMPORTANT:
-     * Pass the authenticated access token into the
-     * orchestrator.
-     *
-     * This prevents the orchestrator from depending only
-     * on the SSR cookie session.
-     */
+    // =====================================================
+    // CREATE AUTOMATION TASK
+    // =====================================================
 
     const created = await createAutomationTask(
       input,
@@ -232,39 +201,27 @@ export async function POST(request: Request) {
       );
     }
 
-    /*
-     * -------------------------------------------------------
-     * PLAN TASK
-     * -------------------------------------------------------
-     *
-     * Pass the same access token to the planner.
-     */
+    // =====================================================
+    // PLAN AUTOMATION TASK
+    // =====================================================
+    //
+    // planAutomationTask() throws on failure.
+    // It does NOT return { success, error, errorCode }.
+    //
+    // Therefore we directly use its returned:
+    // taskId, runId, plan and usage.
+    // =====================================================
 
     const planned = await planAutomationTask(
       created.taskId,
       accessToken
     );
 
-    if (!planned.success) {
-      return NextResponse.json(
-        {
-          success: false,
-          taskId: created.taskId,
-          runId: created.runId,
-          error: planned.error,
-          errorCode:
-            planned.errorCode ||
-            "AUTOMATION_PLANNING_FAILED",
-        },
-        { status: 500 }
-      );
-    }
-
     return NextResponse.json(
       {
         success: true,
-        taskId: created.taskId,
-        runId: created.runId,
+        taskId: planned.taskId,
+        runId: planned.runId,
         status: "planned",
         plan: planned.plan,
         usage: planned.usage,
@@ -277,11 +234,15 @@ export async function POST(request: Request) {
       error
     );
 
+    const message =
+      error instanceof Error
+        ? error.message
+        : "An unexpected automation error occurred.";
+
     return NextResponse.json(
       {
         success: false,
-        error:
-          "An unexpected automation error occurred.",
+        error: message,
         errorCode: "AUTOMATION_API_ERROR",
       },
       { status: 500 }

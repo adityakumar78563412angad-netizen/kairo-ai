@@ -1,6 +1,7 @@
 import { createServerSupabaseClient } from "@/lib/supabase-server";
 
-const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
+const GROQ_API_URL =
+  "https://api.groq.com/openai/v1/chat/completions";
 
 const DEFAULT_MODEL =
   process.env.AUTOMATION_PLANNER_MODEL ||
@@ -23,9 +24,10 @@ const ALLOWED_TOOLS = [
   "notification",
 ] as const;
 
-type AllowedTool = (typeof ALLOWED_TOOLS)[number];
+type AllowedTool =
+  (typeof ALLOWED_TOOLS)[number];
 
-type AutomationPlanStep = {
+export type AutomationPlanStep = {
   step_number: number;
   name: string;
   description: string;
@@ -36,7 +38,7 @@ type AutomationPlanStep = {
   max_retries?: number;
 };
 
-type AutomationPlan = {
+export type AutomationPlan = {
   title: string;
   summary: string;
   steps: AutomationPlanStep[];
@@ -45,17 +47,20 @@ type AutomationPlan = {
 type GroqResponse = {
   id?: string;
   model?: string;
+
   choices?: Array<{
     message?: {
       role?: string;
       content?: string | null;
     };
   }>;
+
   usage?: {
     prompt_tokens?: number;
     completion_tokens?: number;
     total_tokens?: number;
   };
+
   error?: {
     message?: string;
     type?: string;
@@ -63,7 +68,9 @@ type GroqResponse = {
   };
 };
 
-function extractJson(text: string): AutomationPlan {
+function extractJson(
+  text: string
+): AutomationPlan {
   let cleaned = text.trim();
 
   if (cleaned.startsWith("```")) {
@@ -73,109 +80,200 @@ function extractJson(text: string): AutomationPlan {
       .trim();
   }
 
-  const firstBrace = cleaned.indexOf("{");
-  const lastBrace = cleaned.lastIndexOf("}");
+  const firstBrace =
+    cleaned.indexOf("{");
 
-  if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) {
-    throw new Error("Planner returned invalid JSON.");
+  const lastBrace =
+    cleaned.lastIndexOf("}");
+
+  if (
+    firstBrace === -1 ||
+    lastBrace === -1 ||
+    lastBrace <= firstBrace
+  ) {
+    throw new Error(
+      "Planner returned invalid JSON."
+    );
   }
 
-  cleaned = cleaned.slice(firstBrace, lastBrace + 1);
+  cleaned = cleaned.slice(
+    firstBrace,
+    lastBrace + 1
+  );
 
-  const parsed = JSON.parse(cleaned) as AutomationPlan;
+  const parsed =
+    JSON.parse(cleaned) as AutomationPlan;
 
-  if (!parsed || typeof parsed !== "object") {
-    throw new Error("Planner returned an invalid plan.");
+  if (
+    !parsed ||
+    typeof parsed !== "object"
+  ) {
+    throw new Error(
+      "Planner returned an invalid plan."
+    );
   }
 
   if (!Array.isArray(parsed.steps)) {
-    throw new Error("Planner plan does not contain steps.");
+    throw new Error(
+      "Planner plan does not contain steps."
+    );
   }
 
   return parsed;
 }
 
-function normalizePlan(plan: AutomationPlan): AutomationPlan {
-  const normalizedSteps: AutomationPlanStep[] = plan.steps.map(
-    (step, index) => {
-      const toolName = String(step.tool_name || "").trim();
+function normalizePlan(
+  plan: AutomationPlan
+): AutomationPlan {
+  const normalizedSteps:
+    AutomationPlanStep[] =
+    plan.steps.map(
+      (step, index) => {
+        const toolName =
+          String(
+            step.tool_name || ""
+          ).trim();
 
-      if (!ALLOWED_TOOLS.includes(toolName as AllowedTool)) {
-        throw new Error(
-          `Planner selected unsupported tool: ${toolName || "unknown"}`
-        );
+        if (
+          !ALLOWED_TOOLS.includes(
+            toolName as AllowedTool
+          )
+        ) {
+          throw new Error(
+            `Planner selected unsupported tool: ${
+              toolName || "unknown"
+            }`
+          );
+        }
+
+        const dependsOn =
+          Array.isArray(step.depends_on)
+            ? step.depends_on
+                .map((value) =>
+                  Number(value)
+                )
+                .filter(
+                  (value) =>
+                    Number.isInteger(
+                      value
+                    ) &&
+                    value >= 1 &&
+                    value <=
+                      plan.steps.length
+                )
+            : [];
+
+        return {
+          step_number: index + 1,
+
+          name:
+            typeof step.name ===
+              "string" &&
+            step.name.trim()
+              ? step.name.trim()
+              : `Step ${index + 1}`,
+
+          description:
+            typeof step.description ===
+            "string"
+              ? step.description.trim()
+              : "",
+
+          tool_name:
+            toolName as AllowedTool,
+
+          input:
+            step.input &&
+            typeof step.input ===
+              "object"
+              ? step.input
+              : {},
+
+          depends_on: [
+            ...new Set(dependsOn),
+          ],
+
+          requires_approval:
+            Boolean(
+              step.requires_approval
+            ),
+
+          max_retries:
+            Number.isInteger(
+              step.max_retries
+            ) &&
+            Number(
+              step.max_retries
+            ) >= 0
+              ? Math.min(
+                  Number(
+                    step.max_retries
+                  ),
+                  10
+                )
+              : 2,
+        };
       }
-
-      const dependsOn = Array.isArray(step.depends_on)
-        ? step.depends_on
-            .map((value) => Number(value))
-            .filter(
-              (value) =>
-                Number.isInteger(value) &&
-                value >= 1 &&
-                value <= plan.steps.length
-            )
-        : [];
-
-      return {
-        step_number: index + 1,
-        name:
-          typeof step.name === "string" && step.name.trim()
-            ? step.name.trim()
-            : `Step ${index + 1}`,
-        description:
-          typeof step.description === "string"
-            ? step.description.trim()
-            : "",
-        tool_name: toolName as AllowedTool,
-        input:
-          step.input && typeof step.input === "object"
-            ? step.input
-            : {},
-        depends_on: [...new Set(dependsOn)],
-        requires_approval: Boolean(step.requires_approval),
-        max_retries:
-          Number.isInteger(step.max_retries) &&
-          Number(step.max_retries) >= 0
-            ? Math.min(Number(step.max_retries), 10)
-            : 2,
-      };
-    }
-  );
+    );
 
   return {
     title:
-      typeof plan.title === "string" && plan.title.trim()
+      typeof plan.title ===
+        "string" &&
+      plan.title.trim()
         ? plan.title.trim()
         : "Automation Task",
+
     summary:
-      typeof plan.summary === "string"
+      typeof plan.summary ===
+      "string"
         ? plan.summary.trim()
         : "Automation plan created.",
+
     steps: normalizedSteps,
   };
 }
 
 async function getUserWithToken(
-  supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>,
+  supabase: Awaited<
+    ReturnType<
+      typeof createServerSupabaseClient
+    >
+  >,
   accessToken?: string
 ) {
   if (accessToken) {
-    const { data, error } = await supabase.auth.getUser(accessToken);
+    const {
+      data,
+      error,
+    } =
+      await supabase.auth.getUser(
+        accessToken
+      );
 
     if (data.user) {
       return data.user;
     }
 
     if (error) {
-      console.error("Automation planner token auth error:", error);
+      console.error(
+        "Automation planner token auth error:",
+        error
+      );
     }
   }
 
-  const { data, error } = await supabase.auth.getUser();
+  const {
+    data,
+    error,
+  } =
+    await supabase.auth.getUser();
 
   if (error) {
-    console.error("Automation planner cookie auth error:", error);
+    console.error(
+      "Automation planner cookie auth error:",
+      error
+    );
   }
 
   return data.user;
@@ -190,7 +288,9 @@ Your job is to convert a user's automation request into a precise executable pla
 You MUST return ONLY valid JSON.
 
 Available tools:
-${ALLOWED_TOOLS.map((tool) => `- ${tool}`).join("\n")}
+${ALLOWED_TOOLS.map(
+  (tool) => `- ${tool}`
+).join("\n")}
 
 Rules:
 
@@ -246,12 +346,19 @@ export async function planAutomationTask(
   taskId: string,
   accessToken?: string
 ) {
-  const supabase = await createServerSupabaseClient();
+  const supabase =
+    await createServerSupabaseClient();
 
-  const user = await getUserWithToken(supabase, accessToken);
+  const user =
+    await getUserWithToken(
+      supabase,
+      accessToken
+    );
 
   if (!user) {
-    throw new Error("Authentication required.");
+    throw new Error(
+      "Authentication required."
+    );
   }
 
   if (!process.env.GROQ_API_KEY) {
@@ -260,7 +367,10 @@ export async function planAutomationTask(
     );
   }
 
-  const { data: task, error: taskError } = await supabase
+  const {
+    data: task,
+    error: taskError,
+  } = await supabase
     .from("automation_tasks")
     .select("*")
     .eq("id", taskId)
@@ -268,10 +378,14 @@ export async function planAutomationTask(
     .single();
 
   if (taskError || !task) {
-    console.error("Automation planner task load error:", taskError);
+    console.error(
+      "Automation planner task load error:",
+      taskError
+    );
 
     throw new Error(
-      taskError?.message || "Automation task could not be loaded."
+      taskError?.message ||
+        "Automation task could not be loaded."
     );
   }
 
@@ -284,75 +398,111 @@ export async function planAutomationTask(
     .eq("id", taskId)
     .eq("user_id", user.id);
 
-  const prompt = String(task.prompt || "").trim();
+  const prompt =
+    String(task.prompt || "").trim();
 
   if (!prompt) {
-    throw new Error("Automation prompt is empty.");
+    throw new Error(
+      "Automation prompt is empty."
+    );
   }
 
   const plannerPayload = {
     model: DEFAULT_MODEL,
     temperature: 0.1,
     max_tokens: 4000,
+
     messages: [
       {
         role: "system",
-        content: buildPlannerSystemPrompt(),
+        content:
+          buildPlannerSystemPrompt(),
       },
       {
         role: "user",
-        content: `Create an executable automation plan for this request:
-
-${prompt}`,
+        content:
+          `Create an executable automation plan for this request:\n\n${prompt}`,
       },
     ],
   };
 
-  console.log("ZUQEN Automation Planner request:", {
-    taskId,
-    model: DEFAULT_MODEL,
-    userId: user.id,
-  });
+  console.log(
+    "ZUQEN Automation Planner request:",
+    {
+      taskId,
+      model: DEFAULT_MODEL,
+      userId: user.id,
+    }
+  );
 
   let response: Response;
 
   try {
-    response = await fetch(GROQ_API_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
-      },
-      body: JSON.stringify(plannerPayload),
-      signal: AbortSignal.timeout(60_000),
-    });
+    response = await fetch(
+      GROQ_API_URL,
+      {
+        method: "POST",
+
+        headers: {
+          "Content-Type":
+            "application/json",
+
+          Authorization:
+            `Bearer ${process.env.GROQ_API_KEY}`,
+        },
+
+        body:
+          JSON.stringify(
+            plannerPayload
+          ),
+
+        signal:
+          AbortSignal.timeout(
+            60_000
+          ),
+      }
+    );
   } catch (error) {
-    console.error("ZUQEN Automation Planner network error:", error);
+    console.error(
+      "ZUQEN Automation Planner network error:",
+      error
+    );
 
     const message =
-      error instanceof Error ? error.message : "Unknown network error.";
+      error instanceof Error
+        ? error.message
+        : "Unknown network error.";
 
     await supabase
       .from("automation_tasks")
       .update({
         status: "failed",
+
         errors: {
-          code: "PLANNER_NETWORK_ERROR",
+          code:
+            "PLANNER_NETWORK_ERROR",
           message,
         },
       })
       .eq("id", taskId)
       .eq("user_id", user.id);
 
-    throw new Error(`Automation planner provider error: ${message}`);
+    throw new Error(
+      `Automation planner provider error: ${message}`
+    );
   }
 
-  const rawBody = await response.text();
+  const rawBody =
+    await response.text();
 
   let data: GroqResponse = {};
 
   try {
-    data = rawBody ? (JSON.parse(rawBody) as GroqResponse) : {};
+    data = rawBody
+      ? (JSON.parse(
+          rawBody
+        ) as GroqResponse)
+      : {};
   } catch {
     console.error(
       "ZUQEN Automation Planner invalid provider response:",
@@ -363,10 +513,17 @@ ${prompt}`,
       .from("automation_tasks")
       .update({
         status: "failed",
+
         errors: {
-          code: "PLANNER_INVALID_PROVIDER_RESPONSE",
-          message: rawBody.slice(0, 1000),
-          http_status: response.status,
+          code:
+            "PLANNER_INVALID_PROVIDER_RESPONSE",
+          message:
+            rawBody.slice(
+              0,
+              1000
+            ),
+          http_status:
+            response.status,
         },
       })
       .eq("id", taskId)
@@ -382,23 +539,48 @@ ${prompt}`,
       data.error?.message ||
       `Groq returned HTTP ${response.status}.`;
 
-    console.error("ZUQEN Automation Planner provider error:", {
-      status: response.status,
-      model: DEFAULT_MODEL,
-      error: data.error,
-      body: rawBody.slice(0, 2000),
-    });
+    console.error(
+      "ZUQEN Automation Planner provider error:",
+      {
+        status:
+          response.status,
+
+        model:
+          DEFAULT_MODEL,
+
+        error:
+          data.error,
+
+        body:
+          rawBody.slice(
+            0,
+            2000
+          ),
+      }
+    );
 
     await supabase
       .from("automation_tasks")
       .update({
         status: "failed",
+
         errors: {
-          code: data.error?.code || "PLANNER_PROVIDER_ERROR",
-          type: data.error?.type || null,
-          message: providerMessage,
-          http_status: response.status,
-          model: DEFAULT_MODEL,
+          code:
+            data.error?.code ||
+            "PLANNER_PROVIDER_ERROR",
+
+          type:
+            data.error?.type ||
+            null,
+
+          message:
+            providerMessage,
+
+          http_status:
+            response.status,
+
+          model:
+            DEFAULT_MODEL,
         },
       })
       .eq("id", taskId)
@@ -409,75 +591,119 @@ ${prompt}`,
     );
   }
 
-  const content = data.choices?.[0]?.message?.content;
+  const content =
+    data.choices?.[0]?.message
+      ?.content;
 
   if (!content) {
     console.error(
       "ZUQEN Automation Planner returned no content:",
-      JSON.stringify(data).slice(0, 4000)
+      JSON.stringify(data).slice(
+        0,
+        4000
+      )
     );
 
     await supabase
       .from("automation_tasks")
       .update({
         status: "failed",
+
         errors: {
-          code: "PLANNER_EMPTY_RESPONSE",
-          message: "Groq returned no planner content.",
-          model: data.model || DEFAULT_MODEL,
+          code:
+            "PLANNER_EMPTY_RESPONSE",
+
+          message:
+            "Groq returned no planner content.",
+
+          model:
+            data.model ||
+            DEFAULT_MODEL,
         },
       })
       .eq("id", taskId)
       .eq("user_id", user.id);
 
-    throw new Error("Automation planner returned an empty response.");
+    throw new Error(
+      "Automation planner returned an empty response."
+    );
   }
 
   let plan: AutomationPlan;
 
   try {
-    plan = normalizePlan(extractJson(content));
+    plan =
+      normalizePlan(
+        extractJson(content)
+      );
   } catch (error) {
     const message =
       error instanceof Error
         ? error.message
         : "Planner returned an invalid plan.";
 
-    console.error("ZUQEN Automation Planner parse error:", {
-      message,
-      content: content.slice(0, 5000),
-    });
+    console.error(
+      "ZUQEN Automation Planner parse error:",
+      {
+        message,
+        content:
+          content.slice(
+            0,
+            5000
+          ),
+      }
+    );
 
     await supabase
       .from("automation_tasks")
       .update({
         status: "failed",
+
         errors: {
-          code: "PLANNER_INVALID_PLAN",
+          code:
+            "PLANNER_INVALID_PLAN",
+
           message,
-          raw_response: content.slice(0, 5000),
+
+          raw_response:
+            content.slice(
+              0,
+              5000
+            ),
         },
       })
       .eq("id", taskId)
       .eq("user_id", user.id);
 
-    throw new Error(`Automation planner returned an invalid plan: ${message}`);
+    throw new Error(
+      `Automation planner returned an invalid plan: ${message}`
+    );
   }
 
-  const { data: run, error: runError } = await supabase
+  const {
+    data: run,
+    error: runError,
+  } = await supabase
     .from("automation_runs")
     .select("*")
     .eq("task_id", taskId)
     .eq("user_id", user.id)
-    .order("run_number", { ascending: false })
+    .order(
+      "run_number",
+      { ascending: false }
+    )
     .limit(1)
     .maybeSingle();
 
   if (runError || !run) {
-    console.error("Automation planner run load error:", runError);
+    console.error(
+      "Automation planner run load error:",
+      runError
+    );
 
     throw new Error(
-      runError?.message || "Automation run could not be loaded."
+      runError?.message ||
+        "Automation run could not be loaded."
     );
   }
 
@@ -488,39 +714,57 @@ ${prompt}`,
     .eq("task_id", taskId)
     .eq("user_id", user.id);
 
-  const insertedSteps: Array<{
-    id: string;
-    step_number: number;
-  }> = [];
+  const insertedSteps:
+    Array<{
+      id: string;
+      step_number: number;
+    }> = [];
 
   for (const step of plan.steps) {
-    const { data: inserted, error: insertError } = await supabase
+    const {
+      data: inserted,
+      error: insertError,
+    } = await supabase
       .from("automation_steps")
       .insert({
         task_id: taskId,
         run_id: run.id,
         user_id: user.id,
-        step_number: step.step_number,
+        step_number:
+          step.step_number,
         name: step.name,
-        description: step.description,
-        tool_name: step.tool_name,
+        description:
+          step.description,
+        tool_name:
+          step.tool_name,
         status: "queued",
         input: step.input,
         dependencies: [],
         retries: 0,
       })
-      .select("id,step_number")
+      .select(
+        "id,step_number"
+      )
       .single();
 
-    if (insertError || !inserted) {
-      console.error("Automation planner step insert error:", insertError);
+    if (
+      insertError ||
+      !inserted
+    ) {
+      console.error(
+        "Automation planner step insert error:",
+        insertError
+      );
 
       await supabase
         .from("automation_tasks")
         .update({
           status: "failed",
+
           errors: {
-            code: "PLANNER_STEP_INSERT_ERROR",
+            code:
+              "PLANNER_STEP_INSERT_ERROR",
+
             message:
               insertError?.message ||
               `Could not create step ${step.step_number}.`,
@@ -535,28 +779,65 @@ ${prompt}`,
       );
     }
 
-    insertedSteps.push(inserted);
+    insertedSteps.push(
+      inserted
+    );
   }
 
-  const stepIdByNumber = new Map<number, string>(
-    insertedSteps.map((step) => [step.step_number, step.id])
-  );
+  const stepIdByNumber =
+    new Map<number, string>(
+      insertedSteps.map(
+        (step) => [
+          step.step_number,
+          step.id,
+        ]
+      )
+    );
 
   for (const step of plan.steps) {
-    const dependencies = step.depends_on
-      .map((number) => stepIdByNumber.get(number))
-      .filter((id): id is string => Boolean(id));
+    const dependencies =
+      step.depends_on
+        .map((number) =>
+          stepIdByNumber.get(
+            number
+          )
+        )
+        .filter(
+          (
+            id
+          ): id is string =>
+            Boolean(id)
+        );
 
-    if (dependencies.length > 0) {
-      const { error: dependencyError } = await supabase
+    if (
+      dependencies.length > 0
+    ) {
+      const {
+        error:
+          dependencyError,
+      } = await supabase
         .from("automation_steps")
         .update({
           dependencies,
         })
-        .eq("id", stepIdByNumber.get(step.step_number)!)
-        .eq("task_id", taskId)
-        .eq("run_id", run.id)
-        .eq("user_id", user.id);
+        .eq(
+          "id",
+          stepIdByNumber.get(
+            step.step_number
+          )!
+        )
+        .eq(
+          "task_id",
+          taskId
+        )
+        .eq(
+          "run_id",
+          run.id
+        )
+        .eq(
+          "user_id",
+          user.id
+        );
 
       if (dependencyError) {
         console.error(
@@ -572,44 +853,76 @@ ${prompt}`,
     }
   }
 
-  const usage = data.usage || {};
+  const usage =
+    data.usage || {};
 
-  await supabase.from("automation_usage").insert({
-    user_id: user.id,
-    task_id: taskId,
-    run_id: run.id,
-    provider: "groq",
-    tool_name: "automation_planner",
-    model: data.model || DEFAULT_MODEL,
-    input_tokens: usage.prompt_tokens || 0,
-    output_tokens: usage.completion_tokens || 0,
-    total_tokens: usage.total_tokens || 0,
-    api_calls: 1,
-    metadata: {
-      planner: true,
-    },
-  });
+  await supabase
+    .from("automation_usage")
+    .insert({
+      user_id: user.id,
+      task_id: taskId,
+      run_id: run.id,
+      provider: "groq",
+      tool_name:
+        "automation_planner",
+      model:
+        data.model ||
+        DEFAULT_MODEL,
+      input_tokens:
+        usage.prompt_tokens ||
+        0,
+      output_tokens:
+        usage.completion_tokens ||
+        0,
+      total_tokens:
+        usage.total_tokens ||
+        0,
+      api_calls: 1,
 
-  const { error: runUpdateError } = await supabase
+      metadata: {
+        planner: true,
+      },
+    });
+
+  const {
+    error:
+      runUpdateError,
+  } = await supabase
     .from("automation_runs")
     .update({
       status: "running",
+
       execution_context: {
         plan,
-        planner_model: data.model || DEFAULT_MODEL,
+        planner_model:
+          data.model ||
+          DEFAULT_MODEL,
       },
     })
-    .eq("id", run.id)
-    .eq("task_id", taskId)
-    .eq("user_id", user.id);
+    .eq(
+      "id",
+      run.id
+    )
+    .eq(
+      "task_id",
+      taskId
+    )
+    .eq(
+      "user_id",
+      user.id
+    );
 
   if (runUpdateError) {
     throw new Error(
-      runUpdateError.message || "Could not update automation run."
+      runUpdateError.message ||
+        "Could not update automation run."
     );
   }
 
-  const { error: taskUpdateError } = await supabase
+  const {
+    error:
+      taskUpdateError,
+  } = await supabase
     .from("automation_tasks")
     .update({
       title: plan.title,
@@ -617,12 +930,19 @@ ${prompt}`,
       plan,
       errors: null,
     })
-    .eq("id", taskId)
-    .eq("user_id", user.id);
+    .eq(
+      "id",
+      taskId
+    )
+    .eq(
+      "user_id",
+      user.id
+    );
 
   if (taskUpdateError) {
     throw new Error(
-      taskUpdateError.message || "Could not save automation plan."
+      taskUpdateError.message ||
+        "Could not save automation plan."
     );
   }
 
@@ -630,10 +950,19 @@ ${prompt}`,
     taskId,
     runId: run.id,
     plan,
+
     usage: {
-      inputTokens: usage.prompt_tokens || 0,
-      outputTokens: usage.completion_tokens || 0,
-      totalTokens: usage.total_tokens || 0,
+      inputTokens:
+        usage.prompt_tokens ||
+        0,
+
+      outputTokens:
+        usage.completion_tokens ||
+        0,
+
+      totalTokens:
+        usage.total_tokens ||
+        0,
     },
   };
 }
