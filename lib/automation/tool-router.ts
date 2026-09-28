@@ -2,6 +2,8 @@ import type {
   AutomationPlanStep,
 } from "@/lib/automation/planner";
 
+import { executeFileRead } from "@/lib/automation/tools/file-read";
+
 import {
   executeHttpRequest,
 } from "@/lib/automation/tools/http-request";
@@ -411,17 +413,14 @@ const tools: Record<
     }),
   },
 
-  file_read: {
-    name: "file_read",
-
-    execute: async () => ({
-      success: false,
-      error:
-        'Automation tool "file_read" is not connected yet.',
-      errorCode:
-        "TOOL_NOT_CONNECTED",
-    }),
+file_read: {
+  name: "file_read",
+  execute: async (input, context) => {
+    return executeFileRead(input, {
+      userId: context.userId,
+    });
   },
+},
 
   file_write: {
     name: "file_write",
