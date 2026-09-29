@@ -10,8 +10,11 @@ export const runtime = "nodejs";
 
 const MAX_BODY_SIZE = 12000;
 
-function getBearerToken(request: Request): string | undefined {
-  const authorization = request.headers.get("authorization");
+function getBearerToken(
+  request: Request
+): string | undefined {
+  const authorization =
+    request.headers.get("authorization");
 
   if (!authorization) {
     return undefined;
@@ -21,24 +24,33 @@ function getBearerToken(request: Request): string | undefined {
     return undefined;
   }
 
-  const token = authorization.slice(7).trim();
+  const token =
+    authorization.slice(7).trim();
 
   return token || undefined;
 }
 
-export async function POST(request: Request) {
+export async function POST(
+  request: Request
+) {
   try {
-    const contentLength = request.headers.get("content-length");
+    const contentLength =
+      request.headers.get("content-length");
 
     if (contentLength) {
       const size = Number(contentLength);
 
-      if (Number.isFinite(size) && size > MAX_BODY_SIZE) {
+      if (
+        Number.isFinite(size) &&
+        size > MAX_BODY_SIZE
+      ) {
         return NextResponse.json(
           {
             success: false,
-            error: "Request body is too large.",
-            errorCode: "REQUEST_TOO_LARGE",
+            error:
+              "Request body is too large.",
+            errorCode:
+              "REQUEST_TOO_LARGE",
           },
           { status: 413 }
         );
@@ -49,15 +61,19 @@ export async function POST(request: Request) {
     // AUTHENTICATION
     // =====================================================
 
-    const accessToken = getBearerToken(request);
+    const accessToken =
+      getBearerToken(request);
 
-    const supabase = await createServerSupabaseClient();
+    const supabase =
+      await createServerSupabaseClient();
 
     let user = null;
 
     if (accessToken) {
       const { data, error } =
-        await supabase.auth.getUser(accessToken);
+        await supabase.auth.getUser(
+          accessToken
+        );
 
       if (error) {
         console.error(
@@ -90,7 +106,8 @@ export async function POST(request: Request) {
           success: false,
           error:
             "Your ZUQEN session is not available. Please refresh the page and try again.",
-          errorCode: "AUTH_REQUIRED",
+          errorCode:
+            "AUTH_REQUIRED",
         },
         { status: 401 }
       );
@@ -108,33 +125,43 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           success: false,
-          error: "Invalid JSON request.",
-          errorCode: "INVALID_JSON",
+          error:
+            "Invalid JSON request.",
+          errorCode:
+            "INVALID_JSON",
         },
         { status: 400 }
       );
     }
 
-    if (!body || typeof body !== "object") {
+    if (
+      !body ||
+      typeof body !== "object"
+    ) {
       return NextResponse.json(
         {
           success: false,
-          error: "Invalid request body.",
-          errorCode: "INVALID_BODY",
+          error:
+            "Invalid request body.",
+          errorCode:
+            "INVALID_BODY",
         },
         { status: 400 }
       );
     }
 
-    const payload = body as Record<string, unknown>;
+    const payload =
+      body as Record<string, unknown>;
 
     const prompt =
-      typeof payload.prompt === "string"
+      typeof payload.prompt ===
+      "string"
         ? payload.prompt.trim()
         : "";
 
     const title =
-      typeof payload.title === "string"
+      typeof payload.title ===
+      "string"
         ? payload.title.trim()
         : undefined;
 
@@ -142,8 +169,10 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           success: false,
-          error: "Automation request is required.",
-          errorCode: "PROMPT_REQUIRED",
+          error:
+            "Automation request is required.",
+          errorCode:
+            "PROMPT_REQUIRED",
         },
         { status: 400 }
       );
@@ -155,31 +184,37 @@ export async function POST(request: Request) {
           success: false,
           error:
             "Automation request cannot exceed 10000 characters.",
-          errorCode: "PROMPT_TOO_LONG",
+          errorCode:
+            "PROMPT_TOO_LONG",
         },
         { status: 400 }
       );
     }
 
-    const input: CreateAutomationInput = {
-      prompt,
-      title,
-    };
+    const input: CreateAutomationInput =
+      {
+        prompt,
+        title,
+      };
 
     // =====================================================
     // CREATE AUTOMATION TASK
     // =====================================================
 
-    const created = await createAutomationTask(
-      input,
-      accessToken
-    );
+    const created =
+      await createAutomationTask(
+        input,
+        accessToken
+      );
 
     if (!created.success) {
       const status =
-        created.error === "Authentication required."
+        created.error ===
+        "Authentication required."
           ? 401
-          : created.error?.includes("cannot exceed")
+          : created.error?.includes(
+                "cannot exceed"
+              )
             ? 400
             : 500;
 
@@ -195,7 +230,8 @@ export async function POST(request: Request) {
           success: false,
           error:
             "Automation task was created without a task ID.",
-          errorCode: "TASK_ID_MISSING",
+          errorCode:
+            "TASK_ID_MISSING",
         },
         { status: 500 }
       );
@@ -204,26 +240,33 @@ export async function POST(request: Request) {
     // =====================================================
     // PLAN AUTOMATION TASK
     // =====================================================
-    //
-    // planAutomationTask() throws on failure.
-    // It does NOT return { success, error, errorCode }.
-    //
-    // Therefore we directly use its returned:
-    // taskId, runId, plan and usage.
-    // =====================================================
 
-    const planned = await planAutomationTask(
-      created.taskId,
-      accessToken
-    );
+    const planned =
+      await planAutomationTask(
+        created.taskId,
+        accessToken
+      );
+
+    // =====================================================
+    // FINAL API RESPONSE
+    // =====================================================
 
     return NextResponse.json(
       {
         success: true,
+
+        // Primary camelCase response
         taskId: planned.taskId,
         runId: planned.runId,
+
+        // Explicit aliases for compatibility
+        task_id: planned.taskId,
+        run_id: planned.runId,
+
         status: "planned",
+
         plan: planned.plan,
+
         usage: planned.usage,
       },
       { status: 201 }
@@ -243,7 +286,8 @@ export async function POST(request: Request) {
       {
         success: false,
         error: message,
-        errorCode: "AUTOMATION_API_ERROR",
+        errorCode:
+          "AUTOMATION_API_ERROR",
       },
       { status: 500 }
     );
@@ -254,8 +298,10 @@ export async function GET() {
   return NextResponse.json(
     {
       success: false,
-      error: "Method not allowed.",
-      errorCode: "METHOD_NOT_ALLOWED",
+      error:
+        "Method not allowed.",
+      errorCode:
+        "METHOD_NOT_ALLOWED",
     },
     {
       status: 405,

@@ -67,26 +67,43 @@ const TOOL_LABELS: Record<string, string> = {
   browser: "Browser",
 };
 
-function createParticles(count: number): Particle[] {
-  return Array.from({ length: count }, (_, index) => {
-    const angle =
-      (Math.PI * 2 * index) / count +
-      (Math.random() - 0.5) * 0.35;
+function createParticles(
+  count: number
+): Particle[] {
+  return Array.from(
+    { length: count },
+    (_, index) => {
+      const angle =
+        (Math.PI * 2 * index) / count +
+        (Math.random() - 0.5) * 0.35;
 
-    return {
-      x: Math.random(),
-      y: Math.random(),
-      size: 0.7 + Math.random() * 2.6,
-      opacity: 0.15 + Math.random() * 0.75,
-      angle,
-      radius: 65 + Math.random() * 125,
-      speed: 0.00015 + Math.random() * 0.00045,
-      drift: (Math.random() - 0.5) * 0.0015,
-    };
-  });
+      return {
+        x: Math.random(),
+        y: Math.random(),
+        size:
+          0.7 +
+          Math.random() * 2.6,
+        opacity:
+          0.15 +
+          Math.random() * 0.75,
+        angle,
+        radius:
+          65 +
+          Math.random() * 125,
+        speed:
+          0.00015 +
+          Math.random() * 0.00045,
+        drift:
+          (Math.random() - 0.5) *
+          0.0015,
+      };
+    }
+  );
 }
 
-function getStatusLabel(status: AutomationStatus) {
+function getStatusLabel(
+  status: AutomationStatus
+) {
   switch (status) {
     case "creating":
       return "Creating automation";
@@ -111,7 +128,9 @@ function getStatusLabel(status: AutomationStatus) {
   }
 }
 
-function getStepStatusIcon(status?: string) {
+function getStepStatusIcon(
+  status?: string
+) {
   switch (status) {
     case "completed":
     case "success":
@@ -133,7 +152,9 @@ function getStepStatusIcon(status?: string) {
   }
 }
 
-function normalizeSteps(value: unknown): AutomationStep[] {
+function normalizeSteps(
+  value: unknown
+): AutomationStep[] {
   if (!Array.isArray(value)) {
     return [];
   }
@@ -152,41 +173,54 @@ function normalizeSteps(value: unknown): AutomationStep[] {
     const step =
       item as Record<string, unknown>;
 
-    const normalizedStep: AutomationStep = {
-      step_number:
-        typeof step.step_number === "number"
-          ? step.step_number
-          : index + 1,
+    const normalizedStep: AutomationStep =
+      {
+        step_number:
+          typeof step.step_number ===
+          "number"
+            ? step.step_number
+            : index + 1,
 
-      name:
-        typeof step.name === "string"
-          ? step.name
-          : `Step ${index + 1}`,
+        name:
+          typeof step.name ===
+          "string"
+            ? step.name
+            : `Step ${index + 1}`,
 
-      description:
-        typeof step.description === "string"
-          ? step.description
-          : "",
+        description:
+          typeof step.description ===
+          "string"
+            ? step.description
+            : "",
 
-      tool_name:
-        typeof step.tool_name === "string"
-          ? step.tool_name
-          : "unknown",
+        tool_name:
+          typeof step.tool_name ===
+          "string"
+            ? step.tool_name
+            : "unknown",
 
-      status:
-        typeof step.status === "string"
-          ? step.status
-          : "queued",
+        status:
+          typeof step.status ===
+          "string"
+            ? step.status
+            : "queued",
 
-      requires_approval:
-        Boolean(step.requires_approval),
-    };
+        requires_approval:
+          Boolean(
+            step.requires_approval
+          ),
+      };
 
-    if (typeof step.id === "string") {
-      normalizedStep.id = step.id;
+    if (
+      typeof step.id === "string"
+    ) {
+      normalizedStep.id =
+        step.id;
     }
 
-    steps.push(normalizedStep);
+    steps.push(
+      normalizedStep
+    );
   });
 
   return steps;
@@ -195,6 +229,11 @@ function normalizeSteps(value: unknown): AutomationStep[] {
 function extractTaskFromResponse(
   data: any
 ): AutomationTask | null {
+  /*
+   * The API may return the task in
+   * different locations depending on
+   * the endpoint.
+   */
   const candidate =
     data?.task ??
     data?.automation ??
@@ -203,53 +242,107 @@ function extractTaskFromResponse(
 
   if (
     !candidate ||
-    typeof candidate !== "object"
+    typeof candidate !== "object" ||
+    Array.isArray(candidate)
   ) {
     return null;
   }
 
+  /*
+   * Support all common task ID formats:
+   *
+   * id
+   * taskId
+   * task_id
+   */
   const id =
-    typeof candidate.id === "string"
+    typeof candidate.id ===
+    "string"
       ? candidate.id
-      : typeof candidate.task_id === "string"
-        ? candidate.task_id
-        : null;
+      : typeof candidate.taskId ===
+          "string"
+        ? candidate.taskId
+        : typeof candidate.task_id ===
+            "string"
+          ? candidate.task_id
+          : null;
 
   if (!id) {
     return null;
   }
 
+  /*
+   * Support both:
+   *
+   * run_id
+   * runId
+   */
+  const runId =
+    typeof candidate.run_id ===
+    "string"
+      ? candidate.run_id
+      : typeof candidate.runId ===
+          "string"
+        ? candidate.runId
+        : null;
+
+  /*
+   * Some API responses may contain
+   * the actual plan directly.
+   *
+   * Others may wrap it inside
+   * plan.steps.
+   */
+  const planSteps =
+    candidate?.plan &&
+    typeof candidate.plan ===
+      "object" &&
+    !Array.isArray(
+      candidate.plan
+    )
+      ? (
+          candidate.plan as Record<
+            string,
+            unknown
+          >
+        ).steps
+      : undefined;
+
+  const rawSteps =
+    candidate.steps ??
+    planSteps;
+
   return {
     id,
 
     prompt:
-      typeof candidate.prompt === "string"
+      typeof candidate.prompt ===
+      "string"
         ? candidate.prompt
         : "",
 
     title:
-      typeof candidate.title === "string"
+      typeof candidate.title ===
+      "string"
         ? candidate.title
         : null,
 
     summary:
-      typeof candidate.summary === "string"
+      typeof candidate.summary ===
+      "string"
         ? candidate.summary
         : null,
 
     status:
-      typeof candidate.status === "string"
+      typeof candidate.status ===
+      "string"
         ? candidate.status
         : null,
 
-    run_id:
-      typeof candidate.run_id === "string"
-        ? candidate.run_id
-        : null,
+    run_id: runId,
 
-    steps: normalizeSteps(
-      candidate.steps
-    ),
+    steps:
+      normalizeSteps(rawSteps),
   };
 }
 
@@ -259,7 +352,9 @@ function ParticleField({
   active: boolean;
 }) {
   const canvasRef =
-    useRef<HTMLCanvasElement | null>(null);
+    useRef<HTMLCanvasElement | null>(
+      null
+    );
 
   const particlesRef =
     useRef<Particle[]>(
@@ -283,7 +378,8 @@ function ParticleField({
     const resize = () => {
       const ratio =
         Math.min(
-          window.devicePixelRatio || 1,
+          window.devicePixelRatio ||
+            1,
           2
         );
 
@@ -337,18 +433,19 @@ function ParticleField({
         active
           ? 1 +
             Math.sin(
-              timestamp * 0.003
+              timestamp *
+                0.003
             ) *
               0.055
           : 1 +
             Math.sin(
-              timestamp * 0.0012
+              timestamp *
+                0.0012
             ) *
               0.025;
 
-      for (
-        const particle of particlesRef.current
-      ) {
+      for (const particle of
+        particlesRef.current) {
         particle.angle +=
           particle.speed *
           (active ? 2.2 : 1);
@@ -358,8 +455,10 @@ function ParticleField({
           (active ? 1.8 : 1);
 
         if (
-          particle.radius < 55 ||
-          particle.radius > 205
+          particle.radius <
+            55 ||
+          particle.radius >
+            205
         ) {
           particle.drift *= -1;
         }
@@ -390,7 +489,8 @@ function ParticleField({
             0,
             x,
             y,
-            particle.size * 5
+            particle.size *
+              5
           );
 
         glow.addColorStop(
@@ -408,7 +508,8 @@ function ParticleField({
           "rgba(100,100,130,0)"
         );
 
-        context.fillStyle = glow;
+        context.fillStyle =
+          glow;
 
         context.beginPath();
 
@@ -439,7 +540,9 @@ function ParticleField({
       }
 
       animationFrame =
-        requestAnimationFrame(draw);
+        requestAnimationFrame(
+          draw
+        );
     };
 
     resize();
@@ -625,8 +728,10 @@ export default function AutomationPage() {
   const [error, setError] =
     useState("");
 
-  const [mobileInfoOpen, setMobileInfoOpen] =
-    useState(false);
+  const [
+    mobileInfoOpen,
+    setMobileInfoOpen,
+  ] = useState(false);
 
   const textareaRef =
     useRef<HTMLTextAreaElement | null>(
@@ -683,9 +788,7 @@ export default function AutomationPage() {
 
         try {
           const {
-            data: {
-              user,
-            },
+            data: { user },
           } =
             await supabase.auth.getUser();
 
@@ -695,15 +798,40 @@ export default function AutomationPage() {
             );
           }
 
+          /*
+           * Get the current access token
+           * and send it explicitly to the
+           * server when available.
+           *
+           * Cookie authentication remains
+           * supported by the server.
+           */
+          const {
+            data: {
+              session,
+            },
+          } =
+            await supabase.auth.getSession();
+
+          const headers: HeadersInit =
+            {
+              "Content-Type":
+                "application/json",
+            };
+
+          if (
+            session?.access_token
+          ) {
+            headers.Authorization =
+              `Bearer ${session.access_token}`;
+          }
+
           const response =
             await fetch(
               "/api/automation",
               {
                 method: "POST",
-                headers: {
-                  "Content-Type":
-                    "application/json",
-                },
+                headers,
                 body: JSON.stringify({
                   prompt,
                 }),
@@ -733,12 +861,30 @@ export default function AutomationPage() {
             );
           }
 
+          /*
+           * The API response is expected
+           * to contain:
+           *
+           * taskId
+           * runId
+           * status
+           * plan
+           *
+           * extractTaskFromResponse()
+           * supports both camelCase and
+           * snake_case IDs.
+           */
           const created =
             extractTaskFromResponse(
               data
             );
 
           if (!created) {
+            console.error(
+              "Automation API response did not contain a usable task:",
+              data
+            );
+
             throw new Error(
               "Automation task was created but no task ID was returned."
             );
@@ -793,15 +939,32 @@ export default function AutomationPage() {
         setStatus("running");
 
         try {
+          const {
+            data: {
+              session,
+            },
+          } =
+            await supabase.auth.getSession();
+
+          const headers: HeadersInit =
+            {
+              "Content-Type":
+                "application/json",
+            };
+
+          if (
+            session?.access_token
+          ) {
+            headers.Authorization =
+              `Bearer ${session.access_token}`;
+          }
+
           const response =
             await fetch(
               "/api/automation/execute",
               {
                 method: "POST",
-                headers: {
-                  "Content-Type":
-                    "application/json",
-                },
+                headers,
                 body: JSON.stringify({
                   taskId:
                     task.id,
@@ -981,17 +1144,21 @@ export default function AutomationPage() {
             </div>
 
             <h1 className="text-3xl font-medium tracking-[-0.035em] text-white/90 sm:text-5xl">
-              {status === "completed"
+              {status ===
+              "completed"
                 ? "Automation complete"
-                : status === "failed"
+                : status ===
+                    "failed"
                   ? "Something went wrong"
-                  : status === "running"
+                  : status ===
+                      "running"
                     ? "ZUQEN is working"
                     : "What do you want to automate?"}
             </h1>
 
             <p className="mx-auto mt-4 max-w-xl text-sm leading-6 text-white/30 sm:text-base">
-              {status === "running"
+              {status ===
+              "running"
                 ? "Your automation is executing its plan."
                 : status ===
                     "completed"
@@ -1062,7 +1229,9 @@ export default function AutomationPage() {
                 {suggestions.map(
                   suggestion => (
                     <button
-                      key={suggestion}
+                      key={
+                        suggestion
+                      }
                       onClick={() =>
                         setInput(
                           suggestion
@@ -1096,7 +1265,9 @@ export default function AutomationPage() {
               </p>
 
               <button
-                onClick={startOver}
+                onClick={
+                  startOver
+                }
                 className="mt-3 rounded-full border border-white/10 px-4 py-2 text-[10px] text-white/60 hover:bg-white/[0.05] hover:text-white"
               >
                 Try again
@@ -1104,69 +1275,73 @@ export default function AutomationPage() {
             </div>
           )}
 
-          {hasPlan && task && (
-            <div className="mt-8 w-full max-w-3xl pb-12">
-              <div className="mb-6 rounded-3xl border border-white/[0.07] bg-white/[0.025] p-5 backdrop-blur-xl sm:p-6">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="min-w-0">
-                    <p className="text-[9px] uppercase tracking-[0.2em] text-white/25">
-                      Automation goal
-                    </p>
+          {hasPlan &&
+            task && (
+              <div className="mt-8 w-full max-w-3xl pb-12">
+                <div className="mb-6 rounded-3xl border border-white/[0.07] bg-white/[0.025] p-5 backdrop-blur-xl sm:p-6">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <p className="text-[9px] uppercase tracking-[0.2em] text-white/25">
+                        Automation goal
+                      </p>
 
-                    <h2 className="mt-2 text-base font-medium text-white/80 sm:text-lg">
-                      {task.title ||
-                        "Automation task"}
-                    </h2>
+                      <h2 className="mt-2 text-base font-medium text-white/80 sm:text-lg">
+                        {task.title ||
+                          "Automation task"}
+                      </h2>
 
-                    <p className="mt-2 text-xs leading-5 text-white/30">
-                      {task.summary ||
-                        task.prompt}
-                    </p>
-                  </div>
+                      <p className="mt-2 text-xs leading-5 text-white/30">
+                        {task.summary ||
+                          task.prompt}
+                      </p>
+                    </div>
 
-                  <div className="shrink-0 rounded-full border border-white/[0.07] bg-white/[0.025] px-3 py-1.5 text-[9px] uppercase tracking-wider text-white/30">
-                    {getStatusLabel(
-                      status
-                    )}
+                    <div className="shrink-0 rounded-full border border-white/[0.07] bg-white/[0.025] px-3 py-1.5 text-[9px] uppercase tracking-wider text-white/30">
+                      {getStatusLabel(
+                        status
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              <StepTimeline
-                steps={
-                  task.steps ?? []
-                }
-              />
+                <StepTimeline
+                  steps={
+                    task.steps ??
+                    []
+                  }
+                />
 
-              <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-                <button
-                  onClick={startOver}
-                  className="rounded-full border border-white/[0.07] px-5 py-3 text-xs text-white/35 transition hover:bg-white/[0.035] hover:text-white/70"
-                >
-                  New automation
-                </button>
-
-                {status ===
-                  "ready" && (
+                <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
                   <button
-                    onClick={() =>
-                      void executeAutomation()
+                    onClick={
+                      startOver
                     }
-                    className="rounded-full bg-white px-6 py-3 text-xs font-medium text-black transition hover:scale-[1.01]"
+                    className="rounded-full border border-white/[0.07] px-5 py-3 text-xs text-white/35 transition hover:bg-white/[0.035] hover:text-white/70"
                   >
-                    Run automation →
+                    New automation
                   </button>
-                )}
 
-                {status ===
-                  "completed" && (
-                  <div className="rounded-full border border-white/10 bg-white/[0.04] px-6 py-3 text-xs text-white/60">
-                    ✓ Completed
-                  </div>
-                )}
+                  {status ===
+                    "ready" && (
+                    <button
+                      onClick={() =>
+                        void executeAutomation()
+                      }
+                      className="rounded-full bg-white px-6 py-3 text-xs font-medium text-black transition hover:scale-[1.01]"
+                    >
+                      Run automation →
+                    </button>
+                  )}
+
+                  {status ===
+                    "completed" && (
+                    <div className="rounded-full border border-white/10 bg-white/[0.04] px-6 py-3 text-xs text-white/60">
+                      ✓ Completed
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
-          )}
+            )}
         </div>
 
         <footer className="relative z-20 flex items-center justify-center px-4 pb-5">
