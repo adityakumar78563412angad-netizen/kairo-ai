@@ -49,6 +49,38 @@ type Particle = {
   drift: number;
 };
 
+type AutomationStatusResponse = {
+  success?: boolean;
+  error?: string;
+  task?: {
+    id: string;
+    prompt?: string;
+    title?: string | null;
+    summary?: string | null;
+    status?: string | null;
+  };
+  run?: {
+    id: string;
+    task_id: string;
+    status?: string | null;
+    result?: unknown;
+    error?: string | null;
+  } | null;
+  steps?: AutomationStep[];
+  progress?: {
+    completed: number;
+    running: number;
+    failed: number;
+    waiting: number;
+    total: number;
+    percentage: number;
+  };
+  terminal?: boolean;
+  completed?: boolean;
+  failed?: boolean;
+  waiting_approval?: boolean;
+};
+
 const supabase = createClient();
 
 const TOOL_LABELS: Record<string, string> = {
@@ -144,6 +176,7 @@ function getStepStatusIcon(
       return "×";
 
     case "waiting":
+    case "waiting_approval":
     case "approval_required":
       return "⋯";
 
@@ -229,11 +262,6 @@ function normalizeSteps(
 function extractTaskFromResponse(
   data: any
 ): AutomationTask | null {
-  /*
-   * The API may return the task in
-   * different locations depending on
-   * the endpoint.
-   */
   const candidate =
     data?.task ??
     data?.automation ??
@@ -248,13 +276,6 @@ function extractTaskFromResponse(
     return null;
   }
 
-  /*
-   * Support all common task ID formats:
-   *
-   * id
-   * taskId
-   * task_id
-   */
   const id =
     typeof candidate.id ===
     "string"
@@ -271,12 +292,6 @@ function extractTaskFromResponse(
     return null;
   }
 
-  /*
-   * Support both:
-   *
-   * run_id
-   * runId
-   */
   const runId =
     typeof candidate.run_id ===
     "string"
@@ -286,13 +301,6 @@ function extractTaskFromResponse(
         ? candidate.runId
         : null;
 
-  /*
-   * Some API responses may contain
-   * the actual plan directly.
-   *
-   * Others may wrap it inside
-   * plan.steps.
-   */
   const planSteps =
     candidate?.plan &&
     typeof candidate.plan ===
@@ -669,7 +677,14 @@ function StepTimeline({
                       : step.status ===
                           "failed"
                         ? "border-white/15 bg-white/[0.05] text-white/70"
-                        : "border-white/[0.08] bg-white/[0.025] text-white/35"
+                        : step.status ===
+                              "waiting_approval" ||
+                            step.status ===
+                              "approval_required" ||
+                            step.status ===
+                              "waiting"
+                          ? "border-white/15 bg-white/[0.06] text-white/60"
+                          : "border-white/[0.08] bg-white/[0.025] text-white/35"
                 }`}
               >
                 {getStepStatusIcon(
@@ -696,6 +711,29 @@ function StepTimeline({
                   ] ??
                     step.tool_name}
                 </p>
+
+                {step.status ===
+                  "running" && (
+                  <p className="mt-1 text-[10px] text-white/25">
+                    Executing...
+                  </p>
+                )}
+
+                {step.status ===
+                  "failed" && (
+                  <p className="mt-1 text-[10px] text-white/35">
+                    Step failed
+                  </p>
+                )}
+
+                {step.status ===
+                    "waiting_approval" ||
+                  step.status ===
+                    "approval_required" ? (
+                  <p className="mt-1 text-[10px] text-white/25">
+                    Waiting for approval
+                  </p>
+                ) : null}
               </div>
 
               <span className="text-[10px] text-white/20">
@@ -729,6 +767,18 @@ export default function AutomationPage() {
     useState("");
 
   const [
+    progress,
+    setProgress,
+  ] = useState({
+    completed: 0,
+    running: 0,
+    failed: 0,
+    waiting: 0,
+    total: 0,
+    percentage: 0,
+  });
+
+  const [
     mobileInfoOpen,
     setMobileInfoOpen,
   ] = useState(false);
@@ -737,6 +787,22 @@ export default function AutomationPage() {
     useRef<HTMLTextAreaElement | null>(
       null
     );
+
+  const executionStartedRef =
+    useRef(false);
+
+  const executionRequestRef =
+    useRef<Promise<void> | null>(
+      null
+    );
+
+  const pollTimerRef =
+    useRef<ReturnType<
+      typeof setTimeout
+    > | null>(null);
+
+  const mountedRef =
+    useRef(true);
 
   const active =
     status === "creating" ||
@@ -773,6 +839,281 @@ export default function AutomationPage() {
     resetComposerHeight,
   ]);
 
+  useEffect(() => {
+    mountedRef.current =
+      true;
+
+    return () => {
+      mountedRef.current =
+        false;
+
+      if (
+        pollTimerRef.current
+      ) {
+        clearTimeout(
+          pollTimerRef.current
+        );
+
+        pollTimerRef.current =
+          null;
+      }
+    };
+  }, []);
+
+  const getAuthHeaders =
+    useCallback(
+      async (): Promise<HeadersInit> => {
+        const {
+          data: {
+            session,
+          },
+        } =
+          await supabase.auth.getSession();
+
+        const headers: HeadersInit =
+          {
+            "Content-Type":
+              "application/json",
+          };
+
+        if (
+          session?.access_token
+        ) {
+          headers.Authorization =
+            `Bearer ${session.access_token}`;
+        }
+
+        return headers;
+      },
+      []
+    );
+
+  const refreshAutomationStatus =
+    useCallback(
+      async (
+        taskId: string,
+        runId?: string | null
+      ): Promise<
+        AutomationStatusResponse | null
+      > => {
+        try {
+          const params =
+            new URLSearchParams();
+
+          params.set(
+            "taskId",
+            taskId
+          );
+
+          if (runId) {
+            params.set(
+              "runId",
+              runId
+            );
+          }
+
+          const headers =
+            await getAuthHeaders();
+
+          const response =
+            await fetch(
+              `/api/automation/status?${params.toString()}`,
+              {
+                method: "GET",
+                headers,
+                cache: "no-store",
+              }
+            );
+
+          const raw =
+            await response.text();
+
+          let data: AutomationStatusResponse =
+            {};
+
+          try {
+            data = raw
+              ? JSON.parse(raw)
+              : {};
+          } catch {
+            throw new Error(
+              "Automation status returned an invalid response."
+            );
+          }
+
+          if (!response.ok) {
+            throw new Error(
+              data?.error ||
+                `Unable to read automation status (${response.status}).`
+            );
+          }
+
+          if (
+            !mountedRef.current
+          ) {
+            return data;
+          }
+
+          if (
+            Array.isArray(
+              data.steps
+            )
+          ) {
+            setTask(
+              previous => {
+                if (!previous) {
+                  return previous;
+                }
+
+                return {
+                  ...previous,
+                  status:
+                    data.task
+                      ?.status ??
+                    previous.status,
+                  title:
+                    data.task
+                      ?.title ??
+                    previous.title,
+                  summary:
+                    data.task
+                      ?.summary ??
+                    previous.summary,
+                  steps:
+                    normalizeSteps(
+                      data.steps
+                    ),
+                };
+              }
+            );
+          }
+
+          if (data.progress) {
+            setProgress(
+              data.progress
+            );
+          }
+
+          if (
+            data.waiting_approval
+          ) {
+            setStatus(
+              "ready"
+            );
+
+            return data;
+          }
+
+          if (data.failed) {
+            setStatus(
+              "failed"
+            );
+
+            const failedStep =
+              data.steps?.find(
+                step =>
+                  step.status ===
+                  "failed"
+              );
+
+            setError(
+              failedStep
+                ? `Automation step ${failedStep.step_number} failed.`
+                : data.run
+                    ?.error ||
+                    data.error ||
+                    "Automation execution failed."
+            );
+
+            return data;
+          }
+
+          if (data.completed) {
+            setStatus(
+              "completed"
+            );
+
+            return data;
+          }
+
+          return data;
+        } catch (caught) {
+          console.error(
+            "Automation status refresh error:",
+            caught
+          );
+
+          return null;
+        }
+      },
+      [getAuthHeaders]
+    );
+
+  const stopPolling =
+    useCallback(() => {
+      if (
+        pollTimerRef.current
+      ) {
+        clearTimeout(
+          pollTimerRef.current
+        );
+
+        pollTimerRef.current =
+          null;
+      }
+    }, []);
+
+  const pollAutomation =
+    useCallback(
+      async (
+        taskId: string,
+        runId: string
+      ) => {
+        stopPolling();
+
+        const poll = async () => {
+          if (
+            !mountedRef.current
+          ) {
+            return;
+          }
+
+          const result =
+            await refreshAutomationStatus(
+              taskId,
+              runId
+            );
+
+          if (
+            !mountedRef.current
+          ) {
+            return;
+          }
+
+          if (
+            result?.terminal ||
+            result?.completed ||
+            result?.failed ||
+            result?.waiting_approval
+          ) {
+            return;
+          }
+
+          pollTimerRef.current =
+            setTimeout(
+              poll,
+              1000
+            );
+        };
+
+        await poll();
+      },
+      [
+        refreshAutomationStatus,
+        stopPolling,
+      ]
+    );
+
   const createAutomation =
     useCallback(
       async () => {
@@ -783,7 +1124,17 @@ export default function AutomationPage() {
           return;
         }
 
+        stopPolling();
+
         setError("");
+        setProgress({
+          completed: 0,
+          running: 0,
+          failed: 0,
+          waiting: 0,
+          total: 0,
+          percentage: 0,
+        });
         setStatus("creating");
 
         try {
@@ -798,33 +1149,8 @@ export default function AutomationPage() {
             );
           }
 
-          /*
-           * Get the current access token
-           * and send it explicitly to the
-           * server when available.
-           *
-           * Cookie authentication remains
-           * supported by the server.
-           */
-          const {
-            data: {
-              session,
-            },
-          } =
-            await supabase.auth.getSession();
-
-          const headers: HeadersInit =
-            {
-              "Content-Type":
-                "application/json",
-            };
-
-          if (
-            session?.access_token
-          ) {
-            headers.Authorization =
-              `Bearer ${session.access_token}`;
-          }
+          const headers =
+            await getAuthHeaders();
 
           const response =
             await fetch(
@@ -861,19 +1187,6 @@ export default function AutomationPage() {
             );
           }
 
-          /*
-           * The API response is expected
-           * to contain:
-           *
-           * taskId
-           * runId
-           * status
-           * plan
-           *
-           * extractTaskFromResponse()
-           * supports both camelCase and
-           * snake_case IDs.
-           */
           const created =
             extractTaskFromResponse(
               data
@@ -890,19 +1203,28 @@ export default function AutomationPage() {
             );
           }
 
+          const createdSteps =
+            created.steps ?? [];
+
           setTask({
             ...created,
             prompt,
           });
 
+          setProgress({
+            completed: 0,
+            running: 0,
+            failed: 0,
+            waiting: 0,
+            total:
+              createdSteps.length,
+            percentage: 0,
+          });
+
           setStatus("planning");
 
           if (
-            created.steps &&
-            created.steps.length > 0
-          ) {
-            setStatus("ready");
-          } else if (
+            createdSteps.length > 0 ||
             created.status ===
               "planned" ||
             created.status ===
@@ -925,125 +1247,254 @@ export default function AutomationPage() {
           setStatus("failed");
         }
       },
-      [active, input]
+      [
+        active,
+        getAuthHeaders,
+        input,
+        stopPolling,
+      ]
     );
 
   const executeAutomation =
     useCallback(
       async () => {
-        if (!task?.id || active) {
+        if (
+          !task?.id ||
+          active ||
+          executionStartedRef.current
+        ) {
           return;
         }
 
-        setError("");
-        setStatus("running");
-
-        try {
-          const {
-            data: {
-              session,
-            },
-          } =
-            await supabase.auth.getSession();
-
-          const headers: HeadersInit =
-            {
-              "Content-Type":
-                "application/json",
-            };
-
-          if (
-            session?.access_token
-          ) {
-            headers.Authorization =
-              `Bearer ${session.access_token}`;
-          }
-
-          const response =
-            await fetch(
-              "/api/automation/execute",
-              {
-                method: "POST",
-                headers,
-                body: JSON.stringify({
-                  taskId:
-                    task.id,
-
-                  runId:
-                    task.run_id ??
-                    undefined,
-                }),
-              }
-            );
-
-          const raw =
-            await response.text();
-
-          let data: any = {};
-
-          try {
-            data = raw
-              ? JSON.parse(raw)
-              : {};
-          } catch {
-            throw new Error(
-              "Automation execution returned an invalid response."
-            );
-          }
-
-          if (!response.ok) {
-            throw new Error(
-              data?.error ||
-                data?.message ||
-                "Automation execution failed."
-            );
-          }
-
-          const result =
-            extractTaskFromResponse(
-              data
-            );
-
-          if (result) {
-            setTask(
-              previous => ({
-                ...(previous ??
-                  result),
-                ...result,
-                id:
-                  previous?.id ??
-                  result.id,
-              })
-            );
-          }
-
-          setStatus("completed");
-        } catch (caught) {
-          console.error(
-            "Automation execution error:",
-            caught
-          );
-
+        if (!task.run_id) {
           setError(
-            caught instanceof Error
-              ? caught.message
-              : "Automation execution failed."
+            "This automation does not have a valid execution run."
           );
 
           setStatus("failed");
+
+          return;
+        }
+
+        executionStartedRef.current =
+          true;
+
+        setError("");
+
+        setProgress(
+          previous => ({
+            ...previous,
+            percentage:
+              previous.total >
+              0
+                ? previous.percentage
+                : 0,
+          })
+        );
+
+        setStatus("running");
+
+        const taskId =
+          task.id;
+
+        const runId =
+          task.run_id;
+
+        try {
+          /*
+           * Start execution without making the UI
+           * wait for the entire automation.
+           *
+           * The execution request continues on
+           * the server while the frontend polls
+           * the database-backed status endpoint.
+           */
+          const executionPromise =
+            (async () => {
+              try {
+                const headers =
+                  await getAuthHeaders();
+
+                const response =
+                  await fetch(
+                    "/api/automation/execute",
+                    {
+                      method: "POST",
+                      headers,
+                      body: JSON.stringify({
+                        taskId,
+                        runId,
+                      }),
+                    }
+                  );
+
+                const raw =
+                  await response.text();
+
+                let data: any = {};
+
+                try {
+                  data = raw
+                    ? JSON.parse(raw)
+                    : {};
+                } catch {
+                  throw new Error(
+                    "Automation execution returned an invalid response."
+                  );
+                }
+
+                if (!response.ok) {
+                  throw new Error(
+                    data?.error ||
+                      data?.message ||
+                      "Automation execution failed."
+                  );
+                }
+
+                return data;
+              } catch (caught) {
+                console.error(
+                  "Automation execution request error:",
+                  caught
+                );
+
+                return {
+                  __executionError:
+                    caught instanceof Error
+                      ? caught.message
+                      : "Automation execution failed.",
+                };
+              }
+            })();
+
+          executionRequestRef.current =
+            executionPromise.then(
+              () => undefined
+            );
+
+          /*
+           * Immediately start status polling.
+           */
+          await pollAutomation(
+            taskId,
+            runId
+          );
+
+          /*
+           * Polling is authoritative for the
+           * visible automation state.
+           *
+           * If the execution request itself
+           * returns an error, perform one final
+           * status read before showing failure.
+           */
+          const executionResult =
+            await executionPromise;
+
+          if (
+            executionResult?.__executionError
+          ) {
+            const latest =
+              await refreshAutomationStatus(
+                taskId,
+                runId
+              );
+
+            if (
+              latest?.completed
+            ) {
+              setStatus(
+                "completed"
+              );
+            } else if (
+              latest?.failed
+            ) {
+              setStatus(
+                "failed"
+              );
+
+              setError(
+                latest.run
+                  ?.error ||
+                  executionResult.__executionError
+              );
+            } else {
+              setStatus(
+                "failed"
+              );
+
+              setError(
+                executionResult.__executionError
+              );
+            }
+          } else {
+            const latest =
+              await refreshAutomationStatus(
+                taskId,
+                runId
+              );
+
+            if (
+              latest?.completed
+            ) {
+              setStatus(
+                "completed"
+              );
+            } else if (
+              latest?.failed
+            ) {
+              setStatus(
+                "failed"
+              );
+
+              setError(
+                latest.run
+                  ?.error ||
+                  "Automation execution failed."
+              );
+            }
+          }
+        } finally {
+          executionStartedRef.current =
+            false;
+
+          executionRequestRef.current =
+            null;
         }
       },
-      [active, task]
+      [
+        active,
+        getAuthHeaders,
+        pollAutomation,
+        refreshAutomationStatus,
+        task,
+      ]
     );
 
   const startOver =
     useCallback(() => {
+      stopPolling();
+
+      executionStartedRef.current =
+        false;
+
+      executionRequestRef.current =
+        null;
+
       setInput("");
       setTask(null);
       setError("");
+      setProgress({
+        completed: 0,
+        running: 0,
+        failed: 0,
+        waiting: 0,
+        total: 0,
+        percentage: 0,
+      });
       setStatus("idle");
       setMobileInfoOpen(false);
-    }, []);
+    }, [stopPolling]);
 
   const suggestions = useMemo(
     () => [
@@ -1159,7 +1610,10 @@ export default function AutomationPage() {
             <p className="mx-auto mt-4 max-w-xl text-sm leading-6 text-white/30 sm:text-base">
               {status ===
               "running"
-                ? "Your automation is executing its plan."
+                ? progress.total >
+                  0
+                  ? `Executing ${progress.completed} of ${progress.total} steps.`
+                  : "Your automation is executing its plan."
                 : status ===
                     "completed"
                   ? "The automation has finished processing your request."
@@ -1258,6 +1712,37 @@ export default function AutomationPage() {
             </div>
           )}
 
+          {status ===
+              "running" &&
+            hasPlan && (
+              <div className="mt-7 w-full max-w-3xl">
+                <div className="mb-2 flex items-center justify-between text-[10px] uppercase tracking-[0.16em] text-white/25">
+                  <span>
+                    Live execution
+                  </span>
+
+                  <span>
+                    {progress.percentage}%
+                  </span>
+                </div>
+
+                <div className="h-1 overflow-hidden rounded-full bg-white/[0.06]">
+                  <div
+                    className="h-full rounded-full bg-white/60 transition-all duration-500"
+                    style={{
+                      width: `${Math.max(
+                        2,
+                        Math.min(
+                          100,
+                          progress.percentage
+                        )
+                      )}%`,
+                    }}
+                  />
+                </div>
+              </div>
+            )}
+
           {error && (
             <div className="mt-7 w-full max-w-2xl rounded-2xl border border-white/[0.08] bg-white/[0.025] p-4 text-center">
               <p className="text-xs leading-5 text-white/50">
@@ -1306,10 +1791,28 @@ export default function AutomationPage() {
 
                 <StepTimeline
                   steps={
-                    task.steps ??
-                    []
+                    task.steps ?? []
                   }
                 />
+
+                {status ===
+                    "running" &&
+                  progress.total >
+                    0 && (
+                    <div className="mt-4 flex justify-center">
+                      <div className="rounded-full border border-white/[0.07] bg-white/[0.025] px-4 py-2 text-[10px] text-white/30">
+                        {progress.completed}{" "}
+                        completed
+                        {" · "}
+                        {progress.running}{" "}
+                        running
+                        {progress.failed >
+                          0
+                          ? ` · ${progress.failed} failed`
+                          : ""}
+                      </div>
+                    </div>
+                  )}
 
                 <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
                   <button
@@ -1331,6 +1834,13 @@ export default function AutomationPage() {
                     >
                       Run automation →
                     </button>
+                  )}
+
+                  {status ===
+                    "running" && (
+                    <div className="rounded-full border border-white/[0.08] bg-white/[0.035] px-6 py-3 text-xs text-white/45">
+                      ZUQEN is executing...
+                    </div>
                   )}
 
                   {status ===
