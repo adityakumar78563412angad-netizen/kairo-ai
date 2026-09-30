@@ -43,6 +43,25 @@ function normalizeError(value: unknown): string | null {
   return null;
 }
 
+function isCompletedStatus(status: string | null): boolean {
+  return (
+    status === "completed" ||
+    status === "success"
+  );
+}
+
+function isFailedStatus(status: string | null): boolean {
+  return status === "failed";
+}
+
+function isWaitingApprovalStatus(status: string | null): boolean {
+  return (
+    status === "waiting_approval" ||
+    status === "approval_required" ||
+    status === "waiting"
+  );
+}
+
 export async function GET(request: NextRequest) {
   try {
     const supabase = await createServerSupabaseClient();
@@ -80,8 +99,14 @@ export async function GET(request: NextRequest) {
     }
 
     /*
-     * Load the task belonging to the
-     * authenticated user.
+     * ---------------------------------------------------------
+     * 1. Load task
+     * ---------------------------------------------------------
+     *
+     * The task is the ownership boundary.
+     *
+     * We verify that this task belongs to the authenticated
+     * user before loading its runs or steps.
      */
     const {
       data: task,
@@ -106,6 +131,7 @@ export async function GET(request: NextRequest) {
           success: false,
           error: taskError.message,
           code: "TASK_QUERY_FAILED",
+          details: taskError.code ?? null,
         },
         { status: 500 }
       );
@@ -123,10 +149,16 @@ export async function GET(request: NextRequest) {
     }
 
     /*
-     * Load the requested run when available.
+     * ---------------------------------------------------------
+     * 2. Load automation run
+     * ---------------------------------------------------------
      *
-     * If runId is omitted, use the latest run
-     * for this task.
+     * IMPORTANT:
+     * automation_runs is intentionally NOT filtered by
+     * user_id here.
+     *
+     * Ownership has already been verified through
+     * automation_tasks.id + automation_tasks.user_id.
      */
     let run: AutomationRunRow | null = null;
 
@@ -141,7 +173,6 @@ export async function GET(request: NextRequest) {
         )
         .eq("id", runId)
         .eq("task_id", taskId)
-        .eq("user_id", user.id)
         .maybeSingle<AutomationRunRow>();
 
       if (error) {
@@ -155,6 +186,7 @@ export async function GET(request: NextRequest) {
             success: false,
             error: error.message,
             code: "RUN_QUERY_FAILED",
+            details: error.code ?? null,
           },
           { status: 500 }
         );
@@ -171,7 +203,6 @@ export async function GET(request: NextRequest) {
           "id,task_id,status,result,error"
         )
         .eq("task_id", taskId)
-        .eq("user_id", user.id)
         .order("created_at", {
           ascending: false,
         })
@@ -189,6 +220,7 @@ export async function GET(request: NextRequest) {
             success: false,
             error: error.message,
             code: "LATEST_RUN_QUERY_FAILED",
+            details: error.code ?? null,
           },
           { status: 500 }
         );
@@ -198,7 +230,9 @@ export async function GET(request: NextRequest) {
     }
 
     /*
-     * Load all steps for the task/run.
+     * ---------------------------------------------------------
+     * 3. Load automation steps
+     * ---------------------------------------------------------
      */
     let stepsQuery = supabase
       .from("automation_steps")
@@ -235,14 +269,20 @@ export async function GET(request: NextRequest) {
           success: false,
           error: stepsError.message,
           code: "STEPS_QUERY_FAILED",
+          details: stepsError.code ?? null,
         },
         { status: 500 }
       );
     }
 
+    /*
+     * ---------------------------------------------------------
+     * 4. Normalize steps
+     * ---------------------------------------------------------
+     */
     const normalizedSteps = (
       steps ?? []
-    ).map(step => ({
+    ).map((step) => ({
       id: step.id,
       step_number: step.step_number,
       name: step.name,
@@ -260,56 +300,56 @@ export async function GET(request: NextRequest) {
       output:
         step.output ?? null,
       error:
-        normalizeError(
-          step.error
-        ),
+        normalizeError(step.error),
     }));
 
+    /*
+     * ---------------------------------------------------------
+     * 5. Calculate progress
+     * ---------------------------------------------------------
+     */
     const completedSteps =
-      normalizedSteps.filter(
-        step =>
-          step.status ===
-            "completed" ||
-          step.status === "success"
+      normalizedSteps.filter((step) =>
+        isCompletedStatus(step.status)
       ).length;
 
     const runningSteps =
       normalizedSteps.filter(
-        step =>
-          step.status ===
-            "running" ||
-          step.status === "executing"
+        (step) =>
+          step.status === "running" ||
+          step.status === "executing" ||
+          step.status === "ready"
       ).length;
 
     const failedSteps =
-      normalizedSteps.filter(
-        step =>
-          step.status === "failed"
+      normalizedSteps.filter((step) =>
+        isFailedStatus(step.status)
       ).length;
 
     const waitingSteps =
-      normalizedSteps.filter(
-        step =>
-          step.status ===
-            "waiting_approval" ||
-          step.status ===
-            "approval_required" ||
-          step.status === "waiting"
+      normalizedSteps.filter((step) =>
+        isWaitingApprovalStatus(
+          step.status
+        )
       ).length;
 
     const totalSteps =
       normalizedSteps.length;
 
-    let progress = 0;
+    const progress =
+      totalSteps > 0
+        ? Math.round(
+            (completedSteps /
+              totalSteps) *
+              100
+          )
+        : 0;
 
-    if (totalSteps > 0) {
-      progress = Math.round(
-        (completedSteps /
-          totalSteps) *
-          100
-      );
-    }
-
+    /*
+     * ---------------------------------------------------------
+     * 6. Calculate overall state
+     * ---------------------------------------------------------
+     */
     const taskStatus =
       task.status ?? "unknown";
 
@@ -322,7 +362,8 @@ export async function GET(request: NextRequest) {
 
     const failed =
       taskStatus === "failed" ||
-      runStatus === "failed";
+      runStatus === "failed" ||
+      failedSteps > 0;
 
     const waitingApproval =
       taskStatus ===
@@ -331,6 +372,14 @@ export async function GET(request: NextRequest) {
         "waiting_approval" ||
       waitingSteps > 0;
 
+    const terminal =
+      completed || failed;
+
+    /*
+     * ---------------------------------------------------------
+     * 7. Return live automation state
+     * ---------------------------------------------------------
+     */
     return NextResponse.json(
       {
         success: true,
@@ -355,8 +404,7 @@ export async function GET(request: NextRequest) {
                 run.status ??
                 "unknown",
               result:
-                run.result ??
-                null,
+                run.result ?? null,
               error:
                 normalizeError(
                   run.error
@@ -382,14 +430,9 @@ export async function GET(request: NextRequest) {
             progress,
         },
 
-        terminal:
-          completed ||
-          failed,
-
+        terminal,
         completed,
-
         failed,
-
         waiting_approval:
           waitingApproval,
       },
@@ -412,7 +455,8 @@ export async function GET(request: NextRequest) {
       {
         success: false,
         error: message,
-        code: "AUTOMATION_STATUS_EXCEPTION",
+        code:
+          "AUTOMATION_STATUS_EXCEPTION",
       },
       { status: 500 }
     );
