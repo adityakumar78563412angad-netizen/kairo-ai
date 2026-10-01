@@ -17,6 +17,9 @@ type Attachment = {
   name: string;
   type: string;
   size: number;
+  storage: "backblaze_b2";
+  bucket: string;
+  key: string;
 };
 
 type Message = {
@@ -1226,28 +1229,60 @@ export default function HomePage() {
     }
   };
 
-  const handleAttachment = (
-    event: React.ChangeEvent<HTMLInputElement>
-  ) => {
-    const files = Array.from(
-      event.target.files ?? []
-    );
+  const handleAttachment = async (
+  event: React.ChangeEvent<HTMLInputElement>
+) => {
+  const files = Array.from(
+    event.target.files ?? []
+  );
 
-    const mapped = files.map((file) => ({
-      id: makeId(),
-      name: file.name,
-      type: file.type,
-      size: file.size,
-    }));
+  event.target.value = "";
 
-    setAttachments((previous) => [
-      ...previous,
-      ...mapped,
-    ]);
+  if (files.length === 0) {
+    return;
+  }
 
-    event.target.value = "";
-  };
+  for (const file of files) {
+    try {
+      const formData = new FormData();
 
+      formData.append("file", file);
+
+      const response = await fetch(
+        "/api/files/upload",
+        {
+          method: "POST",
+          body: formData,
+        }
+      );
+
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        throw new Error(
+          result.error || "File upload failed"
+        );
+      }
+
+      setAttachments((previous) => [
+        ...previous,
+        result.file,
+      ]);
+    } catch (error) {
+      console.error(
+        "Attachment upload failed:",
+        error
+      );
+
+      const message =
+        error instanceof Error
+          ? error.message
+          : "File upload failed";
+
+      alert(message);
+    }
+  }
+};
   const removeAttachment = (id: string) => {
     setAttachments((previous) =>
       previous.filter((item) => item.id !== id)
@@ -3376,11 +3411,10 @@ export default function HomePage() {
   <span>⚡</span>
   <span>Automation Mode</span>
 </button>
-
 <button
   className="zuqen-top-action templates-action"
   onClick={() => {
-    window.location.href = "/templates";
+    window.location.href = "/marketplace";
   }}
   title="Buy/Sell Templates"
 >
