@@ -9,35 +9,51 @@ import {
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
-const endpoint = process.env.B2_S3_ENDPOINT;
-const region = process.env.B2_S3_REGION;
-const bucket = process.env.B2_S3_BUCKET;
-const accessKeyId = process.env.B2_S3_KEY_ID;
-const secretAccessKey = process.env.B2_S3_APPLICATION_KEY;
+function getB2Config() {
+  const endpoint = process.env.B2_S3_ENDPOINT;
+  const region = process.env.B2_S3_REGION;
+  const bucket = process.env.B2_BUCKET_NAME;
+  const accessKeyId = process.env.B2_APPLICATION_KEY_ID;
+  const secretAccessKey = process.env.B2_APPLICATION_KEY;
 
-if (
-  !endpoint ||
-  !region ||
-  !bucket ||
-  !accessKeyId ||
-  !secretAccessKey
-) {
-  throw new Error(
-    "Backblaze B2 environment variables are not configured correctly."
-  );
-}
+  if (
+    !endpoint ||
+    !region ||
+    !bucket ||
+    !accessKeyId ||
+    !secretAccessKey
+  ) {
+    throw new Error(
+      "Backblaze B2 environment variables are not configured correctly."
+    );
+  }
 
-export const b2Bucket = bucket;
-
-export const b2Client = new S3Client({
-  endpoint,
-  region,
-  credentials: {
+  return {
+    endpoint,
+    region,
+    bucket,
     accessKeyId,
     secretAccessKey,
-  },
-  forcePathStyle: true,
-});
+  };
+}
+
+function getB2Client() {
+  const config = getB2Config();
+
+  return new S3Client({
+    endpoint: config.endpoint,
+    region: config.region,
+    credentials: {
+      accessKeyId: config.accessKeyId,
+      secretAccessKey: config.secretAccessKey,
+    },
+    forcePathStyle: true,
+  });
+}
+
+export function getB2Bucket() {
+  return getB2Config().bucket;
+}
 
 export type B2UploadInput = {
   key: string;
@@ -50,14 +66,17 @@ export async function createB2UploadUrl({
   contentType,
   contentLength,
 }: B2UploadInput) {
+  const config = getB2Config();
+  const client = getB2Client();
+
   const command = new PutObjectCommand({
-    Bucket: b2Bucket,
+    Bucket: config.bucket,
     Key: key,
     ContentType: contentType,
     ContentLength: contentLength,
   });
 
-  return getSignedUrl(b2Client, command, {
+  return getSignedUrl(client, command, {
     expiresIn: 15 * 60,
   });
 }
@@ -66,29 +85,38 @@ export async function createB2DownloadUrl(
   key: string,
   expiresIn = 10 * 60
 ) {
+  const config = getB2Config();
+  const client = getB2Client();
+
   const command = new GetObjectCommand({
-    Bucket: b2Bucket,
+    Bucket: config.bucket,
     Key: key,
   });
 
-  return getSignedUrl(b2Client, command, {
+  return getSignedUrl(client, command, {
     expiresIn,
   });
 }
 
 export async function headB2Object(key: string) {
-  return b2Client.send(
+  const config = getB2Config();
+  const client = getB2Client();
+
+  return client.send(
     new HeadObjectCommand({
-      Bucket: b2Bucket,
+      Bucket: config.bucket,
       Key: key,
     })
   );
 }
 
 export async function deleteB2Object(key: string) {
-  return b2Client.send(
+  const config = getB2Config();
+  const client = getB2Client();
+
+  return client.send(
     new DeleteObjectCommand({
-      Bucket: b2Bucket,
+      Bucket: config.bucket,
       Key: key,
     })
   );
