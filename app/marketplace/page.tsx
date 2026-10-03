@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+
 import { createClient } from "@/lib/supabase";
+
 import {
   ArrowRight,
   Check,
-  ChevronRight,
   Clock3,
   Code2,
   Grid3X3,
@@ -118,7 +119,9 @@ function TemplateCard({
   return (
     <article
       onClick={() => {
-        window.location.href = `/marketplace/template/${template.slug || template.id}`;
+        window.location.href = `/marketplace/template/${
+          template.slug || template.id
+        }`;
       }}
       className="group cursor-pointer overflow-hidden rounded-2xl border border-white/[0.08] bg-white/[0.035] transition-all duration-300 hover:-translate-y-1 hover:border-white/[0.16] hover:bg-white/[0.055] hover:shadow-2xl hover:shadow-black/30"
     >
@@ -188,6 +191,7 @@ function TemplateCard({
             <h3 className="truncate text-[15px] font-semibold text-white">
               {template.name}
             </h3>
+
             <p className="mt-1 truncate text-xs text-white/45">
               {template.category}
             </p>
@@ -250,8 +254,12 @@ function Section({
             <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.04]">
               {icon}
             </span>
-            <h2 className="text-xl font-semibold tracking-tight">{title}</h2>
+
+            <h2 className="text-xl font-semibold tracking-tight">
+              {title}
+            </h2>
           </div>
+
           <p className="text-sm text-white/40">{subtitle}</p>
         </div>
 
@@ -283,7 +291,8 @@ export default function MarketplacePage() {
   const supabase = useMemo(() => createClient(), []);
 
   const [templates, setTemplates] = useState<Template[]>([]);
-  const [selectedCategory, setSelectedCategory] = useState("All Templates");
+  const [selectedCategory, setSelectedCategory] =
+    useState("All Templates");
   const [search, setSearch] = useState("");
   const [mobileCategoriesOpen, setMobileCategoriesOpen] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -359,6 +368,7 @@ export default function MarketplacePage() {
       );
 
       if (!categoryMatch) return false;
+
       if (!query) return true;
 
       const searchable = [
@@ -410,11 +420,17 @@ export default function MarketplacePage() {
     setSelectedCategory("All Templates");
   }
 
+  function handleStartSelling() {
+    window.location.href = "/marketplace/seller";
+  }
+
   return (
     <main className="min-h-screen bg-[#07070a] text-white">
       <div className="fixed inset-0 -z-10 overflow-hidden pointer-events-none">
         <div className="absolute left-1/2 top-[-240px] h-[520px] w-[820px] -translate-x-1/2 rounded-full bg-violet-600/[0.10] blur-[140px]" />
+
         <div className="absolute right-[-180px] top-[520px] h-[420px] w-[420px] rounded-full bg-blue-500/[0.06] blur-[130px]" />
+
         <div className="absolute left-[-180px] top-[900px] h-[420px] w-[420px] rounded-full bg-fuchsia-500/[0.05] blur-[130px]" />
       </div>
 
@@ -443,9 +459,7 @@ export default function MarketplacePage() {
               </button>
 
               <button
-                onClick={() =>
-                  (window.location.href = "/marketplace/sell")
-                }
+                onClick={handleStartSelling}
                 className="rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-black transition hover:bg-white/90"
               >
                 Sell a Template
@@ -510,8 +524,13 @@ export default function MarketplacePage() {
               <button
                 onClick={() => {
                   const element =
-                    document.getElementById("marketplace-content");
-                  element?.scrollIntoView({ behavior: "smooth" });
+                    document.getElementById(
+                      "marketplace-content"
+                    );
+
+                  element?.scrollIntoView({
+                    behavior: "smooth",
+                  });
                 }}
                 className="hidden rounded-xl bg-white px-5 py-3 text-sm font-semibold text-black transition hover:bg-white/90 sm:block"
               >
@@ -527,6 +546,7 @@ export default function MarketplacePage() {
               <h2 className="text-sm font-semibold text-white/80">
                 Explore categories
               </h2>
+
               <p className="mt-1 text-xs text-white/35">
                 Find the right starting point for your next project.
               </p>
@@ -557,6 +577,7 @@ export default function MarketplacePage() {
                   onClick={() => {
                     setSelectedCategory(category.name);
                     setMobileCategoriesOpen(false);
+
                     setTimeout(() => {
                       document
                         .getElementById("marketplace-content")
@@ -597,6 +618,7 @@ export default function MarketplacePage() {
                         className="overflow-hidden rounded-2xl border border-white/[0.06] bg-white/[0.025]"
                       >
                         <div className="aspect-[16/10] animate-pulse bg-white/[0.045]" />
+
                         <div className="space-y-3 p-4">
                           <div className="h-4 w-2/3 animate-pulse rounded bg-white/[0.06]" />
                           <div className="h-3 w-full animate-pulse rounded bg-white/[0.04]" />
@@ -618,7 +640,9 @@ export default function MarketplacePage() {
                 Something went wrong
               </h2>
 
-              <p className="mt-2 text-sm text-white/40">{error}</p>
+              <p className="mt-2 text-sm text-white/40">
+                {error}
+              </p>
 
               <button
                 onClick={() => window.location.reload()}
@@ -661,6 +685,7 @@ export default function MarketplacePage() {
                         <h2 className="text-xl font-semibold">
                           Search results
                         </h2>
+
                         <span className="rounded-full border border-white/[0.08] bg-white/[0.04] px-2 py-0.5 text-[11px] text-white/45">
                           {filteredTemplates.length}
                         </span>
@@ -689,7 +714,9 @@ export default function MarketplacePage() {
                   <Section
                     title="Featured templates"
                     subtitle="Hand-picked marketplace templates worth exploring."
-                    icon={<Sparkles className="h-4 w-4 text-violet-300" />}
+                    icon={
+                      <Sparkles className="h-4 w-4 text-violet-300" />
+                    }
                     templates={featured}
                     onWishlist={handleWishlist}
                   />
@@ -697,7 +724,9 @@ export default function MarketplacePage() {
                   <Section
                     title="Popular right now"
                     subtitle="Templates getting the most attention from builders."
-                    icon={<TrendingUp className="h-4 w-4 text-orange-300" />}
+                    icon={
+                      <TrendingUp className="h-4 w-4 text-orange-300" />
+                    }
                     templates={popular}
                     onWishlist={handleWishlist}
                   />
@@ -705,7 +734,9 @@ export default function MarketplacePage() {
                   <Section
                     title="Fresh arrivals"
                     subtitle="Recently published templates on ZUQEN."
-                    icon={<Clock3 className="h-4 w-4 text-blue-300" />}
+                    icon={
+                      <Clock3 className="h-4 w-4 text-blue-300" />
+                    }
                     templates={newest}
                     onWishlist={handleWishlist}
                   />
@@ -713,7 +744,9 @@ export default function MarketplacePage() {
                   <Section
                     title="Free templates"
                     subtitle="Start building without spending anything."
-                    icon={<Check className="h-4 w-4 text-emerald-300" />}
+                    icon={
+                      <Check className="h-4 w-4 text-emerald-300" />
+                    }
                     templates={free}
                     onWishlist={handleWishlist}
                   />
@@ -721,7 +754,9 @@ export default function MarketplacePage() {
                   <Section
                     title="Premium templates"
                     subtitle="Production-ready templates from creators."
-                    icon={<Zap className="h-4 w-4 text-amber-300" />}
+                    icon={
+                      <Zap className="h-4 w-4 text-amber-300" />
+                    }
                     templates={paid}
                     onWishlist={handleWishlist}
                   />
@@ -750,9 +785,7 @@ export default function MarketplacePage() {
               </p>
 
               <button
-                onClick={() =>
-                  (window.location.href = "/marketplace/sell")
-                }
+                onClick={handleStartSelling}
                 className="mt-7 inline-flex items-center gap-2 rounded-xl bg-white px-5 py-3 text-sm font-semibold text-black transition hover:bg-white/90"
               >
                 Start selling
@@ -774,9 +807,7 @@ export default function MarketplacePage() {
             </button>
 
             <button
-              onClick={() =>
-                (window.location.href = "/marketplace/sell")
-              }
+              onClick={handleStartSelling}
               className="transition hover:text-white/60"
             >
               Sell Templates
