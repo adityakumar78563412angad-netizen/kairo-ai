@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
 
-import {
-  createServerSupabaseClient,
-} from "@/lib/supabase-server";
+import { createServerSupabaseClient } from "@/lib/supabase-server";
 
 export const runtime = "nodejs";
 
@@ -14,142 +12,131 @@ export async function GET(
       await createServerSupabaseClient();
 
     const {
-      data: {
-        user,
-      },
+      data: { user },
     } = await supabase.auth.getUser();
 
     if (!user) {
       return NextResponse.json(
         {
+          success: false,
           error:
-            "You must be signed in.",
+            "Authentication required.",
         },
-        {
-          status: 401,
-        }
+        { status: 401 }
       );
     }
 
-    const url =
-      new URL(request.url);
+    const url = new URL(
+      request.url
+    );
 
     const templateId =
-      url.searchParams.get(
-        "templateId"
-      )?.trim();
+      url.searchParams
+        .get("templateId")
+        ?.trim() || "";
 
     if (!templateId) {
       return NextResponse.json(
         {
+          success: false,
           error:
             "Template ID is required.",
         },
-        {
-          status: 400,
-        }
+        { status: 400 }
       );
     }
 
     const {
-      data: seller,
+      data: sellerProfile,
+      error: sellerError,
     } = await supabase
       .from("seller_profiles")
-      .select(
-        "id,user_id"
-      )
-      .eq(
-        "user_id",
-        user.id
-      )
-      .single();
+      .select("id")
+      .eq("user_id", user.id)
+      .maybeSingle();
 
-    if (!seller) {
+    if (sellerError) {
       return NextResponse.json(
         {
+          success: false,
           error:
-            "Seller profile not found.",
+            "Unable to verify seller profile.",
         },
+        { status: 500 }
+      );
+    }
+
+    if (!sellerProfile) {
+      return NextResponse.json(
         {
-          status: 403,
-        }
+          success: false,
+          error:
+            "Seller profile required.",
+        },
+        { status: 403 }
       );
     }
 
     const {
       data: template,
+      error: templateError,
     } = await supabase
       .from("templates")
-      .select(
-        "id,seller_id"
-      )
+      .select("id")
+      .eq("id", templateId)
       .eq(
-        "id",
-        templateId
+        "seller_id",
+        sellerProfile.id
       )
-      .single();
+      .maybeSingle();
 
-    if (
-      !template ||
-      template.seller_id !==
-        seller.id
-    ) {
+    if (templateError) {
       return NextResponse.json(
         {
+          success: false,
           error:
-            "You do not own this template.",
+            "Unable to verify template ownership.",
         },
+        { status: 500 }
+      );
+    }
+
+    if (!template) {
+      return NextResponse.json(
         {
-          status: 403,
-        }
+          success: false,
+          error:
+            "Template not found.",
+        },
+        { status: 404 }
       );
     }
 
     const {
       data: verification,
-      error,
+      error: verificationError,
     } = await supabase
       .from("template_verifications")
-      .select(
-        `
-        id,
-        template_id,
-        status,
-        result,
-        verification_score,
-        checks,
-        findings,
-        evidence,
-        ai_model,
-        error_message,
-        started_at,
-        completed_at,
-        created_at,
-        updated_at
-        `
-      )
+      .select("*")
       .eq(
         "template_id",
         templateId
       )
       .order(
         "created_at",
-        {
-          ascending: false,
-        }
+        { ascending: false }
       )
       .limit(1)
       .maybeSingle();
 
-    if (error) {
+    if (verificationError) {
       return NextResponse.json(
         {
+          success: false,
           error:
-            error.message,
+            "Unable to load verification status.",
         },
-        {
-          status: 500,
-        }
+        { status: 500 }
       );
     }
 
@@ -160,20 +147,19 @@ export async function GET(
     });
   } catch (error) {
     console.error(
-      "GET /api/marketplace/verification/status:",
+      "Marketplace verification status error:",
       error
     );
 
     return NextResponse.json(
       {
+        success: false,
         error:
           error instanceof Error
             ? error.message
             : "Unable to load verification status.",
       },
-      {
-        status: 500,
-      }
+      { status: 500 }
     );
   }
 }

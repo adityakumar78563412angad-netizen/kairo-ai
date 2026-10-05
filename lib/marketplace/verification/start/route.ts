@@ -1,9 +1,6 @@
 import { NextResponse } from "next/server";
 
-import {
-  createServerSupabaseClient,
-} from "@/lib/supabase-server";
-
+import { createServerSupabaseClient } from "@/lib/supabase-server";
 import {
   runTemplateVerification,
 } from "@/lib/marketplace/verification/engine";
@@ -18,25 +15,24 @@ export async function POST(
       await createServerSupabaseClient();
 
     const {
-      data: {
-        user,
-      },
+      data: { user },
     } = await supabase.auth.getUser();
 
     if (!user) {
       return NextResponse.json(
         {
+          success: false,
           error:
-            "You must be signed in.",
+            "Authentication required.",
         },
-        {
-          status: 401,
-        }
+        { status: 401 }
       );
     }
 
     const body =
-      await request.json();
+      await request.json().catch(
+        () => null
+      );
 
     const templateId =
       typeof body?.templateId === "string"
@@ -46,12 +42,42 @@ export async function POST(
     if (!templateId) {
       return NextResponse.json(
         {
+          success: false,
           error:
             "Template ID is required.",
         },
+        { status: 400 }
+      );
+    }
+
+    const {
+      data: sellerProfile,
+      error: sellerError,
+    } = await supabase
+      .from("seller_profiles")
+      .select("id")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (sellerError) {
+      return NextResponse.json(
         {
-          status: 400,
-        }
+          success: false,
+          error:
+            "Unable to verify seller profile.",
+        },
+        { status: 500 }
+      );
+    }
+
+    if (!sellerProfile) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "Seller profile required.",
+        },
+        { status: 403 }
       );
     }
 
@@ -62,57 +88,38 @@ export async function POST(
       .from("templates")
       .select(
         `
-        id,
-        seller_id,
-        status,
-        review_status
+          id,
+          seller_id,
+          status,
+          review_status
         `
       )
       .eq("id", templateId)
-      .single();
+      .eq(
+        "seller_id",
+        sellerProfile.id
+      )
+      .maybeSingle();
 
-    if (
-      templateError ||
-      !template
-    ) {
+    if (templateError) {
       return NextResponse.json(
         {
+          success: false,
           error:
-            "Template not found.",
+            "Unable to load template.",
         },
-        {
-          status: 404,
-        }
+        { status: 500 }
       );
     }
 
-    const {
-      data: seller,
-      error: sellerError,
-    } = await supabase
-      .from("seller_profiles")
-      .select(
-        "id,user_id"
-      )
-      .eq(
-        "user_id",
-        user.id
-      )
-      .single();
-
-    if (
-      sellerError ||
-      !seller ||
-      seller.id !== template.seller_id
-    ) {
+    if (!template) {
       return NextResponse.json(
         {
+          success: false,
           error:
-            "You do not own this template.",
+            "Template not found.",
         },
-        {
-          status: 403,
-        }
+        { status: 404 }
       );
     }
 
@@ -124,139 +131,106 @@ export async function POST(
     ) {
       return NextResponse.json(
         {
+          success: false,
           error:
-            "Template must be submitted for review before AI verification starts.",
+            "Template must be under marketplace review before verification starts.",
         },
-        {
-          status: 409,
-        }
+        { status: 409 }
       );
     }
 
     const {
-      data: existing,
+      data: activeVerification,
+      error: activeError,
     } = await supabase
       .from("template_verifications")
-      .select(
-        "id,status,result"
-      )
+      .select("*")
       .eq(
         "template_id",
         templateId
       )
-      .in(
-        "status",
-        [
-          "queued",
-          "processing",
-        ]
-      )
+      .in("status", [
+        "queued",
+        "processing",
+      ])
       .maybeSingle();
 
-    if (existing) {
+    if (activeError) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "Unable to check verification status.",
+        },
+        { status: 500 }
+      );
+    }
+
+    if (activeVerification) {
       return NextResponse.json({
         success: true,
-        verificationId:
-          existing.id,
-        status:
-          existing.status,
-        alreadyRunning:
-          true,
+        verification:
+          activeVerification,
+        message:
+          "Template verification is already running.",
       });
     }
 
     const {
       data: verification,
-      error: createError,
+      error: insertError,
     } = await supabase
       .from("template_verifications")
       .insert({
         template_id:
           templateId,
-
-        status:
-          "queued",
+        status: "queued",
       })
-      .select(
-        "id,status"
-      )
+      .select()
       .single();
 
-    if (
-      createError ||
-      !verification
-    ) {
+    if (insertError) {
       return NextResponse.json(
         {
+          success: false,
           error:
-            createError?.message ||
-            "Unable to create verification.",
+            "Unable to create verification job.",
         },
-        {
-          status: 500,
-        }
+        { status: 500 }
       );
     }
 
     /*
-     * Phase 1 executes immediately.
+     * Run verification.
      *
-     * Later we can move this exact engine call
-     * into a durable background worker/queue.
+     * This is intentionally kept separate from the submission
+     * endpoint. A future durable queue can call the same engine.
      */
-    try {
-      await runTemplateVerification(
-        templateId,
-        verification.id
-      );
-    } catch (error) {
-      console.error(
-        "Template verification failed:",
-        error
-      );
-    }
 
-    const {
-      data: finalVerification,
-    } = await supabase
-      .from("template_verifications")
-      .select(
-        "id,status,result,verification_score,findings,evidence,checks,error_message,completed_at"
-      )
-      .eq(
-        "id",
+    const result =
+      await runTemplateVerification(
         verification.id
-      )
-      .single();
+      );
 
     return NextResponse.json({
       success: true,
-
-      verification:
-        finalVerification || {
-          id:
-            verification.id,
-
-          status:
-            "processing",
-        },
+      verification: result,
     });
   } catch (error) {
     console.error(
-      "POST /api/marketplace/verification/start:",
+      "Marketplace verification start error:",
       error
     );
 
     return NextResponse.json(
       {
+        success: false,
         error:
           error instanceof Error
             ? error.message
-            : "Verification could not be started.",
+            : "Unable to start template verification.",
       },
-      {
-        status: 500,
-      }
+      { status: 500 }
     );
   }
 }

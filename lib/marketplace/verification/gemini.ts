@@ -4,14 +4,20 @@ import { GoogleGenAI } from "@google/genai";
 
 import type {
   TemplateVerificationAIResult,
-} from "./types";
+  TemplateVerificationAIResult as VerificationAIResult,
+  TemplateVerificationAIResult as AIResult,
+  TemplateVerificationAIResult as Result,
+  VerificationMediaInput,
+  VerificationTemplateMetadata,
+} from "./type";
 
-const DEFAULT_MODEL =
+const MODEL =
   process.env.GEMINI_TEMPLATE_VERIFICATION_MODEL ||
   "gemini-3.8-flash";
 
 function getGeminiClient() {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey =
+    process.env.GEMINI_API_KEY;
 
   if (!apiKey) {
     throw new Error(
@@ -24,7 +30,7 @@ function getGeminiClient() {
   });
 }
 
-const VERIFICATION_SCHEMA = {
+const verificationSchema = {
   type: "object",
   properties: {
     result: {
@@ -38,6 +44,8 @@ const VERIFICATION_SCHEMA = {
 
     overall_score: {
       type: "number",
+      minimum: 0,
+      maximum: 100,
     },
 
     summary: {
@@ -66,6 +74,8 @@ const VERIFICATION_SCHEMA = {
           },
           score: {
             type: "number",
+            minimum: 0,
+            maximum: 100,
           },
           explanation: {
             type: "string",
@@ -146,6 +156,8 @@ const VERIFICATION_SCHEMA = {
           },
           confidence: {
             type: "number",
+            minimum: 0,
+            maximum: 100,
           },
         },
         required: [
@@ -197,143 +209,115 @@ const VERIFICATION_SCHEMA = {
     "suspicious_signals",
     "recommendations",
   ],
-};
+} as const;
 
-export type GeminiVerificationInput = {
-  metadata: {
-    name: string;
-    category: string;
-    short_description: string;
-    description: string;
-    features: string[];
-    requirements: string[];
-    tech_stack: string[];
-    license: string;
-    price: number;
-    currency: string;
-  };
+function buildMetadataText(
+  template: VerificationTemplateMetadata
+) {
+  return JSON.stringify(
+    {
+      id: template.id,
+      name: template.name,
+      category: template.category,
+      description: template.description,
+      price: template.price,
+      currency: template.currency,
+      features: template.features || [],
+      requirements: template.requirements || [],
+      tech_stack: template.tech_stack || [],
+      license: template.license,
+    },
+    null,
+    2
+  );
+}
 
-  media: Array<{
-    role:
-      | "thumbnail"
-      | "screenshot"
-      | "demo_video";
+function cleanJsonText(
+  text: string
+): string {
+  const trimmed = text.trim();
 
-    mimeType: string;
+  if (
+    trimmed.startsWith("```json") &&
+    trimmed.endsWith("```")
+  ) {
+    return trimmed
+      .slice(7, -3)
+      .trim();
+  }
 
-    uri: string;
-  }>;
-};
+  if (
+    trimmed.startsWith("```") &&
+    trimmed.endsWith("```")
+  ) {
+    return trimmed
+      .slice(3, -3)
+      .trim();
+  }
+
+  return trimmed;
+}
 
 export async function verifyTemplateWithGemini(
-  input: GeminiVerificationInput
+  template: VerificationTemplateMetadata,
+  media: VerificationMediaInput[]
 ): Promise<{
-  result: TemplateVerificationAIResult;
+  result: VerificationAIResult;
   model: string;
 }> {
   const ai = getGeminiClient();
 
-  const mediaInputs = input.media.map((media) => ({
-    type:
-      media.role === "demo_video"
-        ? "video"
-        : "image",
-
-    uri: media.uri,
-
-    mime_type: media.mimeType,
-  }));
+  const mediaParts = media.map(
+    (item) => ({
+      fileData: {
+        fileUri: item.fileUri,
+        mimeType: item.mimeType,
+      },
+    })
+  );
 
   const prompt = `
-You are the ZUQEN AI Template Verification Engine.
+You are the independent AI verification layer for the ZUQEN marketplace.
 
-Your job is to independently verify a marketplace template before
-it can be published.
+Your job is to analyze whether a seller's marketplace template listing is
+consistent with the evidence provided.
 
 IMPORTANT RULES:
 
-1. Do NOT assume the seller is truthful.
-2. Do NOT automatically reject a template merely because something
-   cannot be visually confirmed.
-3. Only claim that a feature is present when there is reasonable
-   evidence.
+1. Do not assume that seller claims are true.
+2. Compare the written metadata against the thumbnail, screenshots and demo video.
+3. Identify contradictions or strong evidence that the media does not represent
+   the advertised template.
 4. Distinguish "not demonstrated" from "false".
-5. Look for contradictions between:
-   - template description
-   - claimed features
-   - screenshots
-   - thumbnail
-   - demo video
-6. Look for evidence that the uploaded media belongs to a different
-   product/template.
-7. Look for misleading marketing claims.
-8. Look for suspicious visual inconsistencies.
-9. Do not make legal conclusions.
-10. Do not claim malware detection from visual/media analysis.
-11. The application performs technical/security validation separately.
-12. Use "review_required" when evidence is ambiguous.
-13. Use "rejected" only when there is strong evidence of a serious
-    contradiction, deception, or unacceptable submission.
-14. Use "verified" only when the supplied evidence is reasonably
-    consistent.
-15. Never modify the template.
-16. Return ONLY valid JSON matching the requested schema.
+5. Missing evidence should normally produce a warning or review_required result,
+   not an automatic rejection.
+6. Strong deception or serious contradictions may produce rejected.
+7. Do not make legal conclusions.
+8. Do not claim that visual analysis proves a package is malware-free.
+9. Security/malware scanning is handled by a separate technical inspection layer.
+10. Never modify the template.
+11. If evidence is ambiguous, prefer review_required.
+12. The final result must be valid JSON matching the requested schema.
 
-TEMPLATE METADATA:
+Template metadata:
 
-Name:
-${input.metadata.name}
+${buildMetadataText(template)}
 
-Category:
-${input.metadata.category}
+Analyze the supplied media and determine:
 
-Short description:
-${input.metadata.short_description}
+- whether the visual identity matches the template description;
+- whether screenshots appear to show the claimed product;
+- whether the demo video appears to demonstrate the same product;
+- whether important claimed features are actually demonstrated;
+- whether there are suspicious inconsistencies;
+- whether the listing appears misleading;
+- what evidence supports your conclusions.
 
-Description:
-${input.metadata.description}
-
-Features:
-${input.metadata.features.join("\n")}
-
-Requirements:
-${input.metadata.requirements.join("\n")}
-
-Tech stack:
-${input.metadata.tech_stack.join("\n")}
-
-License:
-${input.metadata.license}
-
-Price:
-${input.metadata.price} ${input.metadata.currency}
-
-ANALYSIS REQUIREMENTS:
-
-Check:
-
-- visual identity consistency
-- screenshot/template consistency
-- demo/template consistency
-- claimed feature evidence
-- description accuracy based on available evidence
-- category consistency
-- obvious misleading content
-- suspicious media mismatch
-- repeated stock/demo-looking content
-- suspicious edits or cuts in the demo
-- whether the supplied evidence is sufficient
-
-For demo video evidence, mention timestamps whenever possible.
-
-Produce a score from 0 to 100.
-
-Do not invent evidence that is not present.
+Return only structured JSON.
 `;
 
   const response = await ai.models.generateContent({
-    model: DEFAULT_MODEL,
-
+    model: MODEL,
     contents: [
       {
         role: "user",
@@ -341,47 +325,52 @@ Do not invent evidence that is not present.
           {
             text: prompt,
           },
-
-          ...mediaInputs.map((media) => ({
-            fileData: {
-              fileUri: media.uri,
-              mimeType: media.mime_type,
-            },
-          })),
+          ...mediaParts,
         ],
       },
     ],
-
     config: {
       responseMimeType: "application/json",
-
-      responseSchema: VERIFICATION_SCHEMA,
-
+      responseSchema: verificationSchema,
       temperature: 0.1,
     },
   });
 
-  const rawText = response.text?.trim();
+  const rawText =
+    typeof response.text === "string"
+      ? response.text
+      : "";
 
-  if (!rawText) {
+  if (!rawText.trim()) {
     throw new Error(
       "Gemini returned an empty verification response."
     );
   }
 
-  let parsed: TemplateVerificationAIResult;
+  let parsed: unknown;
 
   try {
-    parsed =
-      JSON.parse(rawText) as TemplateVerificationAIResult;
+    parsed = JSON.parse(
+      cleanJsonText(rawText)
+    );
   } catch {
     throw new Error(
       "Gemini returned invalid verification JSON."
     );
   }
 
+  if (
+    typeof parsed !== "object" ||
+    parsed === null
+  ) {
+    throw new Error(
+      "Gemini verification response has an invalid structure."
+    );
+  }
+
   return {
-    result: parsed,
-    model: DEFAULT_MODEL,
+    result:
+      parsed as VerificationAIResult,
+    model: MODEL,
   };
 }
