@@ -31,6 +31,7 @@ type UploadedFile = {
 
 type Props = {
   templateId: string;
+  defaultRole?: UploadRole;
 };
 
 const MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024;
@@ -52,6 +53,7 @@ const ROLE_CONFIG: Record<
     icon: FileArchive,
     multiple: false,
   },
+
   thumbnail: {
     label: "Thumbnail",
     description: "Main marketplace thumbnail.",
@@ -59,6 +61,7 @@ const ROLE_CONFIG: Record<
     icon: ImageIcon,
     multiple: false,
   },
+
   screenshot: {
     label: "Screenshots",
     description: "Screenshots showing the actual template.",
@@ -66,6 +69,7 @@ const ROLE_CONFIG: Record<
     icon: ImageIcon,
     multiple: true,
   },
+
   demo_video: {
     label: "Demo Video",
     description: "Video demonstrating the actual template.",
@@ -73,27 +77,35 @@ const ROLE_CONFIG: Record<
     icon: Video,
     multiple: false,
   },
+
   documentation: {
     label: "Documentation",
     description: "PDF or Markdown documentation.",
-    accept: ".pdf,.md,.txt,application/pdf,text/markdown,text/plain",
+    accept:
+      ".pdf,.md,.txt,application/pdf,text/markdown,text/plain",
     icon: FileText,
     multiple: true,
   },
+
   asset: {
     label: "Additional Assets",
     description: "Optional supporting assets.",
-    accept: ".zip,.pdf,.txt,.md,image/jpeg,image/png,image/webp",
+    accept:
+      ".zip,.pdf,.txt,.md,image/jpeg,image/png,image/webp",
     icon: FileText,
     multiple: true,
   },
 };
 
 function formatBytes(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+
   if (bytes < 1024 * 1024) {
     return `${(bytes / 1024).toFixed(1)} KB`;
   }
+
   if (bytes < 1024 * 1024 * 1024) {
     return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
   }
@@ -101,19 +113,37 @@ function formatBytes(bytes: number) {
   return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }
 
+function isValidUploadRole(value: string): value is UploadRole {
+  return (
+    value === "template" ||
+    value === "thumbnail" ||
+    value === "screenshot" ||
+    value === "demo_video" ||
+    value === "documentation" ||
+    value === "asset"
+  );
+}
+
 export default function TemplateFileUploader({
   templateId,
+  defaultRole = "template",
 }: Props) {
+  const initialRole: UploadRole = isValidUploadRole(defaultRole)
+    ? defaultRole
+    : "template";
+
   const [files, setFiles] = useState<UploadedFile[]>([]);
   const [activeRole, setActiveRole] =
-    useState<UploadRole>("template");
+    useState<UploadRole>(initialRole);
 
   async function uploadFile(
     file: File,
     role: UploadRole
   ) {
     if (!templateId) {
-      throw new Error("Save the template draft before uploading files.");
+      throw new Error(
+        "Save the template draft before uploading files."
+      );
     }
 
     if (file.size <= 0) {
@@ -125,6 +155,9 @@ export default function TemplateFileUploader({
     }
 
     const localId = crypto.randomUUID();
+
+    const contentType =
+      file.type || "application/octet-stream";
 
     setFiles((current) => [
       ...current,
@@ -138,6 +171,10 @@ export default function TemplateFileUploader({
     ]);
 
     try {
+      /*
+       * Step 1:
+       * Ask ZUQEN server for a temporary B2 upload URL.
+       */
       const urlResponse = await fetch(
         "/api/marketplace/storage/upload-url",
         {
@@ -148,29 +185,52 @@ export default function TemplateFileUploader({
           body: JSON.stringify({
             templateId,
             filename: file.name,
-            contentType:
-              file.type || "application/octet-stream",
+            contentType,
             contentLength: file.size,
             role,
           }),
         }
       );
 
-      const urlData = await urlResponse.json();
+      let urlData: {
+        uploadUrl?: string;
+        objectKey?: string;
+        error?: string;
+      };
 
-      if (!urlResponse.ok) {
+      try {
+        urlData = await urlResponse.json();
+      } catch {
         throw new Error(
-          urlData.error || "Unable to prepare upload."
+          "The upload preparation server returned an invalid response."
         );
       }
 
+      if (!urlResponse.ok) {
+        throw new Error(
+          urlData.error ||
+            "Unable to prepare the file upload."
+        );
+      }
+
+      if (!urlData.uploadUrl || !urlData.objectKey) {
+        throw new Error(
+          "The upload server did not return valid storage information."
+        );
+      }
+
+      /*
+       * Step 2:
+       * Upload the actual file directly to Backblaze B2.
+       *
+       * The application server never receives the large file.
+       */
       const uploadResponse = await fetch(
         urlData.uploadUrl,
         {
           method: "PUT",
           headers: {
-            "Content-Type":
-              file.type || "application/octet-stream",
+            "Content-Type": contentType,
           },
           body: file,
         }
@@ -182,6 +242,13 @@ export default function TemplateFileUploader({
         );
       }
 
+      /*
+       * Step 3:
+       * Tell ZUQEN server that the B2 object exists.
+       *
+       * The server performs a HeadObject verification before
+       * saving the metadata in Supabase.
+       */
       const completeResponse = await fetch(
         "/api/marketplace/storage/complete",
         {
@@ -193,15 +260,24 @@ export default function TemplateFileUploader({
             templateId,
             objectKey: urlData.objectKey,
             fileName: file.name,
-            contentType:
-              file.type || "application/octet-stream",
+            contentType,
             fileSize: file.size,
             fileRole: role,
           }),
         }
       );
 
-      const completeData = await completeResponse.json();
+      let completeData: {
+        error?: string;
+      };
+
+      try {
+        completeData = await completeResponse.json();
+      } catch {
+        throw new Error(
+          "The upload completion server returned an invalid response."
+        );
+      }
 
       if (!completeResponse.ok) {
         throw new Error(
@@ -244,14 +320,33 @@ export default function TemplateFileUploader({
     selectedFiles: FileList | null,
     role: UploadRole
   ) {
-    if (!selectedFiles) return;
+    if (!selectedFiles || selectedFiles.length === 0) {
+      return;
+    }
 
-    Array.from(selectedFiles).forEach((file) => {
+    const selected = Array.from(selectedFiles);
+
+    /*
+     * Single-file roles should only ever start one upload.
+     * The browser normally enforces this through `multiple={false}`,
+     * but we enforce it here as well.
+     */
+    const filesToUpload = ROLE_CONFIG[role].multiple
+      ? selected
+      : selected.slice(0, 1);
+
+    for (const file of filesToUpload) {
       void uploadFile(file, role);
-    });
+    }
   }
 
   function removeLocalFile(id: string) {
+    /*
+     * This only removes the item from the current UI.
+     *
+     * The actual B2 object remains stored because a server-side
+     * delete endpoint has not been requested by this component.
+     */
     setFiles((current) =>
       current.filter((file) => file.id !== id)
     );
@@ -274,35 +369,35 @@ export default function TemplateFileUploader({
       </div>
 
       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-        {(
-          Object.keys(ROLE_CONFIG) as UploadRole[]
-        ).map((role) => {
-          const item = ROLE_CONFIG[role];
-          const ItemIcon = item.icon;
+        {(Object.keys(ROLE_CONFIG) as UploadRole[]).map(
+          (role) => {
+            const item = ROLE_CONFIG[role];
+            const ItemIcon = item.icon;
 
-          return (
-            <button
-              key={role}
-              type="button"
-              onClick={() => setActiveRole(role)}
-              className={`rounded-xl border p-4 text-left transition ${
-                activeRole === role
-                  ? "border-white/25 bg-white/[0.08]"
-                  : "border-white/10 bg-white/[0.02] hover:bg-white/[0.05]"
-              }`}
-            >
-              <ItemIcon className="h-5 w-5 text-white/70" />
+            return (
+              <button
+                key={role}
+                type="button"
+                onClick={() => setActiveRole(role)}
+                className={`rounded-xl border p-4 text-left transition ${
+                  activeRole === role
+                    ? "border-white/25 bg-white/[0.08]"
+                    : "border-white/10 bg-white/[0.02] hover:bg-white/[0.05]"
+                }`}
+              >
+                <ItemIcon className="h-5 w-5 text-white/70" />
 
-              <div className="mt-3 text-sm font-medium text-white">
-                {item.label}
-              </div>
+                <div className="mt-3 text-sm font-medium text-white">
+                  {item.label}
+                </div>
 
-              <div className="mt-1 text-xs leading-5 text-white/40">
-                {item.description}
-              </div>
-            </button>
-          );
-        })}
+                <div className="mt-1 text-xs leading-5 text-white/40">
+                  {item.description}
+                </div>
+              </button>
+            );
+          }
+        )}
       </div>
 
       <label className="group block cursor-pointer rounded-2xl border border-dashed border-white/15 bg-black/10 p-8 text-center transition hover:border-white/30 hover:bg-white/[0.03]">
@@ -325,6 +420,9 @@ export default function TemplateFileUploader({
 
         <div className="mt-1 text-xs text-white/40">
           Maximum individual file size: 2 GB
+          {config.multiple
+            ? " · Multiple files allowed"
+            : " · One file"}
         </div>
       </label>
 
@@ -355,6 +453,18 @@ export default function TemplateFileUploader({
                   {ROLE_CONFIG[file.role].label}
                 </div>
 
+                {file.status === "uploading" && (
+                  <div className="mt-1 text-xs text-white/40">
+                    Uploading to secure storage…
+                  </div>
+                )}
+
+                {file.status === "complete" && (
+                  <div className="mt-1 text-xs text-emerald-400/80">
+                    Upload completed successfully.
+                  </div>
+                )}
+
                 {file.error && (
                   <div className="mt-1 text-xs text-red-400">
                     {file.error}
@@ -364,7 +474,9 @@ export default function TemplateFileUploader({
 
               <button
                 type="button"
-                onClick={() => removeLocalFile(file.id)}
+                onClick={() =>
+                  removeLocalFile(file.id)
+                }
                 className="rounded-lg p-2 text-white/40 transition hover:bg-white/[0.06] hover:text-white"
                 aria-label="Remove upload from list"
               >
