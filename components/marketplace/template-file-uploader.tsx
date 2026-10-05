@@ -1,12 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   CheckCircle2,
   FileArchive,
   FileText,
   Image as ImageIcon,
   Loader2,
+  RefreshCw,
+  Trash2,
   Upload,
   Video,
   X,
@@ -22,11 +24,29 @@ type UploadRole =
 
 type UploadedFile = {
   id: string;
+  persistedId?: string;
   name: string;
   size: number;
   role: UploadRole;
   status: "uploading" | "complete" | "error";
   error?: string;
+};
+
+type StoredFile = {
+  id: string;
+  template_id: string;
+  version_id?: string | null;
+  file_name: string;
+  file_size?: number | null;
+  content_type?: string | null;
+  created_at?: string | null;
+  storage_provider?: string | null;
+  storage_bucket?: string | null;
+  storage_object_key?: string | null;
+  storage_region?: string | null;
+  file_role?: string | null;
+  is_private?: boolean | null;
+  metadata?: Record<string, unknown> | null;
 };
 
 type Props = {
@@ -113,7 +133,20 @@ function formatBytes(bytes: number) {
   return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }
 
-function isValidUploadRole(value: string): value is UploadRole {
+function normalizeRole(
+  value: string | null | undefined
+): UploadRole {
+  if (value === "template") return "template";
+  if (value === "thumbnail") return "thumbnail";
+  if (value === "screenshot") return "screenshot";
+  if (value === "demo_video") return "demo_video";
+  if (value === "documentation") return "documentation";
+  if (value === "asset") return "asset";
+
+  return "asset";
+}
+
+function isUploadRole(value: string): value is UploadRole {
   return (
     value === "template" ||
     value === "thumbnail" ||
@@ -128,13 +161,93 @@ export default function TemplateFileUploader({
   templateId,
   defaultRole = "template",
 }: Props) {
-  const initialRole: UploadRole = isValidUploadRole(defaultRole)
-    ? defaultRole
-    : "template";
-
   const [files, setFiles] = useState<UploadedFile[]>([]);
   const [activeRole, setActiveRole] =
-    useState<UploadRole>(initialRole);
+    useState<UploadRole>(
+      isUploadRole(defaultRole)
+        ? defaultRole
+        : "template"
+    );
+
+  const [loadingFiles, setLoadingFiles] =
+    useState(true);
+
+  const [loadError, setLoadError] =
+    useState<string | null>(null);
+
+  const [deletingIds, setDeletingIds] =
+    useState<Set<string>>(new Set());
+
+  async function loadExistingFiles() {
+    if (!templateId) {
+      setFiles([]);
+      setLoadingFiles(false);
+      return;
+    }
+
+    setLoadingFiles(true);
+    setLoadError(null);
+
+    try {
+      const response = await fetch(
+        `/api/marketplace/storage/files?templateId=${encodeURIComponent(
+          templateId
+        )}`,
+        {
+          method: "GET",
+          cache: "no-store",
+        }
+      );
+
+      let data: {
+        files?: StoredFile[];
+        error?: string;
+      };
+
+      try {
+        data = await response.json();
+      } catch {
+        throw new Error(
+          "Unable to read the uploaded file response."
+        );
+      }
+
+      if (!response.ok) {
+        throw new Error(
+          data.error ||
+            "Unable to load uploaded files."
+        );
+      }
+
+      const storedFiles = Array.isArray(data.files)
+        ? data.files
+        : [];
+
+      setFiles(
+        storedFiles.map((file) => ({
+          id: file.id,
+          persistedId: file.id,
+          name: file.file_name,
+          size: Number(file.file_size || 0),
+          role: normalizeRole(file.file_role),
+          status: "complete",
+        }))
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Unable to load uploaded files.";
+
+      setLoadError(message);
+    } finally {
+      setLoadingFiles(false);
+    }
+  }
+
+  useEffect(() => {
+    void loadExistingFiles();
+  }, [templateId]);
 
   async function uploadFile(
     file: File,
@@ -151,7 +264,9 @@ export default function TemplateFileUploader({
     }
 
     if (file.size > MAX_FILE_SIZE) {
-      throw new Error("Maximum file size is 2 GB.");
+      throw new Error(
+        "Maximum file size is 2 GB."
+      );
     }
 
     const localId = crypto.randomUUID();
@@ -172,8 +287,7 @@ export default function TemplateFileUploader({
 
     try {
       /*
-       * Step 1:
-       * Ask ZUQEN server for a temporary B2 upload URL.
+       * 1. Request a temporary B2 upload URL.
        */
       const urlResponse = await fetch(
         "/api/marketplace/storage/upload-url",
@@ -209,21 +323,21 @@ export default function TemplateFileUploader({
       if (!urlResponse.ok) {
         throw new Error(
           urlData.error ||
-            "Unable to prepare the file upload."
+            "Unable to prepare upload."
         );
       }
 
-      if (!urlData.uploadUrl || !urlData.objectKey) {
+      if (
+        !urlData.uploadUrl ||
+        !urlData.objectKey
+      ) {
         throw new Error(
           "The upload server did not return valid storage information."
         );
       }
 
       /*
-       * Step 2:
-       * Upload the actual file directly to Backblaze B2.
-       *
-       * The application server never receives the large file.
+       * 2. Direct upload to Backblaze B2.
        */
       const uploadResponse = await fetch(
         urlData.uploadUrl,
@@ -243,11 +357,7 @@ export default function TemplateFileUploader({
       }
 
       /*
-       * Step 3:
-       * Tell ZUQEN server that the B2 object exists.
-       *
-       * The server performs a HeadObject verification before
-       * saving the metadata in Supabase.
+       * 3. Complete upload and persist metadata.
        */
       const completeResponse = await fetch(
         "/api/marketplace/storage/complete",
@@ -268,11 +378,18 @@ export default function TemplateFileUploader({
       );
 
       let completeData: {
+        file?: {
+          id?: string;
+          file_name?: string;
+          file_size?: number;
+          file_role?: string;
+        };
         error?: string;
       };
 
       try {
-        completeData = await completeResponse.json();
+        completeData =
+          await completeResponse.json();
       } catch {
         throw new Error(
           "The upload completion server returned an invalid response."
@@ -286,11 +403,21 @@ export default function TemplateFileUploader({
         );
       }
 
+      const persistedId =
+        completeData.file?.id;
+
+      if (!persistedId) {
+        throw new Error(
+          "The server did not return the saved file record."
+        );
+      }
+
       setFiles((current) =>
         current.map((item) =>
           item.id === localId
             ? {
                 ...item,
+                persistedId,
                 status: "complete",
               }
             : item
@@ -320,36 +447,107 @@ export default function TemplateFileUploader({
     selectedFiles: FileList | null,
     role: UploadRole
   ) {
-    if (!selectedFiles || selectedFiles.length === 0) {
+    if (
+      !selectedFiles ||
+      selectedFiles.length === 0
+    ) {
       return;
     }
 
     const selected = Array.from(selectedFiles);
 
-    /*
-     * Single-file roles should only ever start one upload.
-     * The browser normally enforces this through `multiple={false}`,
-     * but we enforce it here as well.
-     */
-    const filesToUpload = ROLE_CONFIG[role].multiple
-      ? selected
-      : selected.slice(0, 1);
+    const filesToUpload =
+      ROLE_CONFIG[role].multiple
+        ? selected
+        : selected.slice(0, 1);
 
     for (const file of filesToUpload) {
       void uploadFile(file, role);
     }
   }
 
-  function removeLocalFile(id: string) {
-    /*
-     * This only removes the item from the current UI.
-     *
-     * The actual B2 object remains stored because a server-side
-     * delete endpoint has not been requested by this component.
-     */
-    setFiles((current) =>
-      current.filter((file) => file.id !== id)
-    );
+  async function deleteFile(
+    file: UploadedFile
+  ) {
+    if (!file.persistedId) {
+      setFiles((current) =>
+        current.filter(
+          (item) => item.id !== file.id
+        )
+      );
+
+      return;
+    }
+
+    setDeletingIds((current) => {
+      const next = new Set(current);
+      next.add(file.id);
+      return next;
+    });
+
+    try {
+      const response = await fetch(
+        "/api/marketplace/storage/delete",
+        {
+          method: "DELETE",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            fileId: file.persistedId,
+          }),
+        }
+      );
+
+      let data: {
+        success?: boolean;
+        error?: string;
+      };
+
+      try {
+        data = await response.json();
+      } catch {
+        throw new Error(
+          "The delete server returned an invalid response."
+        );
+      }
+
+      if (!response.ok) {
+        throw new Error(
+          data.error ||
+            "Unable to delete the file."
+        );
+      }
+
+      setFiles((current) =>
+        current.filter(
+          (item) => item.id !== file.id
+        )
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Unable to delete the file.";
+
+      setFiles((current) =>
+        current.map((item) =>
+          item.id === file.id
+            ? {
+                ...item,
+                status: "error",
+                error: message,
+              }
+            : item
+        )
+      );
+    } finally {
+      setDeletingIds((current) => {
+        const next = new Set(current);
+        next.delete(file.id);
+        return next;
+      });
+    }
   }
 
   const config = ROLE_CONFIG[activeRole];
@@ -363,41 +561,44 @@ export default function TemplateFileUploader({
         </h2>
 
         <p className="mt-1 text-sm text-white/50">
-          Upload the real files that buyers will receive and
-          the media used to present your template.
+          Upload the real files that buyers will
+          receive and the media used to present
+          your template.
         </p>
       </div>
 
       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-        {(Object.keys(ROLE_CONFIG) as UploadRole[]).map(
-          (role) => {
-            const item = ROLE_CONFIG[role];
-            const ItemIcon = item.icon;
+        {(
+          Object.keys(ROLE_CONFIG) as UploadRole[]
+        ).map((role) => {
+          const item = ROLE_CONFIG[role];
+          const ItemIcon = item.icon;
 
-            return (
-              <button
-                key={role}
-                type="button"
-                onClick={() => setActiveRole(role)}
-                className={`rounded-xl border p-4 text-left transition ${
-                  activeRole === role
-                    ? "border-white/25 bg-white/[0.08]"
-                    : "border-white/10 bg-white/[0.02] hover:bg-white/[0.05]"
-                }`}
-              >
-                <ItemIcon className="h-5 w-5 text-white/70" />
+          return (
+            <button
+              key={role}
+              type="button"
+              onClick={() =>
+                setActiveRole(role)
+              }
+              className={`rounded-xl border p-4 text-left transition ${
+                activeRole === role
+                  ? "border-white/25 bg-white/[0.08]"
+                  : "border-white/10 bg-white/[0.02] hover:bg-white/[0.05]"
+              }`}
+            >
+              <ItemIcon className="h-5 w-5 text-white/70" />
 
-                <div className="mt-3 text-sm font-medium text-white">
-                  {item.label}
-                </div>
+              <div className="mt-3 text-sm font-medium text-white">
+                {item.label}
+              </div>
 
-                <div className="mt-1 text-xs leading-5 text-white/40">
-                  {item.description}
-                </div>
-              </button>
-            );
-          }
-        )}
+              <div className="mt-1 text-xs leading-5 text-white/40">
+                {item.description}
+              </div>
+            </button>
+          );
+        })}
       </div>
 
       <label className="group block cursor-pointer rounded-2xl border border-dashed border-white/15 bg-black/10 p-8 text-center transition hover:border-white/30 hover:bg-white/[0.03]">
@@ -406,8 +607,13 @@ export default function TemplateFileUploader({
           className="hidden"
           accept={config.accept}
           multiple={config.multiple}
+          disabled={!templateId}
           onChange={(event) => {
-            handleFiles(event.target.files, activeRole);
+            handleFiles(
+              event.target.files,
+              activeRole
+            );
+
             event.currentTarget.value = "";
           }}
         />
@@ -426,72 +632,130 @@ export default function TemplateFileUploader({
         </div>
       </label>
 
-      {files.length > 0 && (
+      {loadingFiles && (
+        <div className="flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.02] p-5 text-sm text-white/50">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Loading uploaded files…
+        </div>
+      )}
+
+      {loadError && !loadingFiles && (
+        <div className="rounded-xl border border-red-400/15 bg-red-400/[0.04] p-4">
+          <div className="text-sm text-red-300">
+            Unable to load uploaded files
+          </div>
+
+          <div className="mt-1 text-xs leading-5 text-red-300/60">
+            {loadError}
+          </div>
+
+          <button
+            type="button"
+            onClick={() =>
+              void loadExistingFiles()
+            }
+            className="mt-3 inline-flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs text-white/70 transition hover:bg-white/[0.06] hover:text-white"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            Try Again
+          </button>
+        </div>
+      )}
+
+      {!loadingFiles && files.length > 0 && (
         <div className="space-y-2">
-          {files.map((file) => (
-            <div
-              key={file.id}
-              className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.02] p-3"
-            >
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/[0.06]">
-                {file.status === "uploading" ? (
-                  <Loader2 className="h-4 w-4 animate-spin text-white/60" />
-                ) : file.status === "complete" ? (
-                  <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-                ) : (
-                  <X className="h-4 w-4 text-red-400" />
-                )}
-              </div>
+          <div className="mb-2 text-xs font-medium uppercase tracking-wider text-white/30">
+            Uploaded Files
+          </div>
 
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-sm text-white">
-                  {file.name}
-                </div>
+          {files.map((file) => {
+            const deleting =
+              deletingIds.has(file.id);
 
-                <div className="mt-0.5 text-xs text-white/40">
-                  {formatBytes(file.size)} ·{" "}
-                  {ROLE_CONFIG[file.role].label}
-                </div>
-
-                {file.status === "uploading" && (
-                  <div className="mt-1 text-xs text-white/40">
-                    Uploading to secure storage…
-                  </div>
-                )}
-
-                {file.status === "complete" && (
-                  <div className="mt-1 text-xs text-emerald-400/80">
-                    Upload completed successfully.
-                  </div>
-                )}
-
-                {file.error && (
-                  <div className="mt-1 text-xs text-red-400">
-                    {file.error}
-                  </div>
-                )}
-              </div>
-
-              <button
-                type="button"
-                onClick={() =>
-                  removeLocalFile(file.id)
-                }
-                className="rounded-lg p-2 text-white/40 transition hover:bg-white/[0.06] hover:text-white"
-                aria-label="Remove upload from list"
+            return (
+              <div
+                key={file.id}
+                className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.02] p-3"
               >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-          ))}
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/[0.06]">
+                  {file.status ===
+                  "uploading" ? (
+                    <Loader2 className="h-4 w-4 animate-spin text-white/60" />
+                  ) : file.status ===
+                    "complete" ? (
+                    <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                  ) : (
+                    <X className="h-4 w-4 text-red-400" />
+                  )}
+                </div>
+
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm text-white">
+                    {file.name}
+                  </div>
+
+                  <div className="mt-0.5 text-xs text-white/40">
+                    {formatBytes(file.size)} ·{" "}
+                    {
+                      ROLE_CONFIG[file.role]
+                        .label
+                    }
+                  </div>
+
+                  {file.status ===
+                    "uploading" && (
+                    <div className="mt-1 text-xs text-white/40">
+                      Uploading to secure
+                      storage…
+                    </div>
+                  )}
+
+                  {file.status ===
+                    "complete" && (
+                    <div className="mt-1 text-xs text-emerald-400/70">
+                      Stored securely in
+                      Backblaze B2.
+                    </div>
+                  )}
+
+                  {file.error && (
+                    <div className="mt-1 text-xs text-red-400">
+                      {file.error}
+                    </div>
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  disabled={
+                    deleting ||
+                    file.status ===
+                      "uploading"
+                  }
+                  onClick={() =>
+                    void deleteFile(file)
+                  }
+                  className="rounded-lg p-2 text-white/40 transition hover:bg-red-400/10 hover:text-red-300 disabled:cursor-not-allowed disabled:opacity-40"
+                  aria-label={`Delete ${file.name}`}
+                >
+                  {deleting ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Trash2 className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
+            );
+          })}
         </div>
       )}
 
       <div className="rounded-xl border border-amber-400/10 bg-amber-400/[0.04] p-4 text-xs leading-5 text-white/50">
-        Files are stored privately in Backblaze B2. Paid
-        template files will not be exposed through permanent
-        public URLs. Buyer downloads will use temporary
-        authenticated download URLs.
+        Files are stored privately in Backblaze B2.
+        Paid template files will not be exposed
+        through permanent public URLs. Buyer
+        downloads will use temporary authenticated
+        download URLs.
       </div>
     </section>
   );
