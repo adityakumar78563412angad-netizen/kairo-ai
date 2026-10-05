@@ -49,7 +49,7 @@ const SELLER_PROFILE_SELECT = `
   updated_at
 `;
 
-function getSupabaseErrorMessage(error: unknown, fallback: string) {
+function getErrorMessage(error: unknown, fallback: string) {
   if (!error) return fallback;
 
   if (typeof error === "object" && error !== null) {
@@ -84,6 +84,7 @@ export default function SellerPage() {
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
@@ -120,11 +121,17 @@ export default function SellerPage() {
   useEffect(() => {
     let mounted = true;
 
-    async function loadSeller() {
+    async function loadSellerCenter() {
       setLoading(true);
       setError("");
 
       try {
+        /*
+         * =========================================================
+         * 1. Check authentication
+         * =========================================================
+         */
+
         const {
           data: { user },
           error: authError,
@@ -134,14 +141,26 @@ export default function SellerPage() {
           throw authError;
         }
 
+        /*
+         * User is not logged in.
+         *
+         * Do not show the seller profile form.
+         * Send the user to authentication first.
+         */
         if (!user) {
-          router.push("/login?redirect=/marketplace/seller");
+          router.replace("/login?redirect=/marketplace/seller");
           return;
         }
 
         if (!mounted) return;
 
         setUserId(user.id);
+
+        /*
+         * =========================================================
+         * 2. Load normal profile + seller profile
+         * =========================================================
+         */
 
         const [profileResult, sellerResult] = await Promise.all([
           supabase
@@ -173,25 +192,32 @@ export default function SellerPage() {
         setProfile(baseProfile);
         setSellerProfile(existingSeller);
 
+        /*
+         * =========================================================
+         * 3. IMPORTANT:
+         * Existing seller → dashboard
+         * New seller → show profile form
+         * =========================================================
+         */
+
         if (existingSeller) {
-          setDisplayName(existingSeller.display_name || "");
-          setUsername(existingSeller.username || "");
-          setBio(existingSeller.bio || "");
-          setWebsiteUrl(existingSeller.website_url || "");
-          setAvatarUrl(existingSeller.avatar_url || "");
-        } else {
-          setDisplayName(baseProfile?.display_name || "");
-          setAvatarUrl(baseProfile?.avatar_url || "");
+          router.replace("/marketplace/seller/dashboard");
+          return;
         }
+
+        /*
+         * No seller profile yet.
+         * Pre-fill the form from the normal ZUQEN profile.
+         */
+
+        setDisplayName(baseProfile?.display_name || "");
+        setAvatarUrl(baseProfile?.avatar_url || "");
       } catch (err) {
-        console.error("Failed to load seller profile:", err);
+        console.error("Failed to load seller center:", err);
 
         if (mounted) {
           setError(
-            getSupabaseErrorMessage(
-              err,
-              "Unable to load your seller profile."
-            )
+            getErrorMessage(err, "Unable to load your seller profile.")
           );
         }
       } finally {
@@ -201,7 +227,7 @@ export default function SellerPage() {
       }
     }
 
-    loadSeller();
+    loadSellerCenter();
 
     return () => {
       mounted = false;
@@ -227,6 +253,12 @@ export default function SellerPage() {
       const normalizedWebsite = websiteUrl.trim();
       const normalizedAvatar = avatarUrl.trim();
 
+      /*
+       * =========================================================
+       * Validation
+       * =========================================================
+       */
+
       if (!normalizedDisplayName) {
         throw new Error("Display name is required.");
       }
@@ -249,10 +281,7 @@ export default function SellerPage() {
         }
 
         /*
-         * Check username availability before saving.
-         *
-         * This prevents a database unique-constraint error from appearing
-         * when another seller is already using the username.
+         * Check whether another seller already owns this username.
          */
         const { data: usernameOwner, error: usernameCheckError } =
           await supabase
@@ -301,6 +330,49 @@ export default function SellerPage() {
         }
       }
 
+      /*
+       * =========================================================
+       * 4. IMPORTANT DUPLICATE-PROFILE PROTECTION
+       *
+       * Before inserting, check again.
+       * This prevents duplicate seller profiles if another request
+       * created one while this page was open.
+       * =========================================================
+       */
+
+      const { data: existingSeller, error: existingSellerError } =
+        await supabase
+          .from("seller_profiles")
+          .select(SELLER_PROFILE_SELECT)
+          .eq("user_id", userId)
+          .maybeSingle();
+
+      if (existingSellerError) {
+        throw existingSellerError;
+      }
+
+      /*
+       * If seller profile already exists, never create another one.
+       * Send the user to the dashboard instead.
+       */
+      if (existingSeller) {
+        setSellerProfile(existingSeller as SellerProfile);
+
+        setSuccess("Your seller profile already exists.");
+
+        window.setTimeout(() => {
+          router.replace("/marketplace/seller/dashboard");
+        }, 700);
+
+        return;
+      }
+
+      /*
+       * =========================================================
+       * 5. Create seller profile
+       * =========================================================
+       */
+
       const payload = {
         user_id: userId,
         display_name: normalizedDisplayName,
@@ -308,117 +380,46 @@ export default function SellerPage() {
         bio: normalizedBio || null,
         avatar_url: normalizedAvatar || null,
         website_url: normalizedWebsite || null,
+        seller_status: "pending",
+        is_verified: false,
       };
 
-      let savedSeller: SellerProfile | null = null;
+      const { data: createdSeller, error: insertError } = await supabase
+        .from("seller_profiles")
+        .insert(payload)
+        .select(SELLER_PROFILE_SELECT)
+        .single();
 
-      /*
-       * Existing seller profile
-       */
-      if (sellerProfile?.id) {
-        const { data, error: updateError } = await supabase
-          .from("seller_profiles")
-          .update({
-            display_name: payload.display_name,
-            username: payload.username,
-            bio: payload.bio,
-            avatar_url: payload.avatar_url,
-            website_url: payload.website_url,
-          })
-          .eq("id", sellerProfile.id)
-          .eq("user_id", userId)
-          .select(SELLER_PROFILE_SELECT)
-          .single();
-
-        if (updateError) {
-          throw updateError;
-        }
-
-        if (!data) {
-          throw new Error(
-            "The seller profile could not be updated. Please refresh the page and try again."
-          );
-        }
-
-        savedSeller = data as SellerProfile;
-      } else {
-        /*
-         * No seller profile loaded.
-         *
-         * First check again by user_id. This protects against cases where
-         * the profile was created elsewhere or a previous request created it.
-         */
-        const { data: existingByUser, error: existingCheckError } =
-          await supabase
-            .from("seller_profiles")
-            .select(SELLER_PROFILE_SELECT)
-            .eq("user_id", userId)
-            .maybeSingle();
-
-        if (existingCheckError) {
-          throw existingCheckError;
-        }
-
-        if (existingByUser) {
-          const { data, error: updateError } = await supabase
-            .from("seller_profiles")
-            .update({
-              display_name: payload.display_name,
-              username: payload.username,
-              bio: payload.bio,
-              avatar_url: payload.avatar_url,
-              website_url: payload.website_url,
-            })
-            .eq("id", existingByUser.id)
-            .eq("user_id", userId)
-            .select(SELLER_PROFILE_SELECT)
-            .single();
-
-          if (updateError) {
-            throw updateError;
-          }
-
-          savedSeller = data as SellerProfile;
-        } else {
-          /*
-           * Create a new seller profile.
-           */
-          const { data, error: insertError } = await supabase
-            .from("seller_profiles")
-            .insert({
-              ...payload,
-              seller_status: "pending",
-              is_verified: false,
-            })
-            .select(SELLER_PROFILE_SELECT)
-            .single();
-
-          if (insertError) {
-            throw insertError;
-          }
-
-          if (!data) {
-            throw new Error(
-              "Seller profile creation returned no data. Please try again."
-            );
-          }
-
-          savedSeller = data as SellerProfile;
-        }
+      if (insertError) {
+        throw insertError;
       }
 
-      setSellerProfile(savedSeller);
+      if (!createdSeller) {
+        throw new Error(
+          "Seller profile was not returned after creation. Please try again."
+        );
+      }
 
-      setSuccess("Seller profile saved successfully.");
+      setSellerProfile(createdSeller as SellerProfile);
+
+      /*
+       * =========================================================
+       * 6. Profile successfully created
+       *
+       * Go directly to seller dashboard.
+       * =========================================================
+       */
+
+      setSuccess("Seller profile created successfully.");
 
       window.setTimeout(() => {
-        setSuccess("");
-      }, 3500);
+        router.replace("/marketplace/seller/dashboard");
+      }, 700);
     } catch (err) {
       console.error("Failed to save seller profile:", err);
 
       setError(
-        getSupabaseErrorMessage(
+        getErrorMessage(
           err,
           "Unable to save your seller profile. Please try again."
         )
@@ -428,18 +429,33 @@ export default function SellerPage() {
     }
   }
 
+  /*
+   * =========================================================
+   * Loading
+   * =========================================================
+   */
+
   if (loading) {
     return (
       <main className="min-h-screen bg-[#07090d] text-white">
         <div className="mx-auto flex min-h-screen max-w-6xl items-center justify-center px-6">
           <div className="flex items-center gap-3 text-sm text-zinc-400">
             <Loader2 className="h-5 w-5 animate-spin" />
-            Loading seller profile...
+            Checking your seller account...
           </div>
         </div>
       </main>
     );
   }
+
+  /*
+   * =========================================================
+   * Seller Profile creation screen
+   *
+   * This is shown ONLY when the authenticated user does not
+   * already have a seller profile.
+   * =========================================================
+   */
 
   return (
     <main className="min-h-screen bg-[#07090d] text-white">
@@ -465,29 +481,17 @@ export default function SellerPage() {
                 <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
                   Seller Center
                 </h1>
+
                 <p className="mt-1 text-sm text-zinc-400">
-                  Manage your ZUQEN marketplace seller profile.
+                  Create your ZUQEN marketplace seller profile.
                 </p>
               </div>
             </div>
           </div>
 
           <div className="flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-4 py-2">
-            <span
-              className={`h-2 w-2 rounded-full ${
-                sellerStatus === "active"
-                  ? "bg-emerald-400"
-                  : sellerStatus === "suspended"
-                  ? "bg-red-400"
-                  : "bg-amber-400"
-              }`}
-            />
-
-            <span className="text-sm text-zinc-300">{statusLabel}</span>
-
-            {isVerified && (
-              <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-            )}
+            <span className="h-2 w-2 rounded-full bg-amber-400" />
+            <span className="text-sm text-zinc-300">New Seller</span>
           </div>
         </div>
 
@@ -497,12 +501,7 @@ export default function SellerPage() {
             <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
 
             <div className="min-w-0 break-words">
-              <p>{error}</p>
-
-              <p className="mt-2 text-xs text-red-300/60">
-                If this is a database permission or policy error, the exact
-                Supabase message above identifies the issue.
-              </p>
+              {error}
             </div>
           </div>
         )}
@@ -519,9 +518,12 @@ export default function SellerPage() {
           {/* Profile form */}
           <section className="rounded-2xl border border-white/10 bg-white/[0.025] p-5 sm:p-7">
             <div className="mb-7">
-              <h2 className="text-lg font-semibold">Seller Profile</h2>
+              <h2 className="text-lg font-semibold">
+                Create Seller Profile
+              </h2>
+
               <p className="mt-1 text-sm text-zinc-500">
-                These details will be used on your marketplace seller profile.
+                You only need to create this seller profile once.
               </p>
             </div>
 
@@ -633,7 +635,10 @@ export default function SellerPage() {
                   htmlFor="website"
                   className="mb-2 block text-sm font-medium text-zinc-200"
                 >
-                  Website
+                  Website{" "}
+                  <span className="font-normal text-zinc-600">
+                    (optional)
+                  </span>
                 </label>
 
                 <input
@@ -646,7 +651,7 @@ export default function SellerPage() {
                 />
 
                 <p className="mt-2 text-xs text-zinc-600">
-                  Optional. This is your personal or portfolio website.
+                  Your personal, creator, or portfolio website.
                 </p>
               </div>
 
@@ -657,7 +662,9 @@ export default function SellerPage() {
                   className="mb-2 block text-sm font-medium text-zinc-200"
                 >
                   Avatar URL{" "}
-                  <span className="font-normal text-zinc-600">(optional)</span>
+                  <span className="font-normal text-zinc-600">
+                    (optional)
+                  </span>
                 </label>
 
                 <input
@@ -673,8 +680,8 @@ export default function SellerPage() {
               {/* Save */}
               <div className="flex flex-col gap-3 border-t border-white/10 pt-6 sm:flex-row sm:items-center sm:justify-between">
                 <p className="text-xs leading-5 text-zinc-600">
-                  Seller status and verification are controlled by the
-                  marketplace system.
+                  Your seller profile will remain connected to this account
+                  after logout.
                 </p>
 
                 <button
@@ -688,98 +695,68 @@ export default function SellerPage() {
                     <Save className="h-4 w-4" />
                   )}
 
-                  {saving ? "Saving..." : "Save Profile"}
+                  {saving ? "Creating..." : "Create Seller Profile"}
                 </button>
               </div>
             </form>
           </section>
 
-          {/* Seller status */}
+          {/* Information */}
           <aside className="space-y-6">
             <section className="rounded-2xl border border-white/10 bg-white/[0.025] p-5">
               <h2 className="text-sm font-semibold text-zinc-200">
-                Seller status
-              </h2>
-
-              <div className="mt-5 rounded-xl border border-white/10 bg-black/20 p-4">
-                <div className="flex items-center justify-between gap-4">
-                  <span className="text-sm text-zinc-400">Account</span>
-
-                  <span className="text-sm font-medium text-zinc-200">
-                    {statusLabel}
-                  </span>
-                </div>
-
-                <div className="mt-4 flex items-center justify-between gap-4">
-                  <span className="text-sm text-zinc-400">Verification</span>
-
-                  {isVerified ? (
-                    <span className="inline-flex items-center gap-1.5 text-sm font-medium text-emerald-400">
-                      <CheckCircle2 className="h-4 w-4" />
-                      Verified
-                    </span>
-                  ) : (
-                    <span className="text-sm text-zinc-500">
-                      Not verified
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              {sellerStatus === "pending" && (
-                <p className="mt-4 text-xs leading-5 text-zinc-500">
-                  Your seller account is currently pending. Marketplace
-                  approval and verification will be handled by the seller
-                  review system.
-                </p>
-              )}
-
-              {sellerStatus === "suspended" && (
-                <p className="mt-4 text-xs leading-5 text-red-300/70">
-                  Seller activity is currently restricted. Contact the
-                  marketplace support/review system for further information.
-                </p>
-              )}
-            </section>
-
-            <section className="rounded-2xl border border-white/10 bg-white/[0.025] p-5">
-              <h2 className="text-sm font-semibold text-zinc-200">
-                Account information
+                How selling works
               </h2>
 
               <div className="mt-5 space-y-4">
-                <div>
-                  <p className="text-xs text-zinc-600">Profile ID</p>
-                  <p className="mt-1 break-all font-mono text-xs text-zinc-400">
-                    {profile?.id || userId}
-                  </p>
+                <div className="flex gap-3">
+                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-white/[0.06] text-xs font-semibold">
+                    1
+                  </div>
+
+                  <div>
+                    <p className="text-sm text-zinc-200">
+                      Create your seller profile
+                    </p>
+
+                    <p className="mt-1 text-xs leading-5 text-zinc-500">
+                      This is a one-time setup for your account.
+                    </p>
+                  </div>
                 </div>
 
-                {sellerProfile?.created_at && (
+                <div className="flex gap-3">
+                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-white/[0.06] text-xs font-semibold">
+                    2
+                  </div>
+
                   <div>
-                    <p className="text-xs text-zinc-600">
-                      Seller profile created
+                    <p className="text-sm text-zinc-200">
+                      Create your template
                     </p>
 
-                    <p className="mt-1 text-sm text-zinc-400">
-                      {new Date(
-                        sellerProfile.created_at
-                      ).toLocaleDateString()}
+                    <p className="mt-1 text-xs leading-5 text-zinc-500">
+                      Add your package, screenshots, video and listing details.
                     </p>
                   </div>
-                )}
+                </div>
 
-                {sellerProfile?.updated_at && (
+                <div className="flex gap-3">
+                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-white/[0.06] text-xs font-semibold">
+                    3
+                  </div>
+
                   <div>
-                    <p className="text-xs text-zinc-600">Last updated</p>
+                    <p className="text-sm text-zinc-200">
+                      Submit for review
+                    </p>
 
-                    <p className="mt-1 text-sm text-zinc-400">
-                      {new Date(
-                        sellerProfile.updated_at
-                      ).toLocaleDateString()}
+                    <p className="mt-1 text-xs leading-5 text-zinc-500">
+                      Security and marketplace verification happen before
+                      publishing.
                     </p>
                   </div>
-                )}
+                </div>
               </div>
             </section>
 
@@ -789,13 +766,12 @@ export default function SellerPage() {
               </div>
 
               <h2 className="mt-4 text-sm font-semibold text-zinc-200">
-                Sell on ZUQEN
+                One account, one seller profile
               </h2>
 
               <p className="mt-2 text-xs leading-5 text-zinc-500">
-                Once your seller profile is ready, the seller dashboard will
-                let you create templates, manage drafts, upload versions,
-                submit listings for review and track marketplace activity.
+                Your seller profile is permanently associated with your ZUQEN
+                account. Logging out does not remove it.
               </p>
             </section>
           </aside>
