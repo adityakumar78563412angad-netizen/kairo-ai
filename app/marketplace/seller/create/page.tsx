@@ -1,4 +1,3 @@
-
 "use client";
 
 import {
@@ -8,6 +7,7 @@ import {
   useMemo,
   useState,
 } from "react";
+
 import {
   AlertCircle,
   ArrowLeft,
@@ -21,10 +21,15 @@ import {
   Save,
   ShieldCheck,
   Sparkles,
-  Upload,
   Video,
 } from "lucide-react";
-import { useParams, useRouter, useSearchParams } from "next/navigation";
+
+import {
+  useParams,
+  useRouter,
+  useSearchParams,
+} from "next/navigation";
+
 import { createClient } from "@/lib/supabase";
 import TemplateFileUploader from "@/components/marketplace/template-file-uploader";
 
@@ -73,6 +78,25 @@ const SELLER_PROFILE_SELECT = `
   is_verified
 `;
 
+const TEMPLATE_SELECT = `
+  id,
+  seller_id,
+  name,
+  slug,
+  category,
+  short_description,
+  description,
+  price,
+  currency,
+  features,
+  requirements,
+  tech_stack,
+  license,
+  preview_image,
+  status,
+  review_status
+`;
+
 const CATEGORIES = [
   "Website",
   "Landing Page",
@@ -111,8 +135,12 @@ function splitLines(value: string) {
     .filter(Boolean);
 }
 
-function joinLines(value: string[] | null | undefined) {
-  return Array.isArray(value) ? value.join("\n") : "";
+function joinLines(
+  value: string[] | null | undefined
+) {
+  return Array.isArray(value)
+    ? value.join("\n")
+    : "";
 }
 
 function formatCurrency(
@@ -126,6 +154,12 @@ function formatCurrency(
   }).format(Number(amount || 0));
 }
 
+function normalizeStatus(
+  value: string | null | undefined
+) {
+  return String(value || "").toLowerCase();
+}
+
 function SellerCreateContent() {
   const router = useRouter();
   const params = useParams();
@@ -136,39 +170,79 @@ function SellerCreateContent() {
       ? params.templateId
       : undefined;
 
-  const queryTemplateId = searchParams.get("template");
+  const queryTemplateId =
+    searchParams.get("template");
 
-  const templateId = queryTemplateId || routeTemplateId || null;
+  const templateId =
+    queryTemplateId ||
+    routeTemplateId ||
+    null;
 
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
+  const [loading, setLoading] =
+    useState(true);
 
-  const [userId, setUserId] = useState<string | null>(null);
+  const [saving, setSaving] =
+    useState(false);
+
+  const [submitting, setSubmitting] =
+    useState(false);
+
+  const [error, setError] =
+    useState("");
+
+  const [success, setSuccess] =
+    useState("");
+
+  const [userId, setUserId] =
+    useState<string | null>(null);
+
   const [sellerProfile, setSellerProfile] =
     useState<SellerProfile | null>(null);
 
-  const [template, setTemplate] = useState<Template | null>(null);
+  const [template, setTemplate] =
+    useState<Template | null>(null);
 
-  const [name, setName] = useState("");
-  const [slug, setSlug] = useState("");
+  const [name, setName] =
+    useState("");
+
+  const [slug, setSlug] =
+    useState("");
+
   const [slugManuallyEdited, setSlugManuallyEdited] =
     useState(false);
 
-  const [category, setCategory] = useState("");
+  const [category, setCategory] =
+    useState("");
+
   const [shortDescription, setShortDescription] =
     useState("");
-  const [description, setDescription] = useState("");
-  const [price, setPrice] = useState("");
-  const [currency, setCurrency] = useState("INR");
-  const [features, setFeatures] = useState("");
-  const [requirements, setRequirements] = useState("");
-  const [techStack, setTechStack] = useState("");
-  const [license, setLicense] = useState(LICENSES[0]);
-  const [previewImage, setPreviewImage] = useState("");
 
-  const [activeStep, setActiveStep] = useState(0);
+  const [description, setDescription] =
+    useState("");
+
+  const [price, setPrice] =
+    useState("");
+
+  const [currency, setCurrency] =
+    useState("INR");
+
+  const [features, setFeatures] =
+    useState("");
+
+  const [requirements, setRequirements] =
+    useState("");
+
+  const [techStack, setTechStack] =
+    useState("");
+
+  const [license, setLicense] =
+    useState(LICENSES[0]);
+
+  const [previewImage, setPreviewImage] =
+    useState("");
+
+  const [activeStep, setActiveStep] =
+    useState(0);
 
   const steps = [
     {
@@ -183,7 +257,7 @@ function SellerCreateContent() {
     },
     {
       title: "Screenshots & Media",
-      description: "Add preview images and demo video",
+      description: "Add required marketplace media",
       icon: ImageIcon,
     },
     {
@@ -198,13 +272,15 @@ function SellerCreateContent() {
     },
     {
       title: "Marketplace Review",
-      description: "Final marketplace approval",
+      description: "Submit for final review",
       icon: CheckCircle2,
     },
   ];
 
   useEffect(() => {
-    if (!name || slugManuallyEdited) return;
+    if (!name || slugManuallyEdited) {
+      return;
+    }
 
     setSlug(slugify(name));
   }, [name, slugManuallyEdited]);
@@ -222,7 +298,9 @@ function SellerCreateContent() {
           error: authError,
         } = await supabase.auth.getUser();
 
-        if (authError) throw authError;
+        if (authError) {
+          throw authError;
+        }
 
         if (!user) {
           router.replace(
@@ -232,30 +310,24 @@ function SellerCreateContent() {
                 : "/marketplace/seller/create"
             )}`
           );
+
           return;
         }
 
-        if (cancelled) return;
+        if (cancelled) {
+          return;
+        }
 
         setUserId(user.id);
 
-        /*
-         * IMPORTANT:
-         *
-         * The real seller_profiles columns are:
-         * seller_status
-         * is_verified
-         *
-         * NOT:
-         * status
-         * verification_status
-         */
-        const { data: sellerData, error: sellerError } =
-          await supabase
-            .from("seller_profiles")
-            .select(SELLER_PROFILE_SELECT)
-            .eq("user_id", user.id)
-            .maybeSingle();
+        const {
+          data: sellerData,
+          error: sellerError,
+        } = await supabase
+          .from("seller_profiles")
+          .select(SELLER_PROFILE_SELECT)
+          .eq("user_id", user.id)
+          .maybeSingle();
 
         if (sellerError) {
           throw sellerError;
@@ -265,81 +337,123 @@ function SellerCreateContent() {
           setError(
             "You need to create your seller profile before creating a template."
           );
+
           setLoading(false);
           return;
         }
 
-        if (cancelled) return;
+        if (cancelled) {
+          return;
+        }
 
-        setSellerProfile(sellerData as SellerProfile);
+        setSellerProfile(
+          sellerData as SellerProfile
+        );
 
-        if (templateId) {
-          const { data: templateData, error: templateError } =
-            await supabase
-              .from("templates")
-              .select(
-                `
-                  id,
-                  seller_id,
-                  name,
-                  slug,
-                  category,
-                  short_description,
-                  description,
-                  price,
-                  currency,
-                  features,
-                  requirements,
-                  tech_stack,
-                  license,
-                  preview_image,
-                  status,
-                  review_status
-                `
-              )
-              .eq("id", templateId)
-              .eq("seller_id", user.id)
-              .maybeSingle();
+        if (!templateId) {
+          return;
+        }
 
-          if (templateError) {
-            throw templateError;
-          }
+        const {
+          data: templateData,
+          error: templateError,
+        } = await supabase
+          .from("templates")
+          .select(TEMPLATE_SELECT)
+          .eq("id", templateId)
+          .eq("seller_id", sellerData.id)
+          .maybeSingle();
 
-          if (!templateData) {
-            throw new Error(
-              "Template not found or you do not have permission to edit it."
-            );
-          }
+        if (templateError) {
+          throw templateError;
+        }
 
-          if (cancelled) return;
-
-          const loaded = templateData as Template;
-
-          setTemplate(loaded);
-          setName(loaded.name || "");
-          setSlug(loaded.slug || slugify(loaded.name || ""));
-          setSlugManuallyEdited(true);
-          setCategory(loaded.category || "");
-          setShortDescription(
-            loaded.short_description || ""
+        if (!templateData) {
+          throw new Error(
+            "Template not found or you do not have permission to edit it."
           );
-          setDescription(loaded.description || "");
-          setPrice(
-            loaded.price === null || loaded.price === undefined
-              ? ""
-              : String(loaded.price)
-          );
-          setCurrency(loaded.currency || "INR");
-          setFeatures(joinLines(loaded.features));
-          setRequirements(joinLines(loaded.requirements));
-          setTechStack(joinLines(loaded.tech_stack));
-          setLicense(
-            loaded.license || LICENSES[0]
-          );
-          setPreviewImage(loaded.preview_image || "");
+        }
+
+        if (cancelled) {
+          return;
+        }
+
+        const loaded =
+          templateData as Template;
+
+        setTemplate(loaded);
+
+        setName(loaded.name || "");
+
+        setSlug(
+          loaded.slug ||
+            slugify(loaded.name || "")
+        );
+
+        setSlugManuallyEdited(true);
+
+        setCategory(
+          loaded.category || ""
+        );
+
+        setShortDescription(
+          loaded.short_description || ""
+        );
+
+        setDescription(
+          loaded.description || ""
+        );
+
+        setPrice(
+          loaded.price === null ||
+            loaded.price === undefined
+            ? ""
+            : String(loaded.price)
+        );
+
+        setCurrency(
+          loaded.currency || "INR"
+        );
+
+        setFeatures(
+          joinLines(loaded.features)
+        );
+
+        setRequirements(
+          joinLines(loaded.requirements)
+        );
+
+        setTechStack(
+          joinLines(loaded.tech_stack)
+        );
+
+        setLicense(
+          loaded.license ||
+            LICENSES[0]
+        );
+
+        setPreviewImage(
+          loaded.preview_image || ""
+        );
+
+        /*
+         * Automatically open marketplace review step
+         * when a template is already under review.
+         */
+        if (
+          normalizeStatus(loaded.status) ===
+            "under_review" ||
+          normalizeStatus(
+            loaded.review_status
+          ) === "under_review"
+        ) {
+          setActiveStep(5);
         }
       } catch (err) {
-        console.error("Template editor load error:", err);
+        console.error(
+          "Template editor load error:",
+          err
+        );
 
         if (!cancelled) {
           setError(
@@ -362,41 +476,79 @@ function SellerCreateContent() {
     };
   }, [router, templateId]);
 
-  const isEditing = Boolean(template);
+  const isEditing =
+    Boolean(template);
 
-  const currentStep = steps[activeStep];
+  const currentStatus =
+    normalizeStatus(template?.status);
 
-  const canOpenUploadWorkflow = Boolean(template?.id);
+  const currentReviewStatus =
+    normalizeStatus(
+      template?.review_status
+    );
 
-  const commissionPreview = useMemo(() => {
-    const numericPrice = Number(price || 0);
+  const isUnderReview =
+    currentStatus === "under_review" ||
+    currentReviewStatus === "under_review";
 
-    if (!Number.isFinite(numericPrice) || numericPrice <= 0) {
+  const isPublished =
+    currentStatus === "published" ||
+    currentReviewStatus === "approved";
+
+  const isRejected =
+    currentStatus === "rejected" ||
+    currentReviewStatus === "rejected";
+
+  const canEdit =
+    !isUnderReview &&
+    !isPublished;
+
+  const canOpenUploadWorkflow =
+    Boolean(template?.id);
+
+  const commissionPreview =
+    useMemo(() => {
+      const numericPrice =
+        Number(price || 0);
+
+      if (
+        !Number.isFinite(
+          numericPrice
+        ) ||
+        numericPrice <= 0
+      ) {
+        return {
+          gross: 0,
+          commission: 0,
+          seller: 0,
+        };
+      }
+
+      const commission =
+        numericPrice * 0.2;
+
+      const seller =
+        numericPrice -
+        commission;
+
       return {
-        gross: 0,
-        commission: 0,
-        seller: 0,
+        gross: numericPrice,
+        commission,
+        seller,
       };
-    }
-
-    const commission = numericPrice * 0.2;
-    const seller = numericPrice - commission;
-
-    return {
-      gross: numericPrice,
-      commission,
-      seller,
-    };
-  }, [price]);
+    }, [price]);
 
   async function ensureUniqueSlug(
     candidate: string,
     currentId?: string
   ) {
-    const cleanSlug = slugify(candidate);
+    const cleanSlug =
+      slugify(candidate);
 
     if (!cleanSlug) {
-      throw new Error("Please enter a valid template name.");
+      throw new Error(
+        "Please enter a valid template name."
+      );
     }
 
     let query = supabase
@@ -406,10 +558,16 @@ function SellerCreateContent() {
       .limit(1);
 
     if (currentId) {
-      query = query.neq("id", currentId);
+      query = query.neq(
+        "id",
+        currentId
+      );
     }
 
-    const { data, error: slugError } = await query.maybeSingle();
+    const {
+      data,
+      error: slugError,
+    } = await query.maybeSingle();
 
     if (slugError) {
       throw slugError;
@@ -424,19 +582,177 @@ function SellerCreateContent() {
     return cleanSlug;
   }
 
+  function validateTemplateInformation() {
+    const cleanName =
+      name.trim();
+
+    const cleanShortDescription =
+      shortDescription.trim();
+
+    const cleanDescription =
+      description.trim();
+
+    const cleanPreviewImage =
+      previewImage.trim();
+
+    if (!cleanName) {
+      throw new Error(
+        "Template name is required."
+      );
+    }
+
+    if (cleanName.length > 120) {
+      throw new Error(
+        "Template name must be 120 characters or less."
+      );
+    }
+
+    if (!category) {
+      throw new Error(
+        "Please select a category."
+      );
+    }
+
+    if (!cleanShortDescription) {
+      throw new Error(
+        "Short description is required."
+      );
+    }
+
+    if (
+      cleanShortDescription.length >
+      240
+    ) {
+      throw new Error(
+        "Short description must be 240 characters or less."
+      );
+    }
+
+    if (!cleanDescription) {
+      throw new Error(
+        "Full description is required."
+      );
+    }
+
+    const numericPrice =
+      Number(price || 0);
+
+    if (
+      !Number.isFinite(
+        numericPrice
+      ) ||
+      numericPrice < 0
+    ) {
+      throw new Error(
+        "Please enter a valid template price."
+      );
+    }
+
+    if (
+      numericPrice >
+      10000000
+    ) {
+      throw new Error(
+        "Template price is too high."
+      );
+    }
+
+    if (
+      !currency ||
+      !CURRENCIES.includes(
+        currency
+      )
+    ) {
+      throw new Error(
+        "Please select a valid currency."
+      );
+    }
+
+    if (
+      !license ||
+      !LICENSES.includes(
+        license
+      )
+    ) {
+      throw new Error(
+        "Please select a valid license."
+      );
+    }
+
+    if (
+      !splitLines(features)
+        .length
+    ) {
+      throw new Error(
+        "Add at least one feature."
+      );
+    }
+
+    if (
+      !splitLines(requirements)
+        .length
+    ) {
+      throw new Error(
+        "Add at least one requirement."
+      );
+    }
+
+    if (
+      !splitLines(techStack)
+        .length
+    ) {
+      throw new Error(
+        "Add at least one technology to the tech stack."
+      );
+    }
+
+    if (cleanPreviewImage) {
+      try {
+        const parsed =
+          new URL(
+            cleanPreviewImage
+          );
+
+        if (
+          ![
+            "http:",
+            "https:",
+          ].includes(
+            parsed.protocol
+          )
+        ) {
+          throw new Error();
+        }
+      } catch {
+        throw new Error(
+          "Preview image must be a valid HTTP or HTTPS URL."
+        );
+      }
+    }
+  }
+
   async function handleSaveDraft(
     event?: FormEvent<HTMLFormElement>
   ) {
     event?.preventDefault();
 
     if (!userId) {
-      setError("Your session has expired. Please log in again.");
+      setError(
+        "Your session has expired. Please log in again."
+      );
       return;
     }
 
     if (!sellerProfile) {
       setError(
-        "Unable to load your seller profile. Please create your seller profile first."
+        "Unable to load your seller profile."
+      );
+      return;
+    }
+
+    if (!canEdit) {
+      setError(
+        "This template cannot be edited while it is under review or published."
       );
       return;
     }
@@ -444,133 +760,111 @@ function SellerCreateContent() {
     setError("");
     setSuccess("");
 
-    const cleanName = name.trim();
-    const cleanShortDescription = shortDescription.trim();
-    const cleanDescription = description.trim();
-    const cleanPreviewImage = previewImage.trim();
-
-    if (!cleanName) {
-      setError("Template name is required.");
-      setActiveStep(0);
-      return;
-    }
-
-    if (cleanName.length > 120) {
-      setError("Template name must be 120 characters or less.");
-      setActiveStep(0);
-      return;
-    }
-
-    if (!category) {
-      setError("Please select a category.");
-      setActiveStep(0);
-      return;
-    }
-
-    if (!cleanShortDescription) {
-      setError("Short description is required.");
-      setActiveStep(0);
-      return;
-    }
-
-    if (cleanShortDescription.length > 240) {
+    try {
+      validateTemplateInformation();
+    } catch (err) {
       setError(
-        "Short description must be 240 characters or less."
+        err instanceof Error
+          ? err.message
+          : "Please complete the template information."
       );
+
       setActiveStep(0);
       return;
-    }
-
-    if (!cleanDescription) {
-      setError("Full description is required.");
-      setActiveStep(0);
-      return;
-    }
-
-    const numericPrice = Number(price || 0);
-
-    if (!Number.isFinite(numericPrice) || numericPrice < 0) {
-      setError("Please enter a valid template price.");
-      setActiveStep(0);
-      return;
-    }
-
-    if (numericPrice > 10000000) {
-      setError("Template price is too high.");
-      setActiveStep(0);
-      return;
-    }
-
-    if (cleanPreviewImage) {
-      try {
-        const parsed = new URL(cleanPreviewImage);
-
-        if (!["http:", "https:"].includes(parsed.protocol)) {
-          throw new Error();
-        }
-      } catch {
-        setError("Preview image must be a valid HTTP or HTTPS URL.");
-        setActiveStep(0);
-        return;
-      }
     }
 
     setSaving(true);
 
     try {
-      const cleanSlug = await ensureUniqueSlug(
-        slug || cleanName,
-        template?.id
-      );
+      const cleanName =
+        name.trim();
+
+      const cleanShortDescription =
+        shortDescription.trim();
+
+      const cleanDescription =
+        description.trim();
+
+      const cleanPreviewImage =
+        previewImage.trim();
+
+      const numericPrice =
+        Number(price || 0);
+
+      const cleanSlug =
+        await ensureUniqueSlug(
+          slug || cleanName,
+          template?.id
+        );
 
       const payload = {
-        seller_id: userId,
+        /*
+         * IMPORTANT:
+         * templates.seller_id points to seller_profiles.id.
+         */
+        seller_id:
+          sellerProfile.id,
+
         name: cleanName,
+
         slug: cleanSlug,
+
         category,
-        short_description: cleanShortDescription,
-        description: cleanDescription,
-        price: numericPrice,
+
+        short_description:
+          cleanShortDescription,
+
+        description:
+          cleanDescription,
+
+        price:
+          numericPrice,
+
         currency,
-        features: splitLines(features),
-        requirements: splitLines(requirements),
-        tech_stack: splitLines(techStack),
+
+        features:
+          splitLines(features),
+
+        requirements:
+          splitLines(requirements),
+
+        tech_stack:
+          splitLines(techStack),
+
         license,
-        preview_image: cleanPreviewImage || null,
+
+        preview_image:
+          cleanPreviewImage ||
+          null,
 
         /*
-         * Marketplace publishing is intentionally NOT performed
-         * by saving the draft.
+         * Saving a draft must NEVER publish it.
+         *
+         * A rejected template is returned to draft
+         * when seller saves corrections.
          */
         status: "draft",
+
         review_status: "draft",
       };
 
       if (template?.id) {
-        const { data, error: updateError } = await supabase
+        const {
+          data,
+          error: updateError,
+        } = await supabase
           .from("templates")
           .update(payload)
-          .eq("id", template.id)
-          .eq("seller_id", userId)
+          .eq(
+            "id",
+            template.id
+          )
+          .eq(
+            "seller_id",
+            sellerProfile.id
+          )
           .select(
-            `
-              id,
-              seller_id,
-              name,
-              slug,
-              category,
-              short_description,
-              description,
-              price,
-              currency,
-              features,
-              requirements,
-              tech_stack,
-              license,
-              preview_image,
-              status,
-              review_status
-            `
+            TEMPLATE_SELECT
           )
           .single();
 
@@ -578,55 +872,59 @@ function SellerCreateContent() {
           throw updateError;
         }
 
-        setTemplate(data as Template);
-        setSlug(cleanSlug);
-        setSuccess("Template draft updated successfully.");
-      } else {
-        const { data, error: insertError } = await supabase
-          .from("templates")
-          .insert(payload)
-          .select(
-            `
-              id,
-              seller_id,
-              name,
-              slug,
-              category,
-              short_description,
-              description,
-              price,
-              currency,
-              features,
-              requirements,
-              tech_stack,
-              license,
-              preview_image,
-              status,
-              review_status
-            `
-          )
-          .single();
+        setTemplate(
+          data as Template
+        );
 
-        if (insertError) {
-          throw insertError;
-        }
+        setSlug(
+          cleanSlug
+        );
 
-        const created = data as Template;
-
-        setTemplate(created);
-        setSlug(cleanSlug);
         setSuccess(
-          "Template draft created. You can now upload the template package and media."
+          "Template draft updated successfully."
         );
 
-        router.replace(
-          `/marketplace/seller/create?template=${encodeURIComponent(
-            created.id
-          )}`
-        );
+        return;
       }
+
+      const {
+        data,
+        error: insertError,
+      } = await supabase
+        .from("templates")
+        .insert(payload)
+        .select(
+          TEMPLATE_SELECT
+        )
+        .single();
+
+      if (insertError) {
+        throw insertError;
+      }
+
+      const created =
+        data as Template;
+
+      setTemplate(created);
+
+      setSlug(
+        cleanSlug
+      );
+
+      setSuccess(
+        "Template draft created. You can now upload the required marketplace assets."
+      );
+
+      router.replace(
+        `/marketplace/seller/create?template=${encodeURIComponent(
+          created.id
+        )}`
+      );
     } catch (err) {
-      console.error("Template draft save error:", err);
+      console.error(
+        "Template draft save error:",
+        err
+      );
 
       setError(
         err instanceof Error
@@ -638,8 +936,139 @@ function SellerCreateContent() {
     }
   }
 
+  async function handleSubmitForReview() {
+    if (!template?.id) {
+      setError(
+        "Save the template draft first."
+      );
+      setActiveStep(0);
+      return;
+    }
+
+    if (!canEdit) {
+      setError(
+        "This template cannot be submitted in its current state."
+      );
+      return;
+    }
+
+    setSubmitting(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      const response =
+        await fetch(
+          "/api/marketplace/templates/submit",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+            body: JSON.stringify({
+              templateId:
+                template.id,
+            }),
+          }
+        );
+
+      const data =
+        await response.json();
+
+      if (!response.ok) {
+        if (
+          Array.isArray(
+            data?.missingInformation
+          ) ||
+          Array.isArray(
+            data?.missingFiles
+          )
+        ) {
+          const info =
+            Array.isArray(
+              data.missingInformation
+            )
+              ? data.missingInformation
+              : [];
+
+          const files =
+            Array.isArray(
+              data.missingFiles
+            )
+              ? data.missingFiles
+              : [];
+
+          const parts: string[] =
+            [];
+
+          if (info.length) {
+            parts.push(
+              `Information: ${info.join(
+                ", "
+              )}`
+            );
+          }
+
+          if (files.length) {
+            parts.push(
+              `Files: ${files.join(
+                ", "
+              )}`
+            );
+          }
+
+          throw new Error(
+            `Submission requirements are incomplete. ${parts.join(
+              " | "
+            )}`
+          );
+        }
+
+        throw new Error(
+          data?.error ||
+            "Unable to submit the template."
+        );
+      }
+
+      setTemplate(
+        (current) =>
+          current
+            ? {
+                ...current,
+                status:
+                  "under_review",
+                review_status:
+                  "under_review",
+              }
+            : current
+      );
+
+      setSuccess(
+        "Template submitted successfully. It is now under marketplace review."
+      );
+
+      setActiveStep(5);
+    } catch (err) {
+      console.error(
+        "Template submission error:",
+        err
+      );
+
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Unable to submit the template for review."
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   function handleBack() {
-    router.push("/marketplace/seller/dashboard");
+    router.push(
+      "/marketplace/seller/dashboard"
+    );
   }
 
   if (loading) {
@@ -722,8 +1151,24 @@ function SellerCreateContent() {
             </div>
 
             <div className="flex flex-wrap gap-2">
-              <span className="rounded-full border border-amber-400/20 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-300">
-                Draft
+              <span
+                className={`rounded-full border px-3 py-1.5 text-xs ${
+                  isUnderReview
+                    ? "border-blue-400/20 bg-blue-500/10 text-blue-300"
+                    : isPublished
+                    ? "border-emerald-400/20 bg-emerald-500/10 text-emerald-300"
+                    : isRejected
+                    ? "border-red-400/20 bg-red-500/10 text-red-300"
+                    : "border-amber-400/20 bg-amber-500/10 text-amber-300"
+                }`}
+              >
+                {isUnderReview
+                  ? "Under Review"
+                  : isPublished
+                  ? "Published"
+                  : isRejected
+                  ? "Rejected"
+                  : "Draft"}
               </span>
 
               <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs text-zinc-500">
@@ -732,6 +1177,40 @@ function SellerCreateContent() {
             </div>
           </div>
         </header>
+
+        {isUnderReview && (
+          <div className="mb-6 flex items-start gap-3 rounded-2xl border border-blue-400/20 bg-blue-500/10 p-4 text-sm text-blue-200">
+            <Lock className="mt-0.5 h-5 w-5 shrink-0" />
+
+            <div>
+              <p className="font-medium">
+                Template is under review
+              </p>
+
+              <p className="mt-1 leading-6 text-blue-100/60">
+                Your listing is currently locked while the
+                marketplace review pipeline processes it.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {isRejected && (
+          <div className="mb-6 flex items-start gap-3 rounded-2xl border border-red-400/20 bg-red-500/10 p-4 text-sm text-red-200">
+            <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
+
+            <div>
+              <p className="font-medium">
+                Template needs changes
+              </p>
+
+              <p className="mt-1 leading-6 text-red-100/60">
+                Correct the requested issues, save the draft,
+                and submit it again for review.
+              </p>
+            </div>
+          </div>
+        )}
 
         {error && (
           <div className="mb-6 flex items-start gap-3 rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-200">
@@ -756,83 +1235,106 @@ function SellerCreateContent() {
             </div>
 
             <div className="space-y-1">
-              {steps.map((step, index) => {
-                const Icon = step.icon;
-                const active = index === activeStep;
-                const completed =
-                  index < activeStep && canOpenUploadWorkflow;
+              {steps.map(
+                (step, index) => {
+                  const Icon =
+                    step.icon;
 
-                return (
-                  <button
-                    key={step.title}
-                    type="button"
-                    onClick={() => {
-                      if (
-                        index === 0 ||
-                        canOpenUploadWorkflow
-                      ) {
-                        setActiveStep(index);
+                  const active =
+                    index ===
+                    activeStep;
+
+                  const completed =
+                    index < activeStep &&
+                    canOpenUploadWorkflow;
+
+                  return (
+                    <button
+                      key={
+                        step.title
                       }
-                    }}
-                    disabled={
-                      index > 0 && !canOpenUploadWorkflow
-                    }
-                    className={`flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left transition ${
-                      active
-                        ? "bg-white text-black"
-                        : "text-zinc-500 hover:bg-white/[0.04] hover:text-white"
-                    } ${
-                      index > 0 && !canOpenUploadWorkflow
-                        ? "cursor-not-allowed opacity-40"
-                        : ""
-                    }`}
-                  >
-                    <div
-                      className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${
+                      type="button"
+                      onClick={() => {
+                        if (
+                          index === 0 ||
+                          canOpenUploadWorkflow
+                        ) {
+                          setActiveStep(
+                            index
+                          );
+                        }
+                      }}
+                      disabled={
+                        (index > 0 &&
+                          !canOpenUploadWorkflow) ||
+                        isUnderReview &&
+                          index < 5
+                      }
+                      className={`flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left transition ${
                         active
-                          ? "bg-black/10"
-                          : completed
-                          ? "bg-emerald-500/10"
-                          : "bg-white/[0.04]"
+                          ? "bg-white text-black"
+                          : "text-zinc-500 hover:bg-white/[0.04] hover:text-white"
+                      } ${
+                        (index > 0 &&
+                          !canOpenUploadWorkflow) ||
+                        (isUnderReview &&
+                          index < 5)
+                          ? "cursor-not-allowed opacity-40"
+                          : ""
                       }`}
                     >
-                      {completed ? (
-                        <CheckCircle2
-                          className={`h-4 w-4 ${
-                            active
-                              ? "text-black"
-                              : "text-emerald-300"
-                          }`}
-                        />
-                      ) : (
-                        <Icon className="h-4 w-4" />
-                      )}
-                    </div>
-
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium">
-                        {step.title}
-                      </p>
-                      <p
-                        className={`mt-0.5 truncate text-[11px] ${
+                      <div
+                        className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${
                           active
-                            ? "text-black/50"
-                            : "text-zinc-700"
+                            ? "bg-black/10"
+                            : completed
+                            ? "bg-emerald-500/10"
+                            : "bg-white/[0.04]"
                         }`}
                       >
-                        {step.description}
-                      </p>
-                    </div>
-                  </button>
-                );
-              })}
+                        {completed ? (
+                          <CheckCircle2
+                            className={`h-4 w-4 ${
+                              active
+                                ? "text-black"
+                                : "text-emerald-300"
+                            }`}
+                          />
+                        ) : (
+                          <Icon className="h-4 w-4" />
+                        )}
+                      </div>
+
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium">
+                          {step.title}
+                        </p>
+
+                        <p
+                          className={`mt-0.5 truncate text-[11px] ${
+                            active
+                              ? "text-black/50"
+                              : "text-zinc-700"
+                          }`}
+                        >
+                          {
+                            step.description
+                          }
+                        </p>
+                      </div>
+                    </button>
+                  );
+                }
+              )}
             </div>
           </aside>
 
           <section className="min-w-0">
             {activeStep === 0 && (
               <form
-                onSubmit={handleSaveDraft}
+                onSubmit={
+                  handleSaveDraft
+                }
                 className="rounded-3xl border border-white/10 bg-white/[0.025] p-5 sm:p-7"
               >
                 <div className="mb-7">
@@ -841,8 +1343,7 @@ function SellerCreateContent() {
                   </h2>
 
                   <p className="mt-1 text-sm text-zinc-600">
-                    Add the information buyers need to understand your
-                    template.
+                    Add the information buyers need to understand your template.
                   </p>
                 </div>
 
@@ -859,12 +1360,17 @@ function SellerCreateContent() {
                       id="name"
                       value={name}
                       onChange={(event) =>
-                        setName(event.target.value)
+                        setName(
+                          event.target.value
+                        )
                       }
                       placeholder="e.g. Modern SaaS Dashboard"
                       maxLength={120}
-                      disabled={saving}
-                      className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none placeholder:text-zinc-700 focus:border-violet-400/50 focus:ring-2 focus:ring-violet-500/10"
+                      disabled={
+                        saving ||
+                        !canEdit
+                      }
+                      className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none placeholder:text-zinc-700 focus:border-violet-400/50 focus:ring-2 focus:ring-violet-500/10 disabled:cursor-not-allowed disabled:opacity-50"
                     />
                   </div>
 
@@ -880,12 +1386,22 @@ function SellerCreateContent() {
                       id="slug"
                       value={slug}
                       onChange={(event) => {
-                        setSlugManuallyEdited(true);
-                        setSlug(slugify(event.target.value));
+                        setSlugManuallyEdited(
+                          true
+                        );
+
+                        setSlug(
+                          slugify(
+                            event.target.value
+                          )
+                        );
                       }}
                       placeholder="modern-saas-dashboard"
-                      disabled={saving}
-                      className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none placeholder:text-zinc-700 focus:border-violet-400/50 focus:ring-2 focus:ring-violet-500/10"
+                      disabled={
+                        saving ||
+                        !canEdit
+                      }
+                      className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none placeholder:text-zinc-700 focus:border-violet-400/50 focus:ring-2 focus:ring-violet-500/10 disabled:cursor-not-allowed disabled:opacity-50"
                     />
 
                     <p className="mt-2 text-xs text-zinc-700">
@@ -905,20 +1421,30 @@ function SellerCreateContent() {
                       id="category"
                       value={category}
                       onChange={(event) =>
-                        setCategory(event.target.value)
+                        setCategory(
+                          event.target.value
+                        )
                       }
-                      disabled={saving}
-                      className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none focus:border-violet-400/50"
+                      disabled={
+                        saving ||
+                        !canEdit
+                      }
+                      className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none focus:border-violet-400/50 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <option value="">
                         Select category
                       </option>
 
-                      {CATEGORIES.map((item) => (
-                        <option key={item} value={item}>
-                          {item}
-                        </option>
-                      ))}
+                      {CATEGORIES.map(
+                        (item) => (
+                          <option
+                            key={item}
+                            value={item}
+                          >
+                            {item}
+                          </option>
+                        )
+                      )}
                     </select>
                   </div>
 
@@ -932,19 +1458,29 @@ function SellerCreateContent() {
 
                     <textarea
                       id="shortDescription"
-                      value={shortDescription}
+                      value={
+                        shortDescription
+                      }
                       onChange={(event) =>
-                        setShortDescription(event.target.value)
+                        setShortDescription(
+                          event.target.value
+                        )
                       }
                       rows={3}
                       maxLength={240}
+                      disabled={
+                        saving ||
+                        !canEdit
+                      }
                       placeholder="A concise description of what buyers get."
-                      disabled={saving}
-                      className="w-full resize-none rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm leading-6 text-white outline-none placeholder:text-zinc-700 focus:border-violet-400/50 focus:ring-2 focus:ring-violet-500/10"
+                      className="w-full resize-none rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm leading-6 text-white outline-none placeholder:text-zinc-700 focus:border-violet-400/50 focus:ring-2 focus:ring-violet-500/10 disabled:cursor-not-allowed disabled:opacity-50"
                     />
 
                     <p className="mt-2 text-xs text-zinc-700">
-                      {shortDescription.length}/240
+                      {
+                        shortDescription.length
+                      }
+                      /240
                     </p>
                   </div>
 
@@ -958,14 +1494,21 @@ function SellerCreateContent() {
 
                     <textarea
                       id="description"
-                      value={description}
+                      value={
+                        description
+                      }
                       onChange={(event) =>
-                        setDescription(event.target.value)
+                        setDescription(
+                          event.target.value
+                        )
                       }
                       rows={10}
+                      disabled={
+                        saving ||
+                        !canEdit
+                      }
                       placeholder="Explain the template, what is included, how it works, and who it is for."
-                      disabled={saving}
-                      className="w-full resize-y rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm leading-6 text-white outline-none placeholder:text-zinc-700 focus:border-violet-400/50 focus:ring-2 focus:ring-violet-500/10"
+                      className="w-full resize-y rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm leading-6 text-white outline-none placeholder:text-zinc-700 focus:border-violet-400/50 focus:ring-2 focus:ring-violet-500/10 disabled:cursor-not-allowed disabled:opacity-50"
                     />
                   </div>
 
@@ -985,11 +1528,16 @@ function SellerCreateContent() {
                         step="0.01"
                         value={price}
                         onChange={(event) =>
-                          setPrice(event.target.value)
+                          setPrice(
+                            event.target.value
+                          )
                         }
                         placeholder="0"
-                        disabled={saving}
-                        className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none placeholder:text-zinc-700 focus:border-violet-400/50"
+                        disabled={
+                          saving ||
+                          !canEdit
+                        }
+                        className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none placeholder:text-zinc-700 focus:border-violet-400/50 disabled:cursor-not-allowed disabled:opacity-50"
                       />
                     </div>
 
@@ -1005,16 +1553,26 @@ function SellerCreateContent() {
                         id="currency"
                         value={currency}
                         onChange={(event) =>
-                          setCurrency(event.target.value)
+                          setCurrency(
+                            event.target.value
+                          )
                         }
-                        disabled={saving}
-                        className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none focus:border-violet-400/50"
+                        disabled={
+                          saving ||
+                          !canEdit
+                        }
+                        className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none focus:border-violet-400/50 disabled:cursor-not-allowed disabled:opacity-50"
                       >
-                        {CURRENCIES.map((item) => (
-                          <option key={item} value={item}>
-                            {item}
-                          </option>
-                        ))}
+                        {CURRENCIES.map(
+                          (item) => (
+                            <option
+                              key={item}
+                              value={item}
+                            >
+                              {item}
+                            </option>
+                          )
+                        )}
                       </select>
                     </div>
                   </div>
@@ -1032,16 +1590,26 @@ function SellerCreateContent() {
                         id="license"
                         value={license}
                         onChange={(event) =>
-                          setLicense(event.target.value)
+                          setLicense(
+                            event.target.value
+                          )
                         }
-                        disabled={saving}
-                        className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none focus:border-violet-400/50"
+                        disabled={
+                          saving ||
+                          !canEdit
+                        }
+                        className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none focus:border-violet-400/50 disabled:cursor-not-allowed disabled:opacity-50"
                       >
-                        {LICENSES.map((item) => (
-                          <option key={item} value={item}>
-                            {item}
-                          </option>
-                        ))}
+                        {LICENSES.map(
+                          (item) => (
+                            <option
+                              key={item}
+                              value={item}
+                            >
+                              {item}
+                            </option>
+                          )
+                        )}
                       </select>
                     </div>
 
@@ -1056,14 +1624,25 @@ function SellerCreateContent() {
                       <input
                         id="previewImage"
                         type="url"
-                        value={previewImage}
+                        value={
+                          previewImage
+                        }
                         onChange={(event) =>
-                          setPreviewImage(event.target.value)
+                          setPreviewImage(
+                            event.target.value
+                          )
                         }
                         placeholder="https://..."
-                        disabled={saving}
-                        className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none placeholder:text-zinc-700 focus:border-violet-400/50"
+                        disabled={
+                          saving ||
+                          !canEdit
+                        }
+                        className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none placeholder:text-zinc-700 focus:border-violet-400/50 disabled:cursor-not-allowed disabled:opacity-50"
                       />
+
+                      <p className="mt-2 text-xs text-zinc-700">
+                        This field is optional. The marketplace thumbnail is uploaded separately below.
+                      </p>
                     </div>
                   </div>
 
@@ -1079,12 +1658,19 @@ function SellerCreateContent() {
                       id="features"
                       value={features}
                       onChange={(event) =>
-                        setFeatures(event.target.value)
+                        setFeatures(
+                          event.target.value
+                        )
                       }
                       rows={6}
-                      placeholder={"Feature one\nFeature two\nFeature three"}
-                      disabled={saving}
-                      className="w-full resize-y rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm leading-6 text-white outline-none placeholder:text-zinc-700 focus:border-violet-400/50"
+                      disabled={
+                        saving ||
+                        !canEdit
+                      }
+                      placeholder={
+                        "Feature one\nFeature two\nFeature three"
+                      }
+                      className="w-full resize-y rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm leading-6 text-white outline-none placeholder:text-zinc-700 focus:border-violet-400/50 disabled:cursor-not-allowed disabled:opacity-50"
                     />
 
                     <p className="mt-2 text-xs text-zinc-700">
@@ -1103,16 +1689,23 @@ function SellerCreateContent() {
 
                       <textarea
                         id="requirements"
-                        value={requirements}
+                        value={
+                          requirements
+                        }
                         onChange={(event) =>
-                          setRequirements(event.target.value)
+                          setRequirements(
+                            event.target.value
+                          )
                         }
                         rows={6}
+                        disabled={
+                          saving ||
+                          !canEdit
+                        }
                         placeholder={
                           "Node.js 20+\nNext.js\nSupabase"
                         }
-                        disabled={saving}
-                        className="w-full resize-y rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm leading-6 text-white outline-none placeholder:text-zinc-700 focus:border-violet-400/50"
+                        className="w-full resize-y rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm leading-6 text-white outline-none placeholder:text-zinc-700 focus:border-violet-400/50 disabled:cursor-not-allowed disabled:opacity-50"
                       />
                     </div>
 
@@ -1126,16 +1719,23 @@ function SellerCreateContent() {
 
                       <textarea
                         id="techStack"
-                        value={techStack}
+                        value={
+                          techStack
+                        }
                         onChange={(event) =>
-                          setTechStack(event.target.value)
+                          setTechStack(
+                            event.target.value
+                          )
                         }
                         rows={6}
+                        disabled={
+                          saving ||
+                          !canEdit
+                        }
                         placeholder={
                           "Next.js\nTypeScript\nTailwind CSS"
                         }
-                        disabled={saving}
-                        className="w-full resize-y rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm leading-6 text-white outline-none placeholder:text-zinc-700 focus:border-violet-400/50"
+                        className="w-full resize-y rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm leading-6 text-white outline-none placeholder:text-zinc-700 focus:border-violet-400/50 disabled:cursor-not-allowed disabled:opacity-50"
                       />
                     </div>
                   </div>
@@ -1150,9 +1750,7 @@ function SellerCreateContent() {
                         </h3>
 
                         <p className="mt-1 text-sm leading-6 text-violet-100/50">
-                          ZUQEN keeps 20% commission from a successful sale.
-                          The remaining 80% is attributed to your seller
-                          earnings ledger.
+                          ZUQEN keeps 20% commission from a successful sale. The remaining 80% is attributed to your seller earnings ledger.
                         </p>
 
                         {commissionPreview.gross > 0 && (
@@ -1161,6 +1759,7 @@ function SellerCreateContent() {
                               <p className="text-[11px] text-zinc-600">
                                 Price
                               </p>
+
                               <p className="mt-1 font-semibold">
                                 {formatCurrency(
                                   commissionPreview.gross,
@@ -1173,6 +1772,7 @@ function SellerCreateContent() {
                               <p className="text-[11px] text-zinc-600">
                                 ZUQEN 20%
                               </p>
+
                               <p className="mt-1 font-semibold text-zinc-400">
                                 {formatCurrency(
                                   commissionPreview.commission,
@@ -1185,6 +1785,7 @@ function SellerCreateContent() {
                               <p className="text-[11px] text-zinc-600">
                                 Seller 80%
                               </p>
+
                               <p className="mt-1 font-semibold text-emerald-300">
                                 {formatCurrency(
                                   commissionPreview.seller,
@@ -1209,7 +1810,10 @@ function SellerCreateContent() {
 
                     <button
                       type="submit"
-                      disabled={saving}
+                      disabled={
+                        saving ||
+                        !canEdit
+                      }
                       className="inline-flex items-center justify-center gap-2 rounded-xl bg-white px-5 py-3 text-sm font-semibold text-black transition hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {saving ? (
@@ -1243,20 +1847,20 @@ function SellerCreateContent() {
                   </h2>
 
                   <p className="mt-1 text-sm leading-6 text-zinc-600">
-                    Upload the actual template package buyers will receive.
-                    Files are stored privately in Backblaze B2.
+                    Upload the actual template package buyers will receive. Files are stored privately in Backblaze B2.
                   </p>
                 </div>
 
                 {template?.id ? (
                   <TemplateFileUploader
-                    templateId={template.id}
+                    templateId={
+                      template.id
+                    }
                     defaultRole="template"
                   />
                 ) : (
                   <div className="rounded-2xl border border-amber-400/20 bg-amber-500/10 p-5 text-sm text-amber-200">
-                    Save the template information first. The upload workflow
-                    becomes available after the draft has been created.
+                    Save the template information first.
                   </div>
                 )}
 
@@ -1264,9 +1868,7 @@ function SellerCreateContent() {
                   <Lock className="mt-0.5 h-5 w-5 shrink-0 text-zinc-500" />
 
                   <p className="text-sm leading-6 text-zinc-500">
-                    Uploaded template files remain private. Buyers will
-                    receive authorized download access only after a
-                    successful purchase.
+                    Uploaded template files remain private. Buyers will receive authorized download access only after a successful purchase.
                   </p>
                 </div>
               </div>
@@ -1284,27 +1886,75 @@ function SellerCreateContent() {
                   </h2>
 
                   <p className="mt-1 text-sm leading-6 text-zinc-600">
-                    Add screenshots and a demo video so buyers can understand
-                    exactly what they are purchasing.
+                    All four asset types are checked by the server before a template can enter marketplace review.
                   </p>
                 </div>
 
                 {template?.id ? (
                   <div className="space-y-6">
-                    <TemplateFileUploader
-                      templateId={template.id}
-                      defaultRole="screenshot"
-                    />
+                    <div className="rounded-2xl border border-violet-400/15 bg-violet-500/[0.04] p-4">
+                      <div className="flex items-start gap-3">
+                        <ImageIcon className="mt-0.5 h-5 w-5 text-violet-300" />
 
-                    <TemplateFileUploader
-                      templateId={template.id}
-                      defaultRole="demo_video"
-                    />
+                        <div>
+                          <p className="font-medium">
+                            Marketplace Thumbnail
+                          </p>
 
-                    <TemplateFileUploader
-                      templateId={template.id}
-                      defaultRole="documentation"
-                    />
+                          <p className="mt-1 text-xs leading-5 text-zinc-600">
+                            Required. This image represents your template in marketplace cards.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="mt-4">
+                        <TemplateFileUploader
+                          templateId={
+                            template.id
+                          }
+                          defaultRole="thumbnail"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                      <p className="mb-3 text-sm font-medium">
+                        Screenshots
+                      </p>
+
+                      <TemplateFileUploader
+                        templateId={
+                          template.id
+                        }
+                        defaultRole="screenshot"
+                      />
+                    </div>
+
+                    <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                      <p className="mb-3 text-sm font-medium">
+                        Demo Video
+                      </p>
+
+                      <TemplateFileUploader
+                        templateId={
+                          template.id
+                        }
+                        defaultRole="demo_video"
+                      />
+                    </div>
+
+                    <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                      <p className="mb-3 text-sm font-medium">
+                        Documentation
+                      </p>
+
+                      <TemplateFileUploader
+                        templateId={
+                          template.id
+                        }
+                        defaultRole="documentation"
+                      />
+                    </div>
                   </div>
                 ) : (
                   <div className="rounded-2xl border border-amber-400/20 bg-amber-500/10 p-5 text-sm text-amber-200">
@@ -1312,26 +1962,40 @@ function SellerCreateContent() {
                   </div>
                 )}
 
-                <div className="mt-6 grid gap-4 sm:grid-cols-2">
+                <div className="mt-6 grid gap-4 sm:grid-cols-3">
                   <div className="rounded-2xl border border-white/10 bg-black/20 p-5">
                     <ImageIcon className="h-5 w-5 text-zinc-500" />
+
+                    <h3 className="mt-3 font-medium">
+                      Thumbnail
+                    </h3>
+
+                    <p className="mt-1 text-xs leading-5 text-zinc-600">
+                      Required marketplace cover image.
+                    </p>
+                  </div>
+
+                  <div className="rounded-2xl border border-white/10 bg-black/20 p-5">
+                    <ImageIcon className="h-5 w-5 text-zinc-500" />
+
                     <h3 className="mt-3 font-medium">
                       Screenshots
                     </h3>
+
                     <p className="mt-1 text-xs leading-5 text-zinc-600">
-                      Use screenshots that accurately represent the actual
-                      template.
+                      At least one screenshot is required.
                     </p>
                   </div>
 
                   <div className="rounded-2xl border border-white/10 bg-black/20 p-5">
                     <Video className="h-5 w-5 text-zinc-500" />
+
                     <h3 className="mt-3 font-medium">
                       Demo Video
                     </h3>
+
                     <p className="mt-1 text-xs leading-5 text-zinc-600">
-                      The demo should show the real template and its claimed
-                      functionality.
+                      Required to demonstrate the actual template.
                     </p>
                   </div>
                 </div>
@@ -1350,8 +2014,7 @@ function SellerCreateContent() {
                   </h2>
 
                   <p className="mt-1 text-sm leading-6 text-zinc-600">
-                    Your uploaded package will go through file and security
-                    checks before marketplace review.
+                    Before submission, ZUQEN validates that the required marketplace assets actually exist in private storage.
                   </p>
                 </div>
 
@@ -1359,36 +2022,56 @@ function SellerCreateContent() {
                   {[
                     {
                       title: "File validation",
-                      text: "Validate file type, size and upload integrity.",
+                      text: "File type, size, storage provider and upload integrity are checked.",
                     },
                     {
                       title: "Package checks",
-                      text: "Inspect the uploaded template package for suspicious or invalid content.",
+                      text: "The required template package must exist as a private B2 object.",
                     },
                     {
-                      title: "Metadata checks",
-                      text: "Compare template metadata with uploaded assets.",
+                      title: "Media checks",
+                      text: "Thumbnail, screenshot and demo video requirements are checked server-side.",
                     },
                     {
-                      title: "Security review",
-                      text: "Flag suspicious files or patterns for further review.",
+                      title: "Ownership checks",
+                      text: "Only the authenticated seller who owns the template can submit it.",
                     },
-                  ].map((item) => (
-                    <div
-                      key={item.title}
-                      className="rounded-2xl border border-white/10 bg-black/20 p-5"
-                    >
-                      <ShieldCheck className="h-5 w-5 text-zinc-500" />
+                  ].map(
+                    (item) => (
+                      <div
+                        key={
+                          item.title
+                        }
+                        className="rounded-2xl border border-white/10 bg-black/20 p-5"
+                      >
+                        <ShieldCheck className="h-5 w-5 text-zinc-500" />
 
-                      <h3 className="mt-3 font-medium">
-                        {item.title}
-                      </h3>
+                        <h3 className="mt-3 font-medium">
+                          {item.title}
+                        </h3>
 
-                      <p className="mt-1 text-sm leading-6 text-zinc-600">
-                        {item.text}
+                        <p className="mt-1 text-sm leading-6 text-zinc-600">
+                          {item.text}
+                        </p>
+                      </div>
+                    )
+                  )}
+                </div>
+
+                <div className="mt-6 rounded-2xl border border-emerald-400/15 bg-emerald-500/[0.05] p-5">
+                  <div className="flex items-start gap-3">
+                    <ShieldCheck className="mt-0.5 h-5 w-5 text-emerald-300" />
+
+                    <div>
+                      <p className="font-medium text-emerald-100">
+                        Server-side validation
+                      </p>
+
+                      <p className="mt-1 text-sm leading-6 text-emerald-100/50">
+                        These checks are repeated on the server when you click Submit for Review. The browser cannot bypass them.
                       </p>
                     </div>
-                  ))}
+                  </div>
                 </div>
               </div>
             )}
@@ -1405,8 +2088,7 @@ function SellerCreateContent() {
                   </h2>
 
                   <p className="mt-1 text-sm leading-6 text-zinc-600">
-                    ZUQEN will compare your package, screenshots, demo video
-                    and listing claims for consistency before final review.
+                    This is the next automated verification stage after submission.
                   </p>
                 </div>
 
@@ -1418,24 +2100,25 @@ function SellerCreateContent() {
                     "Demonstrated features vs uploaded package",
                     "Description and feature claims",
                     "Cross-media consistency",
-                  ].map((item) => (
-                    <div
-                      key={item}
-                      className="flex items-center gap-3 rounded-2xl border border-white/10 bg-black/20 p-4"
-                    >
-                      <Sparkles className="h-4 w-4 text-violet-300" />
-                      <span className="text-sm text-zinc-400">
-                        {item}
-                      </span>
-                    </div>
-                  ))}
+                  ].map(
+                    (item) => (
+                      <div
+                        key={item}
+                        className="flex items-center gap-3 rounded-2xl border border-white/10 bg-black/20 p-4"
+                      >
+                        <Sparkles className="h-4 w-4 text-violet-300" />
+
+                        <span className="text-sm text-zinc-400">
+                          {item}
+                        </span>
+                      </div>
+                    )
+                  )}
                 </div>
 
                 <div className="mt-6 rounded-2xl border border-violet-400/15 bg-violet-500/[0.05] p-5">
                   <p className="text-sm leading-6 text-violet-100/60">
-                    AI verification does not guarantee that a template is
-                    completely bug-free. It is a verification and risk
-                    detection layer used alongside marketplace review.
+                    AI verification is not executed from this seller page. Once a submission enters under_review, the separate marketplace verification service will analyze the uploaded assets and listing claims.
                   </p>
                 </div>
               </div>
@@ -1453,9 +2136,7 @@ function SellerCreateContent() {
                   </h2>
 
                   <p className="mt-1 text-sm leading-6 text-zinc-600">
-                    After your package, media and verification requirements
-                    are complete, the template can move into marketplace
-                    review.
+                    Complete every requirement, then submit the template to the marketplace review pipeline.
                   </p>
                 </div>
 
@@ -1463,10 +2144,12 @@ function SellerCreateContent() {
                   <div className="rounded-2xl border border-white/10 bg-black/20 p-5">
                     <div className="flex items-start gap-3">
                       <CheckCircle2 className="mt-0.5 h-5 w-5 text-emerald-300" />
+
                       <div>
                         <h3 className="font-medium">
                           Seller profile
                         </h3>
+
                         <p className="mt-1 text-sm text-zinc-600">
                           {sellerProfile?.display_name ||
                             "Seller profile ready"}
@@ -1478,31 +2161,80 @@ function SellerCreateContent() {
                   <div className="rounded-2xl border border-white/10 bg-black/20 p-5">
                     <div className="flex items-start gap-3">
                       <CheckCircle2 className="mt-0.5 h-5 w-5 text-emerald-300" />
+
                       <div>
                         <h3 className="font-medium">
                           Template draft
                         </h3>
+
                         <p className="mt-1 text-sm text-zinc-600">
-                          {template?.name || "Template created"}
+                          {template?.name ||
+                            "Template created"}
                         </p>
                       </div>
                     </div>
                   </div>
 
-                  <div className="rounded-2xl border border-amber-400/15 bg-amber-500/[0.05] p-5">
-                    <div className="flex items-start gap-3">
-                      <Info className="mt-0.5 h-5 w-5 text-amber-300" />
-                      <div>
-                        <h3 className="font-medium text-amber-100">
-                          Submission pipeline
-                        </h3>
-                        <p className="mt-1 text-sm leading-6 text-amber-100/50">
-                          Final submission, AI verification and marketplace
-                          approval are handled as separate workflow stages.
-                        </p>
+                  {isUnderReview ? (
+                    <div className="rounded-2xl border border-blue-400/20 bg-blue-500/10 p-5">
+                      <div className="flex items-start gap-3">
+                        <ShieldCheck className="mt-0.5 h-5 w-5 text-blue-300" />
+
+                        <div>
+                          <h3 className="font-medium text-blue-100">
+                            Submitted for review
+                          </h3>
+
+                          <p className="mt-1 text-sm leading-6 text-blue-100/50">
+                            Your template is now under marketplace review. Editing and new uploads are locked until the review stage is resolved.
+                          </p>
+                        </div>
                       </div>
                     </div>
-                  </div>
+                  ) : (
+                    <>
+                      <div className="rounded-2xl border border-amber-400/15 bg-amber-500/[0.05] p-5">
+                        <div className="flex items-start gap-3">
+                          <Info className="mt-0.5 h-5 w-5 text-amber-300" />
+
+                          <div>
+                            <h3 className="font-medium text-amber-100">
+                              Final submission
+                            </h3>
+
+                            <p className="mt-1 text-sm leading-6 text-amber-100/50">
+                              Clicking Submit for Review performs the final server-side validation. If every requirement passes, the template changes to under_review.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={
+                          handleSubmitForReview
+                        }
+                        disabled={
+                          submitting ||
+                          !template?.id ||
+                          !canEdit
+                        }
+                        className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-white px-5 py-4 text-sm font-semibold text-black transition hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        {submitting ? (
+                          <>
+                            <Loader2 className="h-5 w-5 animate-spin" />
+                            Validating & Submitting...
+                          </>
+                        ) : (
+                          <>
+                            <ShieldCheck className="h-5 w-5" />
+                            Submit for Review
+                          </>
+                        )}
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
             )}
@@ -1510,10 +2242,17 @@ function SellerCreateContent() {
             <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:justify-between">
               <button
                 type="button"
-                disabled={activeStep === 0}
+                disabled={
+                  activeStep === 0 ||
+                  submitting
+                }
                 onClick={() =>
-                  setActiveStep((current) =>
-                    Math.max(0, current - 1)
+                  setActiveStep(
+                    (current) =>
+                      Math.max(
+                        0,
+                        current - 1
+                      )
                   )
                 }
                 className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-5 py-3 text-sm font-medium text-zinc-400 transition hover:bg-white/[0.06] hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
@@ -1522,25 +2261,37 @@ function SellerCreateContent() {
                 Previous
               </button>
 
-              {activeStep < steps.length - 1 && (
+              {activeStep <
+                steps.length - 1 && (
                 <button
                   type="button"
                   disabled={
-                    activeStep === 0 && !template?.id
+                    submitting ||
+                    (activeStep === 0 &&
+                      !template?.id)
                   }
                   onClick={async () => {
-                    if (activeStep === 0) {
+                    if (
+                      activeStep ===
+                      0
+                    ) {
                       await handleSaveDraft();
                       return;
                     }
 
-                    setActiveStep((current) =>
-                      Math.min(steps.length - 1, current + 1)
+                    setActiveStep(
+                      (current) =>
+                        Math.min(
+                          steps.length -
+                            1,
+                          current + 1
+                        )
                     );
                   }}
                   className="inline-flex items-center justify-center gap-2 rounded-xl bg-white px-5 py-3 text-sm font-semibold text-black transition hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  {activeStep === 0 ? (
+                  {activeStep ===
+                  0 ? (
                     <>
                       <Save className="h-4 w-4" />
                       Save & Continue
@@ -1600,4 +2351,3 @@ export default function SellerCreatePage() {
     </Suspense>
   );
 }
-
