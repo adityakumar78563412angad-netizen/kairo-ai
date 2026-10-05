@@ -1,16 +1,24 @@
+
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import {
+  FormEvent,
+  Suspense,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import {
   AlertCircle,
   ArrowLeft,
   CheckCircle2,
+  Globe,
   Loader2,
   Save,
   Store,
   User,
 } from "lucide-react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase";
 
 type SellerProfile = {
@@ -35,103 +43,51 @@ type Profile = {
 
 const supabase = createClient();
 
-const SELLER_PROFILE_SELECT = `
-  id,
-  user_id,
-  display_name,
-  username,
-  bio,
-  avatar_url,
-  website_url,
-  seller_status,
-  is_verified,
-  created_at,
-  updated_at
-`;
-
-function getErrorMessage(error: unknown, fallback: string) {
-  if (!error) return fallback;
-
-  if (typeof error === "object" && error !== null) {
-    const value = error as {
-      message?: string;
-      details?: string;
-      hint?: string;
-      code?: string;
-    };
-
-    const parts = [
-      value.message,
-      value.details,
-      value.hint,
-      value.code ? `Code: ${value.code}` : null,
-    ].filter(Boolean);
-
-    if (parts.length > 0) {
-      return parts.join(" — ");
-    }
-  }
-
-  if (error instanceof Error && error.message) {
-    return error.message;
-  }
-
-  return fallback;
-}
-
-export default function SellerPage() {
+function SellerProfileContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+
+  const editMode = searchParams.get("edit") === "true";
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
-
-  const [userId, setUserId] = useState("");
-
-  const [profile, setProfile] = useState<Profile | null>(null);
-  const [sellerProfile, setSellerProfile] = useState<SellerProfile | null>(
-    null
-  );
+  const [userId, setUserId] = useState<string | null>(null);
+  const [existingSeller, setExistingSeller] =
+    useState<SellerProfile | null>(null);
+  const [baseProfile, setBaseProfile] = useState<Profile | null>(null);
 
   const [displayName, setDisplayName] = useState("");
   const [username, setUsername] = useState("");
   const [bio, setBio] = useState("");
-  const [websiteUrl, setWebsiteUrl] = useState("");
   const [avatarUrl, setAvatarUrl] = useState("");
+  const [websiteUrl, setWebsiteUrl] = useState("");
 
-  const sellerStatus = sellerProfile?.seller_status || "pending";
-  const isVerified = sellerProfile?.is_verified === true;
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
 
-  const statusLabel = useMemo(() => {
-    switch (sellerStatus) {
-      case "active":
-        return "Active";
-      case "suspended":
-        return "Suspended";
-      case "rejected":
-        return "Rejected";
-      case "pending":
-      default:
-        return "Pending";
-    }
-  }, [sellerStatus]);
+  const pageTitle = useMemo(
+    () => (editMode ? "Edit Seller Profile" : "Become a Seller"),
+    [editMode]
+  );
+
+  const pageDescription = useMemo(
+    () =>
+      editMode
+        ? "Update the public profile customers see when they visit your templates."
+        : "Create your seller profile before publishing templates on the ZUQEN Marketplace.",
+    [editMode]
+  );
 
   useEffect(() => {
-    let mounted = true;
+    let cancelled = false;
 
-    async function loadSellerCenter() {
+    async function loadSellerProfile() {
       setLoading(true);
       setError("");
+      setSuccess("");
 
       try {
-        /*
-         * =========================================================
-         * 1. Check authentication
-         * =========================================================
-         */
-
         const {
           data: { user },
           error: authError,
@@ -141,642 +97,667 @@ export default function SellerPage() {
           throw authError;
         }
 
-        /*
-         * User is not logged in.
-         *
-         * Do not show the seller profile form.
-         * Send the user to authentication first.
-         */
         if (!user) {
-          router.replace("/login?redirect=/marketplace/seller");
+          const redirect = editMode
+            ? "/marketplace/seller?edit=true"
+            : "/marketplace/seller";
+
+          router.replace(`/login?redirect=${encodeURIComponent(redirect)}`);
           return;
         }
 
-        if (!mounted) return;
+        if (cancelled) return;
 
         setUserId(user.id);
 
-        /*
-         * =========================================================
-         * 2. Load normal profile + seller profile
-         * =========================================================
-         */
+        const [sellerResult, profileResult] = await Promise.all([
+          supabase
+            .from("seller_profiles")
+            .select(
+              `
+                id,
+                user_id,
+                display_name,
+                username,
+                bio,
+                avatar_url,
+                website_url,
+                seller_status,
+                is_verified,
+                created_at,
+                updated_at
+              `
+            )
+            .eq("user_id", user.id)
+            .maybeSingle(),
 
-        const [profileResult, sellerResult] = await Promise.all([
           supabase
             .from("profiles")
             .select("id, display_name, avatar_url")
             .eq("id", user.id)
             .maybeSingle(),
-
-          supabase
-            .from("seller_profiles")
-            .select(SELLER_PROFILE_SELECT)
-            .eq("user_id", user.id)
-            .maybeSingle(),
         ]);
-
-        if (profileResult.error) {
-          throw profileResult.error;
-        }
 
         if (sellerResult.error) {
           throw sellerResult.error;
         }
 
-        if (!mounted) return;
+        if (profileResult.error) {
+          throw profileResult.error;
+        }
 
-        const baseProfile = profileResult.data as Profile | null;
-        const existingSeller = sellerResult.data as SellerProfile | null;
+        if (cancelled) return;
 
-        setProfile(baseProfile);
-        setSellerProfile(existingSeller);
+        const seller = sellerResult.data as SellerProfile | null;
+        const profile = profileResult.data as Profile | null;
+
+        setExistingSeller(seller);
+        setBaseProfile(profile);
 
         /*
-         * =========================================================
-         * 3. IMPORTANT:
-         * Existing seller → dashboard
-         * New seller → show profile form
-         * =========================================================
+         * If a seller already exists and this is NOT edit mode,
+         * send them directly to their seller dashboard.
+         *
+         * Edit mode deliberately skips this redirect.
          */
-
-        if (existingSeller) {
+        if (seller && !editMode) {
           router.replace("/marketplace/seller/dashboard");
           return;
         }
 
         /*
-         * No seller profile yet.
-         * Pre-fill the form from the normal ZUQEN profile.
+         * Existing seller profile:
+         * load its values into the form.
          */
-
-        setDisplayName(baseProfile?.display_name || "");
-        setAvatarUrl(baseProfile?.avatar_url || "");
+        if (seller) {
+          setDisplayName(
+            seller.display_name || profile?.display_name || ""
+          );
+          setUsername(seller.username || "");
+          setBio(seller.bio || "");
+          setAvatarUrl(
+            seller.avatar_url || profile?.avatar_url || ""
+          );
+          setWebsiteUrl(seller.website_url || "");
+        } else {
+          /*
+           * New seller:
+           * prefill from the normal profile where possible.
+           */
+          setDisplayName(profile?.display_name || "");
+          setAvatarUrl(profile?.avatar_url || "");
+        }
       } catch (err) {
-        console.error("Failed to load seller center:", err);
+        console.error("Seller profile load error:", err);
 
-        if (mounted) {
+        if (!cancelled) {
           setError(
-            getErrorMessage(err, "Unable to load your seller profile.")
+            err instanceof Error
+              ? err.message
+              : "Unable to load your seller profile."
           );
         }
       } finally {
-        if (mounted) {
+        if (!cancelled) {
           setLoading(false);
         }
       }
     }
 
-    loadSellerCenter();
+    loadSellerProfile();
 
     return () => {
-      mounted = false;
+      cancelled = true;
     };
-  }, [router]);
+  }, [router, editMode]);
 
-  async function handleSave(event: FormEvent<HTMLFormElement>) {
+  async function checkUsernameAvailability(
+    value: string,
+    currentSellerId?: string
+  ) {
+    const cleanUsername = value.trim().toLowerCase();
+
+    if (!cleanUsername) {
+      return true;
+    }
+
+    const { data, error: usernameError } = await supabase
+      .from("seller_profiles")
+      .select("id")
+      .eq("username", cleanUsername)
+      .maybeSingle();
+
+    if (usernameError) {
+      /*
+       * A duplicate result is the important case.
+       * If RLS/API returns a normal database error, surface it.
+       */
+      throw usernameError;
+    }
+
+    if (!data) {
+      return true;
+    }
+
+    if (currentSellerId && data.id === currentSellerId) {
+      return true;
+    }
+
+    return false;
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     if (!userId) {
-      setError("Authentication is required.");
+      setError("Your session has expired. Please log in again.");
       return;
     }
 
-    setSaving(true);
     setError("");
     setSuccess("");
 
+    const cleanDisplayName = displayName.trim();
+    const cleanUsername = username.trim().toLowerCase();
+    const cleanBio = bio.trim();
+    const cleanAvatarUrl = avatarUrl.trim();
+    const cleanWebsiteUrl = websiteUrl.trim();
+
+    if (!cleanDisplayName) {
+      setError("Please enter your seller display name.");
+      return;
+    }
+
+    if (cleanDisplayName.length > 80) {
+      setError("Seller display name must be 80 characters or less.");
+      return;
+    }
+
+    if (cleanUsername) {
+      if (!/^[a-z0-9_]+$/.test(cleanUsername)) {
+        setError(
+          "Username can contain only lowercase letters, numbers, and underscores."
+        );
+        return;
+      }
+
+      if (cleanUsername.length < 3 || cleanUsername.length > 30) {
+        setError("Username must be between 3 and 30 characters.");
+        return;
+      }
+    }
+
+    if (cleanBio.length > 500) {
+      setError("Bio must be 500 characters or less.");
+      return;
+    }
+
+    if (cleanWebsiteUrl) {
+      try {
+        const parsed = new URL(cleanWebsiteUrl);
+
+        if (!["http:", "https:"].includes(parsed.protocol)) {
+          throw new Error();
+        }
+      } catch {
+        setError("Please enter a valid website URL.");
+        return;
+      }
+    }
+
+    if (cleanAvatarUrl) {
+      try {
+        const parsed = new URL(cleanAvatarUrl);
+
+        if (!["http:", "https:"].includes(parsed.protocol)) {
+          throw new Error();
+        }
+      } catch {
+        setError("Please enter a valid avatar URL.");
+        return;
+      }
+    }
+
+    setSaving(true);
+
     try {
-      const normalizedDisplayName = displayName.trim();
-      const normalizedUsername = username.trim().toLowerCase();
-      const normalizedBio = bio.trim();
-      const normalizedWebsite = websiteUrl.trim();
-      const normalizedAvatar = avatarUrl.trim();
+      const usernameAvailable = await checkUsernameAvailability(
+        cleanUsername,
+        existingSeller?.id
+      );
 
-      /*
-       * =========================================================
-       * Validation
-       * =========================================================
-       */
-
-      if (!normalizedDisplayName) {
-        throw new Error("Display name is required.");
-      }
-
-      if (normalizedDisplayName.length < 2) {
-        throw new Error("Display name must contain at least 2 characters.");
-      }
-
-      if (normalizedDisplayName.length > 100) {
-        throw new Error("Display name cannot exceed 100 characters.");
-      }
-
-      if (normalizedUsername) {
-        const usernamePattern = /^[a-z0-9_]{3,30}$/;
-
-        if (!usernamePattern.test(normalizedUsername)) {
-          throw new Error(
-            "Username must be 3–30 characters and contain only lowercase letters, numbers, and underscores."
-          );
-        }
-
-        /*
-         * Check whether another seller already owns this username.
-         */
-        const { data: usernameOwner, error: usernameCheckError } =
-          await supabase
-            .from("seller_profiles")
-            .select("id, user_id")
-            .eq("username", normalizedUsername)
-            .neq("user_id", userId)
-            .maybeSingle();
-
-        if (usernameCheckError) {
-          throw usernameCheckError;
-        }
-
-        if (usernameOwner) {
-          throw new Error(
-            `The username @${normalizedUsername} is already in use. Please choose another username.`
-          );
-        }
-      }
-
-      if (normalizedWebsite) {
-        try {
-          const url = new URL(normalizedWebsite);
-
-          if (!["http:", "https:"].includes(url.protocol)) {
-            throw new Error();
-          }
-        } catch {
-          throw new Error(
-            "Please enter a valid website URL starting with http:// or https://."
-          );
-        }
-      }
-
-      if (normalizedAvatar) {
-        try {
-          const url = new URL(normalizedAvatar);
-
-          if (!["http:", "https:"].includes(url.protocol)) {
-            throw new Error();
-          }
-        } catch {
-          throw new Error(
-            "Please enter a valid avatar URL starting with http:// or https://."
-          );
-        }
+      if (!usernameAvailable) {
+        setError("That username is already being used by another seller.");
+        return;
       }
 
       /*
-       * =========================================================
-       * 4. IMPORTANT DUPLICATE-PROFILE PROTECTION
-       *
-       * Before inserting, check again.
-       * This prevents duplicate seller profiles if another request
-       * created one while this page was open.
-       * =========================================================
-       */
-
-      const { data: existingSeller, error: existingSellerError } =
-        await supabase
-          .from("seller_profiles")
-          .select(SELLER_PROFILE_SELECT)
-          .eq("user_id", userId)
-          .maybeSingle();
-
-      if (existingSellerError) {
-        throw existingSellerError;
-      }
-
-      /*
-       * If seller profile already exists, never create another one.
-       * Send the user to the dashboard instead.
+       * EDIT EXISTING SELLER
        */
       if (existingSeller) {
-        setSellerProfile(existingSeller as SellerProfile);
+        const { data, error: updateError } = await supabase
+          .from("seller_profiles")
+          .update({
+            display_name: cleanDisplayName,
+            username: cleanUsername || null,
+            bio: cleanBio || null,
+            avatar_url: cleanAvatarUrl || null,
+            website_url: cleanWebsiteUrl || null,
+          })
+          .eq("id", existingSeller.id)
+          .eq("user_id", userId)
+          .select(
+            `
+              id,
+              user_id,
+              display_name,
+              username,
+              bio,
+              avatar_url,
+              website_url,
+              seller_status,
+              is_verified,
+              created_at,
+              updated_at
+            `
+          )
+          .single();
 
-        setSuccess("Your seller profile already exists.");
+        if (updateError) {
+          throw updateError;
+        }
 
-        window.setTimeout(() => {
+        setExistingSeller(data as SellerProfile);
+        setSuccess("Seller profile updated successfully.");
+
+        setTimeout(() => {
           router.replace("/marketplace/seller/dashboard");
-        }, 700);
+        }, 500);
 
         return;
       }
 
       /*
-       * =========================================================
-       * 5. Create seller profile
-       * =========================================================
+       * CREATE NEW SELLER
+       *
+       * Double-check first so a duplicate seller profile
+       * cannot be created because of a stale client state.
        */
+      const { data: duplicateSeller, error: duplicateError } =
+        await supabase
+          .from("seller_profiles")
+          .select("id")
+          .eq("user_id", userId)
+          .maybeSingle();
 
-      const payload = {
-        user_id: userId,
-        display_name: normalizedDisplayName,
-        username: normalizedUsername || null,
-        bio: normalizedBio || null,
-        avatar_url: normalizedAvatar || null,
-        website_url: normalizedWebsite || null,
-        seller_status: "pending",
-        is_verified: false,
-      };
+      if (duplicateError) {
+        throw duplicateError;
+      }
 
-      const { data: createdSeller, error: insertError } = await supabase
+      if (duplicateSeller) {
+        router.replace("/marketplace/seller/dashboard");
+        return;
+      }
+
+      const { data, error: insertError } = await supabase
         .from("seller_profiles")
-        .insert(payload)
-        .select(SELLER_PROFILE_SELECT)
+        .insert({
+          user_id: userId,
+          display_name: cleanDisplayName,
+          username: cleanUsername || null,
+          bio: cleanBio || null,
+          avatar_url: cleanAvatarUrl || null,
+          website_url: cleanWebsiteUrl || null,
+          seller_status: "pending",
+          is_verified: false,
+        })
+        .select(
+          `
+            id,
+            user_id,
+            display_name,
+            username,
+            bio,
+            avatar_url,
+            website_url,
+            seller_status,
+            is_verified,
+            created_at,
+            updated_at
+          `
+        )
         .single();
 
       if (insertError) {
         throw insertError;
       }
 
-      if (!createdSeller) {
-        throw new Error(
-          "Seller profile was not returned after creation. Please try again."
-        );
-      }
-
-      setSellerProfile(createdSeller as SellerProfile);
-
-      /*
-       * =========================================================
-       * 6. Profile successfully created
-       *
-       * Go directly to seller dashboard.
-       * =========================================================
-       */
-
+      setExistingSeller(data as SellerProfile);
       setSuccess("Seller profile created successfully.");
 
-      window.setTimeout(() => {
+      setTimeout(() => {
         router.replace("/marketplace/seller/dashboard");
-      }, 700);
+      }, 500);
     } catch (err) {
-      console.error("Failed to save seller profile:", err);
+      console.error("Seller profile save error:", err);
 
-      setError(
-        getErrorMessage(
-          err,
-          "Unable to save your seller profile. Please try again."
-        )
-      );
+      const message =
+        err instanceof Error
+          ? err.message
+          : "Unable to save your seller profile.";
+
+      /*
+       * Give a cleaner message for common username conflicts.
+       */
+      if (
+        message.toLowerCase().includes("duplicate") ||
+        message.toLowerCase().includes("unique")
+      ) {
+        setError("That username is already being used by another seller.");
+      } else {
+        setError(message);
+      }
     } finally {
       setSaving(false);
     }
   }
 
-  /*
-   * =========================================================
-   * Loading
-   * =========================================================
-   */
+  function handleBack() {
+    if (editMode || existingSeller) {
+      router.push("/marketplace/seller/dashboard");
+      return;
+    }
+
+    router.push("/marketplace");
+  }
 
   if (loading) {
     return (
-      <main className="min-h-screen bg-[#07090d] text-white">
-        <div className="mx-auto flex min-h-screen max-w-6xl items-center justify-center px-6">
+      <main className="min-h-screen bg-[#050505] text-white">
+        <div className="mx-auto flex min-h-screen max-w-5xl items-center justify-center px-6">
           <div className="flex items-center gap-3 text-sm text-zinc-400">
             <Loader2 className="h-5 w-5 animate-spin" />
-            Checking your seller account...
+            Loading seller profile...
           </div>
         </div>
       </main>
     );
   }
 
-  /*
-   * =========================================================
-   * Seller Profile creation screen
-   *
-   * This is shown ONLY when the authenticated user does not
-   * already have a seller profile.
-   * =========================================================
-   */
-
   return (
-    <main className="min-h-screen bg-[#07090d] text-white">
-      <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 lg:px-8">
-        {/* Header */}
-        <div className="mb-8 flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <button
-              type="button"
-              onClick={() => router.push("/marketplace")}
-              className="mb-4 inline-flex items-center gap-2 text-sm text-zinc-400 transition hover:text-white"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              Back to Marketplace
-            </button>
+    <main className="min-h-screen bg-[#050505] text-white">
+      <div className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6 lg:px-8">
+        <button
+          type="button"
+          onClick={handleBack}
+          className="mb-8 inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm font-medium text-zinc-300 transition hover:bg-white/[0.07] hover:text-white"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          {editMode ? "Back to Seller Dashboard" : "Back to Marketplace"}
+        </button>
 
-            <div className="flex items-center gap-3">
-              <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-white/10 bg-white/[0.05]">
-                <Store className="h-5 w-5 text-zinc-200" />
-              </div>
-
-              <div>
-                <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
-                  Seller Center
-                </h1>
-
-                <p className="mt-1 text-sm text-zinc-400">
-                  Create your ZUQEN marketplace seller profile.
-                </p>
-              </div>
-            </div>
+        <div className="mb-8">
+          <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl border border-violet-400/20 bg-violet-500/10">
+            {editMode ? (
+              <User className="h-7 w-7 text-violet-300" />
+            ) : (
+              <Store className="h-7 w-7 text-violet-300" />
+            )}
           </div>
 
-          <div className="flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-4 py-2">
-            <span className="h-2 w-2 rounded-full bg-amber-400" />
-            <span className="text-sm text-zinc-300">New Seller</span>
-          </div>
+          <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
+            {pageTitle}
+          </h1>
+
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-400 sm:text-base">
+            {pageDescription}
+          </p>
         </div>
 
-        {/* Error */}
         {error && (
-          <div className="mb-6 flex items-start gap-3 rounded-xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-200">
+          <div className="mb-6 flex items-start gap-3 rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-200">
             <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
-
-            <div className="min-w-0 break-words">
-              {error}
-            </div>
+            <div>{error}</div>
           </div>
         )}
 
-        {/* Success */}
         {success && (
-          <div className="mb-6 flex items-start gap-3 rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-4 text-sm text-emerald-200">
+          <div className="mb-6 flex items-start gap-3 rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-4 text-sm text-emerald-200">
             <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" />
             <div>{success}</div>
           </div>
         )}
 
-        <div className="grid gap-6 lg:grid-cols-[1fr_340px]">
-          {/* Profile form */}
-          <section className="rounded-2xl border border-white/10 bg-white/[0.025] p-5 sm:p-7">
-            <div className="mb-7">
-              <h2 className="text-lg font-semibold">
-                Create Seller Profile
-              </h2>
+        <form onSubmit={handleSubmit}>
+          <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
+            <section className="rounded-3xl border border-white/10 bg-white/[0.025] p-5 sm:p-7">
+              <div className="mb-7">
+                <h2 className="text-lg font-semibold">
+                  Profile Information
+                </h2>
+                <p className="mt-1 text-sm text-zinc-500">
+                  These details will be shown on your seller profile and
+                  marketplace listings.
+                </p>
+              </div>
 
-              <p className="mt-1 text-sm text-zinc-500">
-                You only need to create this seller profile once.
-              </p>
-            </div>
+              <div className="space-y-6">
+                <div>
+                  <label
+                    htmlFor="displayName"
+                    className="mb-2 block text-sm font-medium text-zinc-200"
+                  >
+                    Seller Display Name
+                  </label>
 
-            <form onSubmit={handleSave} className="space-y-6">
-              {/* Avatar preview */}
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
-                <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-white/10 bg-white/[0.05]">
-                  {avatarUrl.trim() ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={avatarUrl.trim()}
-                      alt="Seller avatar"
-                      className="h-full w-full object-cover"
-                    />
-                  ) : (
-                    <User className="h-8 w-8 text-zinc-600" />
-                  )}
+                  <input
+                    id="displayName"
+                    type="text"
+                    value={displayName}
+                    onChange={(event) =>
+                      setDisplayName(event.target.value)
+                    }
+                    placeholder="Your creator or brand name"
+                    maxLength={80}
+                    disabled={saving}
+                    className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none transition placeholder:text-zinc-600 focus:border-violet-400/50 focus:ring-2 focus:ring-violet-500/10 disabled:cursor-not-allowed disabled:opacity-60"
+                  />
+
+                  <p className="mt-2 text-xs text-zinc-600">
+                    {displayName.length}/80
+                  </p>
                 </div>
 
                 <div>
-                  <p className="text-sm font-medium text-zinc-200">
-                    Profile image
-                  </p>
+                  <label
+                    htmlFor="username"
+                    className="mb-2 block text-sm font-medium text-zinc-200"
+                  >
+                    Username
+                  </label>
 
-                  <p className="mt-1 text-xs leading-5 text-zinc-500">
-                    Optional. You can leave the avatar URL empty.
+                  <div className="flex items-center rounded-2xl border border-white/10 bg-black/30 px-4 focus-within:border-violet-400/50 focus-within:ring-2 focus-within:ring-violet-500/10">
+                    <span className="text-sm text-zinc-600">@</span>
+                    <input
+                      id="username"
+                      type="text"
+                      value={username}
+                      onChange={(event) =>
+                        setUsername(
+                          event.target.value
+                            .toLowerCase()
+                            .replace(/\s+/g, "")
+                        )
+                      }
+                      placeholder="yourusername"
+                      maxLength={30}
+                      disabled={saving}
+                      className="w-full bg-transparent px-2 py-3 text-sm text-white outline-none placeholder:text-zinc-600 disabled:cursor-not-allowed disabled:opacity-60"
+                    />
+                  </div>
+
+                  <p className="mt-2 text-xs text-zinc-600">
+                    Lowercase letters, numbers and underscores only.
                   </p>
                 </div>
-              </div>
 
-              {/* Display name */}
-              <div>
-                <label
-                  htmlFor="displayName"
-                  className="mb-2 block text-sm font-medium text-zinc-200"
-                >
-                  Display name
-                </label>
+                <div>
+                  <label
+                    htmlFor="bio"
+                    className="mb-2 block text-sm font-medium text-zinc-200"
+                  >
+                    Bio
+                  </label>
 
-                <input
-                  id="displayName"
-                  type="text"
-                  value={displayName}
-                  onChange={(event) => setDisplayName(event.target.value)}
-                  maxLength={100}
-                  placeholder="Your seller name"
-                  className="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none transition placeholder:text-zinc-600 focus:border-white/25 focus:bg-black/30"
-                />
-              </div>
+                  <textarea
+                    id="bio"
+                    value={bio}
+                    onChange={(event) => setBio(event.target.value)}
+                    placeholder="Tell buyers what you create..."
+                    rows={5}
+                    maxLength={500}
+                    disabled={saving}
+                    className="w-full resize-none rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm leading-6 text-white outline-none transition placeholder:text-zinc-600 focus:border-violet-400/50 focus:ring-2 focus:ring-violet-500/10 disabled:cursor-not-allowed disabled:opacity-60"
+                  />
 
-              {/* Username */}
-              <div>
-                <label
-                  htmlFor="username"
-                  className="mb-2 block text-sm font-medium text-zinc-200"
-                >
-                  Seller username
-                </label>
+                  <p className="mt-2 text-xs text-zinc-600">
+                    {bio.length}/500
+                  </p>
+                </div>
 
-                <div className="flex items-center rounded-xl border border-white/10 bg-black/20 focus-within:border-white/25">
-                  <span className="pl-4 text-sm text-zinc-600">@</span>
+                <div>
+                  <label
+                    htmlFor="avatarUrl"
+                    className="mb-2 block text-sm font-medium text-zinc-200"
+                  >
+                    Avatar URL
+                  </label>
 
                   <input
-                    id="username"
-                    type="text"
-                    value={username}
+                    id="avatarUrl"
+                    type="url"
+                    value={avatarUrl}
                     onChange={(event) =>
-                      setUsername(event.target.value.toLowerCase())
+                      setAvatarUrl(event.target.value)
                     }
-                    maxLength={30}
-                    placeholder="yourname"
-                    className="min-w-0 flex-1 bg-transparent px-2 py-3 text-sm text-white outline-none placeholder:text-zinc-600"
+                    placeholder="https://..."
+                    disabled={saving}
+                    className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none transition placeholder:text-zinc-600 focus:border-violet-400/50 focus:ring-2 focus:ring-violet-500/10 disabled:cursor-not-allowed disabled:opacity-60"
                   />
                 </div>
 
-                <p className="mt-2 text-xs text-zinc-600">
-                  Optional. 3–30 characters. Lowercase letters, numbers and
-                  underscores.
-                </p>
-              </div>
+                <div>
+                  <label
+                    htmlFor="websiteUrl"
+                    className="mb-2 flex items-center gap-2 text-sm font-medium text-zinc-200"
+                  >
+                    <Globe className="h-4 w-4 text-zinc-500" />
+                    Website
+                  </label>
 
-              {/* Bio */}
-              <div>
-                <label
-                  htmlFor="bio"
-                  className="mb-2 block text-sm font-medium text-zinc-200"
-                >
-                  Seller bio
-                </label>
-
-                <textarea
-                  id="bio"
-                  value={bio}
-                  onChange={(event) => setBio(event.target.value)}
-                  maxLength={1000}
-                  rows={6}
-                  placeholder="Tell buyers about the templates you create..."
-                  className="w-full resize-y rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm leading-6 text-white outline-none transition placeholder:text-zinc-600 focus:border-white/25 focus:bg-black/30"
-                />
-
-                <div className="mt-2 text-right text-xs text-zinc-600">
-                  {bio.length}/1000
+                  <input
+                    id="websiteUrl"
+                    type="url"
+                    value={websiteUrl}
+                    onChange={(event) =>
+                      setWebsiteUrl(event.target.value)
+                    }
+                    placeholder="https://yourwebsite.com"
+                    disabled={saving}
+                    className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none transition placeholder:text-zinc-600 focus:border-violet-400/50 focus:ring-2 focus:ring-violet-500/10 disabled:cursor-not-allowed disabled:opacity-60"
+                  />
                 </div>
               </div>
+            </section>
 
-              {/* Website */}
-              <div>
-                <label
-                  htmlFor="website"
-                  className="mb-2 block text-sm font-medium text-zinc-200"
-                >
-                  Website{" "}
-                  <span className="font-normal text-zinc-600">
-                    (optional)
-                  </span>
-                </label>
+            <aside className="space-y-6">
+              <div className="rounded-3xl border border-white/10 bg-white/[0.025] p-5">
+                <h3 className="font-semibold">Seller Status</h3>
 
-                <input
-                  id="website"
-                  type="url"
-                  value={websiteUrl}
-                  onChange={(event) => setWebsiteUrl(event.target.value)}
-                  placeholder="https://example.com"
-                  className="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none transition placeholder:text-zinc-600 focus:border-white/25 focus:bg-black/30"
-                />
+                <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 p-4">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-500/10">
+                      <Store className="h-5 w-5 text-amber-300" />
+                    </div>
 
-                <p className="mt-2 text-xs text-zinc-600">
-                  Your personal, creator, or portfolio website.
+                    <div>
+                      <p className="text-sm font-medium text-white">
+                        {existingSeller?.seller_status
+                          ? existingSeller.seller_status
+                              .charAt(0)
+                              .toUpperCase() +
+                            existingSeller.seller_status.slice(1)
+                          : "Pending"}
+                      </p>
+
+                      <p className="mt-0.5 text-xs text-zinc-500">
+                        {existingSeller?.is_verified
+                          ? "Verified seller"
+                          : "Verification pending"}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <p className="mt-4 text-xs leading-5 text-zinc-600">
+                  Seller verification and marketplace review are handled
+                  separately from your profile information.
                 </p>
               </div>
 
-              {/* Avatar URL */}
-              <div>
-                <label
-                  htmlFor="avatarUrl"
-                  className="mb-2 block text-sm font-medium text-zinc-200"
-                >
-                  Avatar URL{" "}
-                  <span className="font-normal text-zinc-600">
-                    (optional)
-                  </span>
-                </label>
+              <div className="rounded-3xl border border-violet-400/15 bg-violet-500/[0.06] p-5">
+                <h3 className="font-semibold text-violet-100">
+                  Marketplace Commission
+                </h3>
 
-                <input
-                  id="avatarUrl"
-                  type="url"
-                  value={avatarUrl}
-                  onChange={(event) => setAvatarUrl(event.target.value)}
-                  placeholder="https://..."
-                  className="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none transition placeholder:text-zinc-600 focus:border-white/25 focus:bg-black/30"
-                />
+                <p className="mt-2 text-sm leading-6 text-violet-100/60">
+                  ZUQEN retains 20% of each successful template sale.
+                  Sellers receive the remaining 80% through the marketplace
+                  earnings system.
+                </p>
               </div>
 
-              {/* Save */}
-              <div className="flex flex-col gap-3 border-t border-white/10 pt-6 sm:flex-row sm:items-center sm:justify-between">
-                <p className="text-xs leading-5 text-zinc-600">
-                  Your seller profile will remain connected to this account
-                  after logout.
-                </p>
-
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-white px-5 py-3 text-sm font-semibold text-black transition hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {saving ? (
+              <button
+                type="submit"
+                disabled={saving}
+                className="flex w-full items-center justify-center gap-2 rounded-2xl bg-white px-5 py-3.5 text-sm font-semibold text-black transition hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {saving ? (
+                  <>
                     <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
+                    Saving...
+                  </>
+                ) : (
+                  <>
                     <Save className="h-4 w-4" />
-                  )}
-
-                  {saving ? "Creating..." : "Create Seller Profile"}
-                </button>
-              </div>
-            </form>
-          </section>
-
-          {/* Information */}
-          <aside className="space-y-6">
-            <section className="rounded-2xl border border-white/10 bg-white/[0.025] p-5">
-              <h2 className="text-sm font-semibold text-zinc-200">
-                How selling works
-              </h2>
-
-              <div className="mt-5 space-y-4">
-                <div className="flex gap-3">
-                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-white/[0.06] text-xs font-semibold">
-                    1
-                  </div>
-
-                  <div>
-                    <p className="text-sm text-zinc-200">
-                      Create your seller profile
-                    </p>
-
-                    <p className="mt-1 text-xs leading-5 text-zinc-500">
-                      This is a one-time setup for your account.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex gap-3">
-                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-white/[0.06] text-xs font-semibold">
-                    2
-                  </div>
-
-                  <div>
-                    <p className="text-sm text-zinc-200">
-                      Create your template
-                    </p>
-
-                    <p className="mt-1 text-xs leading-5 text-zinc-500">
-                      Add your package, screenshots, video and listing details.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex gap-3">
-                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-white/[0.06] text-xs font-semibold">
-                    3
-                  </div>
-
-                  <div>
-                    <p className="text-sm text-zinc-200">
-                      Submit for review
-                    </p>
-
-                    <p className="mt-1 text-xs leading-5 text-zinc-500">
-                      Security and marketplace verification happen before
-                      publishing.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </section>
-
-            <section className="rounded-2xl border border-white/10 bg-gradient-to-br from-white/[0.06] to-white/[0.02] p-5">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/[0.05]">
-                <Store className="h-5 w-5 text-zinc-300" />
-              </div>
-
-              <h2 className="mt-4 text-sm font-semibold text-zinc-200">
-                One account, one seller profile
-              </h2>
-
-              <p className="mt-2 text-xs leading-5 text-zinc-500">
-                Your seller profile is permanently associated with your ZUQEN
-                account. Logging out does not remove it.
-              </p>
-            </section>
-          </aside>
-        </div>
+                    {editMode ? "Save Changes" : "Create Seller Profile"}
+                  </>
+                )}
+              </button>
+            </aside>
+          </div>
+        </form>
       </div>
     </main>
   );
 }
+
+export default function SellerProfilePage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="min-h-screen bg-[#050505] text-white">
+          <div className="flex min-h-screen items-center justify-center">
+            <div className="flex items-center gap-3 text-sm text-zinc-400">
+              <Loader2 className="h-5 w-5 animate-spin" />
+              Loading seller profile...
+            </div>
+          </div>
+        </main>
+      }
+    >
+      <SellerProfileContent />
+    </Suspense>
+  );
+}
+

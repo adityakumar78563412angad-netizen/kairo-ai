@@ -1,57 +1,28 @@
+
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import {
   AlertCircle,
   ArrowLeft,
   BarChart3,
   CheckCircle2,
+  ChevronRight,
   Clock3,
   DollarSign,
+  Edit3,
   Eye,
-  FileEdit,
+  FileText,
   Loader2,
   Plus,
   ShoppingBag,
   Store,
-  TrendingUp,
+  Tag,
+  Users,
   XCircle,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase";
-
-type Template = {
-  id: string;
-  name: string;
-  slug: string | null;
-  category: string;
-  price: number;
-  currency: string | null;
-  preview_image: string | null;
-  status: string;
-  review_status: string | null;
-  featured: boolean;
-  is_new: boolean;
-  average_rating: number | null;
-  review_count: number | null;
-  sales_count: number | null;
-  view_count: number | null;
-  created_at: string;
-  updated_at: string;
-};
-
-type Purchase = {
-  id: string;
-  template_id: string;
-  buyer_id: string;
-  seller_id: string | null;
-  amount: number;
-  commission: number;
-  seller_amount: number;
-  payment_status: string;
-  refunded_at: string | null;
-  created_at: string;
-};
 
 type SellerProfile = {
   id: string;
@@ -62,118 +33,103 @@ type SellerProfile = {
   is_verified: boolean | null;
 };
 
-type DashboardTemplate = Template & {
-  buyerCount: number;
-  successfulSales: number;
-  grossRevenue: number;
-  sellerRevenue: number;
+type Template = {
+  id: string;
+  seller_id: string;
+  name: string;
+  slug: string | null;
+  category: string | null;
+  price: number | null;
+  currency: string | null;
+  preview_image: string | null;
+  status: string | null;
+  review_status: string | null;
+  sales_count: number | null;
+  view_count: number | null;
+  average_rating: number | null;
+  review_count: number | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type Purchase = {
+  id: string;
+  template_id: string;
+  buyer_id: string;
+  seller_id: string;
+  amount: number | null;
+  commission: number | null;
+  seller_amount: number | null;
+  payment_status: string | null;
+  created_at: string;
 };
 
 const supabase = createClient();
 
-function formatCurrency(amount: number, currency = "INR") {
-  try {
-    return new Intl.NumberFormat("en-IN", {
-      style: "currency",
-      currency,
-      maximumFractionDigits: 2,
-    }).format(amount);
-  } catch {
-    return `₹${amount.toLocaleString("en-IN", {
-      maximumFractionDigits: 2,
-    })}`;
-  }
+function formatMoney(
+  amount: number | null | undefined,
+  currency = "INR"
+) {
+  const value = Number(amount || 0);
+
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency,
+    maximumFractionDigits: 2,
+  }).format(value);
 }
 
-function normalizeStatus(status: string | null | undefined) {
-  return (status || "").toLowerCase();
+function formatDate(value: string | null | undefined) {
+  if (!value) return "—";
+
+  return new Intl.DateTimeFormat("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  }).format(new Date(value));
 }
 
-function isSuccessfulPurchase(purchase: Purchase) {
-  const status = normalizeStatus(purchase.payment_status);
+function getStatusLabel(status: string | null) {
+  if (!status) return "Draft";
 
-  return (
-    ["paid", "completed", "succeeded", "success"].includes(status) &&
-    !purchase.refunded_at
-  );
+  return status
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
-function getTemplateStatus(template: Template) {
-  const status = normalizeStatus(template.status);
-  const reviewStatus = normalizeStatus(template.review_status);
+function getStatusClasses(status: string | null) {
+  switch (status) {
+    case "published":
+    case "approved":
+      return "border-emerald-400/20 bg-emerald-500/10 text-emerald-300";
 
-  if (status === "published" && reviewStatus === "approved") {
-    return {
-      label: "Published",
-      icon: CheckCircle2,
-      className:
-        "border-emerald-500/20 bg-emerald-500/10 text-emerald-300",
-    };
+    case "under_review":
+    case "pending":
+      return "border-amber-400/20 bg-amber-500/10 text-amber-300";
+
+    case "rejected":
+      return "border-red-400/20 bg-red-500/10 text-red-300";
+
+    case "draft":
+    default:
+      return "border-white/10 bg-white/[0.04] text-zinc-400";
   }
-
-  if (
-    reviewStatus === "pending" ||
-    status === "pending_review" ||
-    status === "under_review"
-  ) {
-    return {
-      label: "Under Review",
-      icon: Clock3,
-      className: "border-amber-500/20 bg-amber-500/10 text-amber-300",
-    };
-  }
-
-  if (reviewStatus === "rejected" || status === "rejected") {
-    return {
-      label: "Rejected",
-      icon: XCircle,
-      className: "border-red-500/20 bg-red-500/10 text-red-300",
-    };
-  }
-
-  if (status === "draft") {
-    return {
-      label: "Draft",
-      icon: FileEdit,
-      className: "border-white/10 bg-white/[0.05] text-zinc-300",
-    };
-  }
-
-  if (status === "unpublished") {
-    return {
-      label: "Unpublished",
-      icon: Store,
-      className: "border-zinc-500/20 bg-zinc-500/10 text-zinc-400",
-    };
-  }
-
-  return {
-    label: template.status || "Unknown",
-    icon: Store,
-    className: "border-white/10 bg-white/[0.05] text-zinc-300",
-  };
 }
 
 export default function SellerDashboardPage() {
   const router = useRouter();
 
   const [loading, setLoading] = useState(true);
-  const [userId, setUserId] = useState("");
+  const [error, setError] = useState("");
 
-  const [sellerProfile, setSellerProfile] =
-    useState<SellerProfile | null>(null);
-
+  const [seller, setSeller] = useState<SellerProfile | null>(null);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [purchases, setPurchases] = useState<Purchase[]>([]);
 
-  const [error, setError] = useState("");
-
-  const [filter, setFilter] = useState<
-    "all" | "published" | "draft" | "review" | "rejected"
-  >("all");
+  const [filter, setFilter] = useState("all");
 
   useEffect(() => {
-    let mounted = true;
+    let cancelled = false;
 
     async function loadDashboard() {
       setLoading(true);
@@ -185,18 +141,16 @@ export default function SellerDashboardPage() {
           error: authError,
         } = await supabase.auth.getUser();
 
-        if (authError) {
-          throw authError;
-        }
+        if (authError) throw authError;
 
         if (!user) {
-          router.push("/login?redirect=/marketplace/seller/dashboard");
+          router.replace(
+            `/login?redirect=${encodeURIComponent(
+              "/marketplace/seller/dashboard"
+            )}`
+          );
           return;
         }
-
-        if (!mounted) return;
-
-        setUserId(user.id);
 
         const [sellerResult, templatesResult, purchasesResult] =
           await Promise.all([
@@ -220,6 +174,7 @@ export default function SellerDashboardPage() {
               .select(
                 `
                   id,
+                  seller_id,
                   name,
                   slug,
                   category,
@@ -228,12 +183,10 @@ export default function SellerDashboardPage() {
                   preview_image,
                   status,
                   review_status,
-                  featured,
-                  is_new,
-                  average_rating,
-                  review_count,
                   sales_count,
                   view_count,
+                  average_rating,
+                  review_count,
                   created_at,
                   updated_at
                 `
@@ -253,7 +206,6 @@ export default function SellerDashboardPage() {
                   commission,
                   seller_amount,
                   payment_status,
-                  refunded_at,
                   created_at
                 `
               )
@@ -261,35 +213,34 @@ export default function SellerDashboardPage() {
               .order("created_at", { ascending: false }),
           ]);
 
-        if (sellerResult.error) {
-          throw sellerResult.error;
+        if (sellerResult.error) throw sellerResult.error;
+        if (templatesResult.error) throw templatesResult.error;
+        if (purchasesResult.error) throw purchasesResult.error;
+
+        if (cancelled) return;
+
+        const sellerData = sellerResult.data as SellerProfile | null;
+
+        if (!sellerData) {
+          router.replace("/marketplace/seller");
+          return;
         }
 
-        if (templatesResult.error) {
-          throw templatesResult.error;
-        }
-
-        if (purchasesResult.error) {
-          throw purchasesResult.error;
-        }
-
-        if (!mounted) return;
-
-        setSellerProfile(sellerResult.data as SellerProfile | null);
+        setSeller(sellerData);
         setTemplates((templatesResult.data || []) as Template[]);
         setPurchases((purchasesResult.data || []) as Purchase[]);
       } catch (err) {
-        console.error("Failed to load seller dashboard:", err);
+        console.error("Seller dashboard error:", err);
 
-        if (mounted) {
+        if (!cancelled) {
           setError(
             err instanceof Error
               ? err.message
-              : "Unable to load seller dashboard."
+              : "Unable to load your seller dashboard."
           );
         }
       } finally {
-        if (mounted) {
+        if (!cancelled) {
           setLoading(false);
         }
       }
@@ -298,101 +249,73 @@ export default function SellerDashboardPage() {
     loadDashboard();
 
     return () => {
-      mounted = false;
+      cancelled = true;
     };
   }, [router]);
 
   const successfulPurchases = useMemo(
-    () => purchases.filter(isSuccessfulPurchase),
+    () =>
+      purchases.filter((purchase) => {
+        const status = (purchase.payment_status || "").toLowerCase();
+
+        return [
+          "paid",
+          "completed",
+          "succeeded",
+          "success",
+        ].includes(status);
+      }),
     [purchases]
   );
 
-  const dashboardTemplates = useMemo<DashboardTemplate[]>(() => {
-    return templates.map((template) => {
-      const templatePurchases = successfulPurchases.filter(
-        (purchase) => purchase.template_id === template.id
-      );
-
-      const buyerIds = new Set(
-        templatePurchases
-          .map((purchase) => purchase.buyer_id)
-          .filter(Boolean)
-      );
-
-      const grossRevenue = templatePurchases.reduce(
-        (total, purchase) => total + Number(purchase.amount || 0),
-        0
-      );
-
-      const sellerRevenue = templatePurchases.reduce(
-        (total, purchase) => total + Number(purchase.seller_amount || 0),
-        0
-      );
-
-      return {
-        ...template,
-        buyerCount: buyerIds.size,
-        successfulSales: templatePurchases.length,
-        grossRevenue,
-        sellerRevenue,
-      };
-    });
-  }, [templates, successfulPurchases]);
-
   const stats = useMemo(() => {
-    const published = templates.filter(
-      (template) =>
-        normalizeStatus(template.status) === "published" &&
-        normalizeStatus(template.review_status) === "approved"
-    ).length;
+    const totalSales = successfulPurchases.length;
 
-    const drafts = templates.filter(
-      (template) => normalizeStatus(template.status) === "draft"
-    ).length;
+    const uniqueBuyers = new Set(
+      successfulPurchases.map((purchase) => purchase.buyer_id)
+    ).size;
 
-    const underReview = templates.filter((template) => {
-      const status = normalizeStatus(template.status);
-      const review = normalizeStatus(template.review_status);
-
-      return (
-        status === "pending_review" ||
-        status === "under_review" ||
-        review === "pending"
-      );
-    }).length;
-
-    const rejected = templates.filter((template) => {
-      const status = normalizeStatus(template.status);
-      const review = normalizeStatus(template.review_status);
-
-      return status === "rejected" || review === "rejected";
-    }).length;
-
-    const grossRevenue = successfulPurchases.reduce(
-      (total, purchase) => total + Number(purchase.amount || 0),
+    const gross = successfulPurchases.reduce(
+      (sum, purchase) => sum + Number(purchase.amount || 0),
       0
     );
 
     const commission = successfulPurchases.reduce(
-      (total, purchase) => total + Number(purchase.commission || 0),
+      (sum, purchase) => sum + Number(purchase.commission || 0),
       0
     );
 
     const sellerRevenue = successfulPurchases.reduce(
-      (total, purchase) => total + Number(purchase.seller_amount || 0),
+      (sum, purchase) => sum + Number(purchase.seller_amount || 0),
       0
     );
 
-    const buyers = new Set(
-      successfulPurchases
-        .map((purchase) => purchase.buyer_id)
-        .filter(Boolean)
-    );
-
-    const views = templates.reduce(
-      (total, template) => total + Number(template.view_count || 0),
+    const totalViews = templates.reduce(
+      (sum, template) => sum + Number(template.view_count || 0),
       0
     );
+
+    const published = templates.filter(
+      (template) =>
+        template.status === "published" &&
+        template.review_status === "approved"
+    ).length;
+
+    const drafts = templates.filter(
+      (template) => template.status === "draft"
+    ).length;
+
+    const underReview = templates.filter(
+      (template) =>
+        template.status === "under_review" ||
+        template.review_status === "pending"
+    ).length;
+
+    const rejected = templates.filter(
+      (template) =>
+        template.status === "rejected" ||
+        template.review_status === "rejected"
+    ).length;
 
     return {
       totalTemplates: templates.length,
@@ -400,60 +323,54 @@ export default function SellerDashboardPage() {
       drafts,
       underReview,
       rejected,
-      sales: successfulPurchases.length,
-      buyers: buyers.size,
-      grossRevenue,
+      totalSales,
+      uniqueBuyers,
+      gross,
       commission,
       sellerRevenue,
-      views,
+      totalViews,
     };
   }, [templates, successfulPurchases]);
 
   const filteredTemplates = useMemo(() => {
-    if (filter === "all") {
-      return dashboardTemplates;
+    if (filter === "all") return templates;
+
+    if (filter === "published") {
+      return templates.filter(
+        (template) =>
+          template.status === "published" &&
+          template.review_status === "approved"
+      );
     }
 
-    return dashboardTemplates.filter((template) => {
-      const status = normalizeStatus(template.status);
-      const review = normalizeStatus(template.review_status);
+    if (filter === "draft") {
+      return templates.filter(
+        (template) => template.status === "draft"
+      );
+    }
 
-      if (filter === "published") {
-        return status === "published" && review === "approved";
-      }
+    if (filter === "under_review") {
+      return templates.filter(
+        (template) =>
+          template.status === "under_review" ||
+          template.review_status === "pending"
+      );
+    }
 
-      if (filter === "draft") {
-        return status === "draft";
-      }
+    if (filter === "rejected") {
+      return templates.filter(
+        (template) =>
+          template.status === "rejected" ||
+          template.review_status === "rejected"
+      );
+    }
 
-      if (filter === "review") {
-        return (
-          status === "pending_review" ||
-          status === "under_review" ||
-          review === "pending"
-        );
-      }
-
-      if (filter === "rejected") {
-        return status === "rejected" || review === "rejected";
-      }
-
-      return true;
-    });
-  }, [dashboardTemplates, filter]);
-
-  const recentSales = useMemo(
-    () => successfulPurchases.slice(0, 8),
-    [successfulPurchases]
-  );
-
-  const templateNameById = useMemo(() => {
-    return new Map(templates.map((template) => [template.id, template.name]));
-  }, [templates]);
+    return templates;
+  }, [filter, templates]);
 
   if (loading) {
     return (
-      <main className="min-h-screen bg-[#07090d] text-white">
+      <main className="min-h-screen bg-[#050505] text-white">
         <div className="flex min-h-screen items-center justify-center">
           <div className="flex items-center gap-3 text-sm text-zinc-400">
             <Loader2 className="h-5 w-5 animate-spin" />
@@ -465,44 +382,72 @@ export default function SellerDashboardPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#07090d] text-white">
-      <div className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-        {/* Header */}
-        <header className="mb-8">
-          <button
-            type="button"
-            onClick={() => router.push("/marketplace/seller")}
-            className="mb-5 inline-flex items-center gap-2 text-sm text-zinc-400 transition hover:text-white"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Seller Profile
-          </button>
+    <main className="min-h-screen bg-[#050505] text-white">
+      <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+        <header className="mb-8 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <button
+              type="button"
+              onClick={() =>
+                router.push("/marketplace/seller?edit=true")
+              }
+              className="mb-4 inline-flex items-center gap-2 text-sm text-zinc-500 transition hover:text-white"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Seller Profile
+            </button>
 
-          <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
-            <div>
-              <div className="flex items-center gap-3">
-                <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-white/10 bg-white/[0.05]">
-                  <BarChart3 className="h-5 w-5 text-zinc-200" />
-                </div>
+            <div className="flex items-center gap-3">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-violet-400/20 bg-violet-500/10">
+                <Store className="h-6 w-6 text-violet-300" />
+              </div>
 
-                <div>
-                  <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
-                    Seller Dashboard
-                  </h1>
+              <div>
+                <h1 className="text-2xl font-bold sm:text-3xl">
+                  Seller Dashboard
+                </h1>
 
-                  <p className="mt-1 text-sm text-zinc-500">
-                    {sellerProfile?.display_name ||
-                      sellerProfile?.username ||
-                      "Seller"}
-                  </p>
+                <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-zinc-500">
+                  <span>
+                    {seller?.display_name || "Seller"}
+                  </span>
+
+                  {seller?.username && (
+                    <>
+                      <span>•</span>
+                      <span>@{seller.username}</span>
+                    </>
+                  )}
+
+                  {seller?.is_verified && (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-emerald-400/20 bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-300">
+                      <CheckCircle2 className="h-3 w-3" />
+                      Verified
+                    </span>
+                  )}
                 </div>
               </div>
             </div>
+          </div>
+
+          <div className="flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={() =>
+                router.push("/marketplace/seller?edit=true")
+              }
+              className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm font-medium text-zinc-300 transition hover:bg-white/[0.07] hover:text-white"
+            >
+              <Edit3 className="h-4 w-4" />
+              Edit Seller Profile
+            </button>
 
             <button
               type="button"
-              onClick={() => router.push("/marketplace/seller/create")}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-white px-5 py-3 text-sm font-semibold text-black transition hover:bg-zinc-200"
+              onClick={() =>
+                router.push("/marketplace/seller/create")
+              }
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-black transition hover:bg-zinc-200"
             >
               <Plus className="h-4 w-4" />
               Create Template
@@ -510,210 +455,196 @@ export default function SellerDashboardPage() {
           </div>
         </header>
 
-        {/* Error */}
         {error && (
-          <div className="mb-6 flex items-start gap-3 rounded-xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-200">
+          <div className="mb-6 flex items-start gap-3 rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-200">
             <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
-            <div>{error}</div>
+            <span>{error}</span>
           </div>
         )}
 
-        {/* Seller status */}
-        <section className="mb-6 rounded-2xl border border-white/10 bg-white/[0.025] p-5">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-xs uppercase tracking-[0.18em] text-zinc-600">
-                Seller Account
-              </p>
-
-              <div className="mt-2 flex items-center gap-2">
-                <span
-                  className={`h-2 w-2 rounded-full ${
-                    sellerProfile?.seller_status === "active"
-                      ? "bg-emerald-400"
-                      : sellerProfile?.seller_status === "suspended"
-                      ? "bg-red-400"
-                      : "bg-amber-400"
-                  }`}
-                />
-
-                <span className="text-sm font-medium text-zinc-200">
-                  {sellerProfile?.seller_status === "active"
-                    ? "Active"
-                    : sellerProfile?.seller_status === "suspended"
-                    ? "Suspended"
-                    : "Pending"}
-                </span>
-
-                {sellerProfile?.is_verified && (
-                  <span className="inline-flex items-center gap-1 text-xs text-emerald-400">
-                    <CheckCircle2 className="h-3.5 w-3.5" />
-                    Verified
-                  </span>
-                )}
-              </div>
+        <section className="mb-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="rounded-2xl border border-white/10 bg-white/[0.025] p-5">
+            <div className="mb-4 flex items-center justify-between">
+              <span className="text-sm text-zinc-500">
+                Templates
+              </span>
+              <FileText className="h-5 w-5 text-zinc-600" />
             </div>
 
-            <button
-              type="button"
-              onClick={() => router.push("/marketplace/seller")}
-              className="inline-flex items-center justify-center gap-2 rounded-lg border border-white/10 px-4 py-2 text-sm text-zinc-300 transition hover:bg-white/[0.05] hover:text-white"
-            >
-              <Store className="h-4 w-4" />
-              Edit Seller Profile
-            </button>
+            <p className="text-2xl font-bold">
+              {stats.totalTemplates}
+            </p>
+
+            <p className="mt-1 text-xs text-zinc-600">
+              {stats.published} published · {stats.drafts} drafts
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-white/10 bg-white/[0.025] p-5">
+            <div className="mb-4 flex items-center justify-between">
+              <span className="text-sm text-zinc-500">
+                Total Sales
+              </span>
+              <ShoppingBag className="h-5 w-5 text-zinc-600" />
+            </div>
+
+            <p className="text-2xl font-bold">
+              {stats.totalSales}
+            </p>
+
+            <p className="mt-1 text-xs text-zinc-600">
+              {stats.uniqueBuyers} unique buyers
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-white/10 bg-white/[0.025] p-5">
+            <div className="mb-4 flex items-center justify-between">
+              <span className="text-sm text-zinc-500">
+                Seller Revenue
+              </span>
+              <DollarSign className="h-5 w-5 text-zinc-600" />
+            </div>
+
+            <p className="text-2xl font-bold">
+              {formatMoney(stats.sellerRevenue)}
+            </p>
+
+            <p className="mt-1 text-xs text-zinc-600">
+              After 20% ZUQEN commission
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-white/10 bg-white/[0.025] p-5">
+            <div className="mb-4 flex items-center justify-between">
+              <span className="text-sm text-zinc-500">
+                Total Views
+              </span>
+              <Eye className="h-5 w-5 text-zinc-600" />
+            </div>
+
+            <p className="text-2xl font-bold">
+              {stats.totalViews.toLocaleString("en-IN")}
+            </p>
+
+            <p className="mt-1 text-xs text-zinc-600">
+              Across all your templates
+            </p>
           </div>
         </section>
 
-        {/* Overview stats */}
-        <section className="mb-8 grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <StatCard
-            icon={<Store className="h-5 w-5" />}
-            label="Total Templates"
-            value={stats.totalTemplates.toLocaleString("en-IN")}
-          />
+        <section className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
+            <div className="flex items-center gap-3">
+              <CheckCircle2 className="h-5 w-5 text-emerald-400" />
+              <div>
+                <p className="text-xs text-zinc-600">Published</p>
+                <p className="text-xl font-semibold">
+                  {stats.published}
+                </p>
+              </div>
+            </div>
+          </div>
 
-          <StatCard
-            icon={<ShoppingBag className="h-5 w-5" />}
-            label="Total Sales"
-            value={stats.sales.toLocaleString("en-IN")}
-          />
+          <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
+            <div className="flex items-center gap-3">
+              <Clock3 className="h-5 w-5 text-amber-400" />
+              <div>
+                <p className="text-xs text-zinc-600">
+                  Under Review
+                </p>
+                <p className="text-xl font-semibold">
+                  {stats.underReview}
+                </p>
+              </div>
+            </div>
+          </div>
 
-          <StatCard
-            icon={<DollarSign className="h-5 w-5" />}
-            label="Seller Revenue"
-            value={formatCurrency(stats.sellerRevenue)}
-          />
+          <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
+            <div className="flex items-center gap-3">
+              <FileText className="h-5 w-5 text-zinc-400" />
+              <div>
+                <p className="text-xs text-zinc-600">Drafts</p>
+                <p className="text-xl font-semibold">
+                  {stats.drafts}
+                </p>
+              </div>
+            </div>
+          </div>
 
-          <StatCard
-            icon={<Eye className="h-5 w-5" />}
-            label="Total Views"
-            value={stats.views.toLocaleString("en-IN")}
-          />
+          <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
+            <div className="flex items-center gap-3">
+              <XCircle className="h-5 w-5 text-red-400" />
+              <div>
+                <p className="text-xs text-zinc-600">Rejected</p>
+                <p className="text-xl font-semibold">
+                  {stats.rejected}
+                </p>
+              </div>
+            </div>
+          </div>
         </section>
 
-        {/* Secondary stats */}
-        <section className="mb-8 grid grid-cols-2 gap-3 md:grid-cols-4">
-          <SmallStat label="Published" value={stats.published} />
-          <SmallStat label="Drafts" value={stats.drafts} />
-          <SmallStat label="Under Review" value={stats.underReview} />
-          <SmallStat label="Rejected" value={stats.rejected} />
-        </section>
-
-        {/* Earnings overview */}
-        <section className="mb-8 rounded-2xl border border-white/10 bg-white/[0.025] p-5 sm:p-6">
-          <div className="mb-5 flex items-center justify-between">
+        <section className="mb-8 overflow-hidden rounded-3xl border border-white/10 bg-white/[0.025]">
+          <div className="flex flex-col gap-4 border-b border-white/10 p-5 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h2 className="text-lg font-semibold">Earnings Overview</h2>
-              <p className="mt-1 text-sm text-zinc-500">
-                Calculated from successful, non-refunded marketplace
+              <h2 className="text-lg font-semibold">
+                Your Templates
+              </h2>
+              <p className="mt-1 text-sm text-zinc-600">
+                Your templates remain listed here even after they receive
                 purchases.
               </p>
             </div>
 
-            <TrendingUp className="h-5 w-5 text-zinc-500" />
-          </div>
-
-          <div className="grid gap-4 md:grid-cols-3">
-            <MoneyCard
-              label="Gross Sales"
-              amount={stats.grossRevenue}
-              description="Total amount paid by buyers"
-            />
-
-            <MoneyCard
-              label="ZUQEN Commission"
-              amount={stats.commission}
-              description="20% marketplace commission"
-            />
-
-            <MoneyCard
-              label="Seller Revenue"
-              amount={stats.sellerRevenue}
-              description="Seller share after commission"
-            />
-          </div>
-
-          <p className="mt-5 text-xs leading-5 text-zinc-600">
-            Seller revenue shown here is based on recorded purchase
-            transactions. Withdrawal availability and settlement rules will
-            be handled by the seller earnings and withdrawal system.
-          </p>
-        </section>
-
-        {/* Templates */}
-        <section className="mb-8 rounded-2xl border border-white/10 bg-white/[0.025]">
-          <div className="border-b border-white/10 p-5 sm:p-6">
-            <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <h2 className="text-lg font-semibold">My Templates</h2>
-                <p className="mt-1 text-sm text-zinc-500">
-                  Your templates remain here after they are sold.
-                </p>
-              </div>
-
-              <div className="flex flex-wrap gap-2">
-                <FilterButton
-                  active={filter === "all"}
-                  onClick={() => setFilter("all")}
+            <div className="flex flex-wrap gap-2">
+              {[
+                ["all", "All"],
+                ["published", "Published"],
+                ["draft", "Drafts"],
+                ["under_review", "Review"],
+                ["rejected", "Rejected"],
+              ].map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setFilter(value)}
+                  className={`rounded-xl px-3 py-2 text-xs font-medium transition ${
+                    filter === value
+                      ? "bg-white text-black"
+                      : "border border-white/10 bg-white/[0.03] text-zinc-500 hover:text-white"
+                  }`}
                 >
-                  All ({stats.totalTemplates})
-                </FilterButton>
-
-                <FilterButton
-                  active={filter === "published"}
-                  onClick={() => setFilter("published")}
-                >
-                  Published ({stats.published})
-                </FilterButton>
-
-                <FilterButton
-                  active={filter === "draft"}
-                  onClick={() => setFilter("draft")}
-                >
-                  Drafts ({stats.drafts})
-                </FilterButton>
-
-                <FilterButton
-                  active={filter === "review"}
-                  onClick={() => setFilter("review")}
-                >
-                  Review ({stats.underReview})
-                </FilterButton>
-
-                <FilterButton
-                  active={filter === "rejected"}
-                  onClick={() => setFilter("rejected")}
-                >
-                  Rejected ({stats.rejected})
-                </FilterButton>
-              </div>
+                  {label}
+                </button>
+              ))}
             </div>
           </div>
 
           {filteredTemplates.length === 0 ? (
-            <div className="flex min-h-[260px] flex-col items-center justify-center px-6 text-center">
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04]">
-                <Store className="h-5 w-5 text-zinc-600" />
+            <div className="flex min-h-72 flex-col items-center justify-center px-6 text-center">
+              <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-white/[0.04]">
+                <FileText className="h-6 w-6 text-zinc-600" />
               </div>
 
-              <h3 className="mt-4 text-sm font-medium text-zinc-300">
+              <h3 className="font-semibold">
                 {templates.length === 0
                   ? "No templates yet"
                   : "No templates in this filter"}
               </h3>
 
-              <p className="mt-2 max-w-md text-sm text-zinc-600">
+              <p className="mt-2 max-w-md text-sm leading-6 text-zinc-600">
                 {templates.length === 0
-                  ? "Create your first template to start building your marketplace catalog."
-                  : "Try another status filter to see your other templates."}
+                  ? "Create your first template and start building your marketplace catalog."
+                  : "Try another status filter."}
               </p>
 
               {templates.length === 0 && (
                 <button
                   type="button"
-                  onClick={() => router.push("/marketplace/seller/create")}
-                  className="mt-5 inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-black hover:bg-zinc-200"
+                  onClick={() =>
+                    router.push("/marketplace/seller/create")
+                  }
+                  className="mt-5 inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-black"
                 >
                   <Plus className="h-4 w-4" />
                   Create Template
@@ -723,20 +654,30 @@ export default function SellerDashboardPage() {
           ) : (
             <div className="divide-y divide-white/10">
               {filteredTemplates.map((template) => {
-                const status = getTemplateStatus(template);
-                const StatusIcon = status.icon;
+                const templateSales = successfulPurchases.filter(
+                  (purchase) =>
+                    purchase.template_id === template.id
+                );
+
+                const templateRevenue = templateSales.reduce(
+                  (sum, purchase) =>
+                    sum + Number(purchase.seller_amount || 0),
+                  0
+                );
+
+                const uniqueTemplateBuyers = new Set(
+                  templateSales.map((purchase) => purchase.buyer_id)
+                ).size;
 
                 return (
                   <div
                     key={template.id}
-                    className="p-5 transition hover:bg-white/[0.015] sm:p-6"
+                    className="p-5 transition hover:bg-white/[0.02]"
                   >
-                    <div className="flex flex-col gap-5 xl:flex-row xl:items-center">
-                      {/* Template identity */}
-                      <div className="flex min-w-0 flex-1 gap-4">
+                    <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
+                      <div className="flex min-w-0 gap-4">
                         <div className="h-20 w-28 shrink-0 overflow-hidden rounded-xl border border-white/10 bg-black/30">
                           {template.preview_image ? (
-                            // eslint-disable-next-line @next/next/no-img-element
                             <img
                               src={template.preview_image}
                               alt={template.name}
@@ -744,69 +685,106 @@ export default function SellerDashboardPage() {
                             />
                           ) : (
                             <div className="flex h-full w-full items-center justify-center">
-                              <Store className="h-6 w-6 text-zinc-700" />
+                              <FileText className="h-6 w-6 text-zinc-700" />
                             </div>
                           )}
                         </div>
 
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-2">
-                            <h3 className="truncate text-sm font-semibold text-white">
+                            <h3 className="truncate font-semibold">
                               {template.name}
                             </h3>
 
-                            {template.featured && (
-                              <span className="rounded-full border border-white/10 bg-white/[0.05] px-2 py-0.5 text-[10px] text-zinc-400">
-                                Featured
-                              </span>
-                            )}
-                          </div>
-
-                          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
-                            <span>{template.category}</span>
-                            <span>•</span>
-                            <span>
-                              {formatCurrency(
-                                Number(template.price || 0),
-                                template.currency || "INR"
+                            <span
+                              className={`rounded-full border px-2 py-0.5 text-[11px] ${getStatusClasses(
+                                template.review_status === "approved"
+                                  ? template.status
+                                  : template.review_status
+                              )}`}
+                            >
+                              {getStatusLabel(
+                                template.review_status === "approved"
+                                  ? template.status
+                                  : template.review_status
                               )}
                             </span>
                           </div>
 
-                          <div
-                            className={`mt-3 inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs ${status.className}`}
-                          >
-                            <StatusIcon className="h-3.5 w-3.5" />
-                            {status.label}
+                          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-600">
+                            {template.category && (
+                              <span className="inline-flex items-center gap-1">
+                                <Tag className="h-3 w-3" />
+                                {template.category}
+                              </span>
+                            )}
+
+                            <span>
+                              Updated {formatDate(template.updated_at)}
+                            </span>
                           </div>
                         </div>
                       </div>
 
-                      {/* Stats */}
-                      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:w-[500px]">
-                        <Metric
-                          label="Buyers"
-                          value={template.buyerCount}
-                        />
+                      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:min-w-[500px]">
+                        <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+                          <p className="text-[11px] text-zinc-600">
+                            Sales
+                          </p>
+                          <p className="mt-1 font-semibold">
+                            {templateSales.length}
+                          </p>
+                        </div>
 
-                        <Metric
-                          label="Sales"
-                          value={template.successfulSales}
-                        />
+                        <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+                          <p className="text-[11px] text-zinc-600">
+                            Buyers
+                          </p>
+                          <p className="mt-1 font-semibold">
+                            {uniqueTemplateBuyers}
+                          </p>
+                        </div>
 
-                        <Metric
-                          label="Views"
-                          value={Number(template.view_count || 0)}
-                        />
+                        <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+                          <p className="text-[11px] text-zinc-600">
+                            Views
+                          </p>
+                          <p className="mt-1 font-semibold">
+                            {Number(
+                              template.view_count || 0
+                            ).toLocaleString("en-IN")}
+                          </p>
+                        </div>
 
-                        <Metric
-                          label="Revenue"
-                          value={formatCurrency(template.sellerRevenue)}
-                        />
+                        <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+                          <p className="text-[11px] text-zinc-600">
+                            Revenue
+                          </p>
+                          <p className="mt-1 font-semibold">
+                            {formatMoney(
+                              templateRevenue,
+                              template.currency || "INR"
+                            )}
+                          </p>
+                        </div>
                       </div>
 
-                      {/* Actions */}
-                      <div className="flex shrink-0 gap-2 xl:w-[150px] xl:justify-end">
+                      <div className="flex shrink-0 gap-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            router.push(
+                              `/marketplace/seller/create?template=${encodeURIComponent(
+                                template.id
+                              )}`
+                            )
+                          }
+                          className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-zinc-300 transition hover:bg-white/[0.07] hover:text-white"
+                        >
+                          <Edit3 className="h-4 w-4" />
+                          Edit
+                        </button>
+
                         <button
                           type="button"
                           onClick={() =>
@@ -816,48 +794,12 @@ export default function SellerDashboardPage() {
                               }`
                             )
                           }
-                          className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs font-medium text-zinc-300 transition hover:bg-white/[0.05] hover:text-white xl:flex-none"
+                          className="inline-flex items-center justify-center rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5 text-zinc-400 transition hover:text-white"
+                          aria-label={`View ${template.name}`}
                         >
-                          <Eye className="h-3.5 w-3.5" />
-                          View
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() =>
-                            router.push(
-                              `/marketplace/seller/create?template=${template.id}`
-                            )
-                          }
-                          className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs font-medium text-zinc-300 transition hover:bg-white/[0.05] hover:text-white xl:flex-none"
-                        >
-                          <FileEdit className="h-3.5 w-3.5" />
-                          Edit
+                          <ChevronRight className="h-4 w-4" />
                         </button>
                       </div>
-                    </div>
-
-                    <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-white/5 pt-4 text-xs text-zinc-600">
-                      <span>
-                        Updated{" "}
-                        {new Date(template.updated_at).toLocaleDateString(
-                          "en-IN"
-                        )}
-                      </span>
-
-                      <span>
-                        Rating{" "}
-                        {template.review_count && template.average_rating
-                          ? `${Number(template.average_rating).toFixed(1)} (${template.review_count})`
-                          : "No reviews"}
-                      </span>
-
-                      <span>
-                        Template ID{" "}
-                        <span className="font-mono text-zinc-700">
-                          {template.id}
-                        </span>
-                      </span>
                     </div>
                   </div>
                 );
@@ -866,183 +808,132 @@ export default function SellerDashboardPage() {
           )}
         </section>
 
-        {/* Recent sales */}
-        <section className="rounded-2xl border border-white/10 bg-white/[0.025]">
-          <div className="border-b border-white/10 p-5 sm:p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-lg font-semibold">Recent Sales</h2>
-                <p className="mt-1 text-sm text-zinc-500">
-                  Actual successful purchases recorded for your templates.
-                </p>
+        <section className="grid gap-6 lg:grid-cols-[1.5fr_1fr]">
+          <div className="rounded-3xl border border-white/10 bg-white/[0.025]">
+            <div className="border-b border-white/10 p-5">
+              <div className="flex items-center gap-3">
+                <ShoppingBag className="h-5 w-5 text-zinc-500" />
+                <div>
+                  <h2 className="font-semibold">Recent Sales</h2>
+                  <p className="mt-1 text-xs text-zinc-600">
+                    Successful purchases associated with your templates.
+                  </p>
+                </div>
               </div>
-
-              <ShoppingBag className="h-5 w-5 text-zinc-500" />
             </div>
+
+            {successfulPurchases.length === 0 ? (
+              <div className="p-8 text-center text-sm text-zinc-600">
+                No successful sales yet.
+              </div>
+            ) : (
+              <div className="divide-y divide-white/10">
+                {successfulPurchases
+                  .slice(0, 8)
+                  .map((purchase) => {
+                    const template = templates.find(
+                      (item) => item.id === purchase.template_id
+                    );
+
+                    return (
+                      <div
+                        key={purchase.id}
+                        className="flex items-center justify-between gap-4 p-5"
+                      >
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium">
+                            {template?.name || "Template"}
+                          </p>
+
+                          <p className="mt-1 text-xs text-zinc-600">
+                            {formatDate(purchase.created_at)}
+                          </p>
+                        </div>
+
+                        <div className="text-right">
+                          <p className="text-sm font-semibold text-emerald-300">
+                            +
+                            {formatMoney(
+                              purchase.seller_amount,
+                              template?.currency || "INR"
+                            )}
+                          </p>
+
+                          <p className="mt-1 text-[11px] text-zinc-600">
+                            Seller share
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+            )}
           </div>
 
-          {recentSales.length === 0 ? (
-            <div className="flex min-h-[220px] items-center justify-center px-6 text-center">
-              <div>
-                <ShoppingBag className="mx-auto h-8 w-8 text-zinc-700" />
-                <p className="mt-3 text-sm text-zinc-500">
-                  No successful sales yet.
-                </p>
+          <div className="space-y-6">
+            <div className="rounded-3xl border border-white/10 bg-white/[0.025] p-5">
+              <div className="flex items-center gap-3">
+                <BarChart3 className="h-5 w-5 text-zinc-500" />
+                <h2 className="font-semibold">Revenue Summary</h2>
               </div>
-            </div>
-          ) : (
-            <div className="divide-y divide-white/10">
-              {recentSales.map((purchase) => (
-                <div
-                  key={purchase.id}
-                  className="flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between"
-                >
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-zinc-200">
-                      {templateNameById.get(purchase.template_id) ||
-                        "Template"}
-                    </p>
 
-                    <p className="mt-1 text-xs text-zinc-600">
-                      Purchased{" "}
-                      {new Date(purchase.created_at).toLocaleDateString(
-                        "en-IN"
-                      )}
-                    </p>
-                  </div>
+              <div className="mt-5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-zinc-500">
+                    Gross sales
+                  </span>
+                  <span className="font-medium">
+                    {formatMoney(stats.gross)}
+                  </span>
+                </div>
 
-                  <div className="flex items-center gap-5">
-                    <div className="text-right">
-                      <p className="text-xs text-zinc-600">Sale</p>
-                      <p className="mt-1 text-sm text-zinc-300">
-                        {formatCurrency(Number(purchase.amount || 0))}
-                      </p>
-                    </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-zinc-500">
+                    ZUQEN commission
+                  </span>
+                  <span className="font-medium text-zinc-400">
+                    -{formatMoney(stats.commission)}
+                  </span>
+                </div>
 
-                    <div className="text-right">
-                      <p className="text-xs text-zinc-600">Seller</p>
-                      <p className="mt-1 text-sm font-medium text-emerald-400">
-                        {formatCurrency(
-                          Number(purchase.seller_amount || 0)
-                        )}
-                      </p>
-                    </div>
+                <div className="border-t border-white/10 pt-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-zinc-400">
+                      Seller revenue
+                    </span>
+                    <span className="text-lg font-bold text-emerald-300">
+                      {formatMoney(stats.sellerRevenue)}
+                    </span>
                   </div>
                 </div>
-              ))}
+              </div>
             </div>
-          )}
+
+            <div className="rounded-3xl border border-violet-400/15 bg-violet-500/[0.05] p-5">
+              <h3 className="font-semibold text-violet-100">
+                Keep building
+              </h3>
+
+              <p className="mt-2 text-sm leading-6 text-violet-100/50">
+                Add more high-quality templates, complete your previews and
+                media, and submit them for marketplace verification.
+              </p>
+
+              <button
+                type="button"
+                onClick={() =>
+                  router.push("/marketplace/seller/create")
+                }
+                className="mt-5 inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-black"
+              >
+                <Plus className="h-4 w-4" />
+                New Template
+              </button>
+            </div>
+          </div>
         </section>
       </div>
     </main>
   );
 }
 
-function StatCard({
-  icon,
-  label,
-  value,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="rounded-2xl border border-white/10 bg-white/[0.025] p-4 sm:p-5">
-      <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] text-zinc-400">
-        {icon}
-      </div>
-
-      <p className="mt-4 text-xs text-zinc-600">{label}</p>
-
-      <p className="mt-1 truncate text-lg font-semibold text-zinc-100 sm:text-xl">
-        {value}
-      </p>
-    </div>
-  );
-}
-
-function SmallStat({
-  label,
-  value,
-}: {
-  label: string;
-  value: number;
-}) {
-  return (
-    <div className="rounded-xl border border-white/10 bg-white/[0.02] px-4 py-3">
-      <p className="text-xs text-zinc-600">{label}</p>
-      <p className="mt-1 text-lg font-semibold text-zinc-300">
-        {value.toLocaleString("en-IN")}
-      </p>
-    </div>
-  );
-}
-
-function MoneyCard({
-  label,
-  amount,
-  description,
-}: {
-  label: string;
-  amount: number;
-  description: string;
-}) {
-  return (
-    <div className="rounded-xl border border-white/10 bg-black/20 p-4">
-      <p className="text-xs text-zinc-600">{label}</p>
-
-      <p className="mt-2 text-xl font-semibold text-zinc-100">
-        {formatCurrency(amount)}
-      </p>
-
-      <p className="mt-2 text-xs text-zinc-600">{description}</p>
-    </div>
-  );
-}
-
-function Metric({
-  label,
-  value,
-}: {
-  label: string;
-  value: string | number;
-}) {
-  return (
-    <div className="rounded-lg border border-white/5 bg-black/20 px-3 py-2.5">
-      <p className="text-[10px] uppercase tracking-wide text-zinc-600">
-        {label}
-      </p>
-
-      <p className="mt-1 truncate text-sm font-medium text-zinc-300">
-        {typeof value === "number"
-          ? value.toLocaleString("en-IN")
-          : value}
-      </p>
-    </div>
-  );
-}
-
-function FilterButton({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`rounded-lg border px-3 py-2 text-xs font-medium transition ${
-        active
-          ? "border-white/20 bg-white/[0.08] text-white"
-          : "border-white/10 bg-transparent text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-300"
-      }`}
-    >
-      {children}
-    </button>
-  );
-}
