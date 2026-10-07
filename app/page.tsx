@@ -2503,10 +2503,12 @@ export default function HomePage() {
           justify-content: flex-end;
         }
 
-        .zuqen-message-block {
-          width: min(760px, 90%);
-        }
-
+      .zuqen-message-block {
+  width: fit-content;
+  max-width: 90%;
+  display: flex;
+  flex-direction: column;
+}
         .zuqen-message-label {
           display: flex;
           align-items: center;
@@ -2537,10 +2539,9 @@ export default function HomePage() {
           color: var(--text);
           font-size: 9px;
         }
-
-      .zuqen-message-bubble {
+.zuqen-message-bubble {
   width: fit-content;
-  max-width: min(80%, 760px);
+  max-width: 100%;
   box-sizing: border-box;
   padding: 12px 15px;
   border-radius: 16px;
