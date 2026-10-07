@@ -7,8 +7,7 @@ export const dynamic = "force-dynamic";
 const GROQ_URL =
   "https://api.groq.com/openai/v1/chat/completions";
 
-const DEFAULT_MODEL =
-  "openai/gpt-oss-120b";
+const DEFAULT_MODEL = "openai/gpt-oss-120b";
 
 type ChatMessage = {
   role: "system" | "user" | "assistant";
@@ -20,6 +19,12 @@ type CreditRow = {
   feature_key: string;
   balance: number;
   total_granted: number;
+  total_used: number;
+};
+
+type CreditResult = {
+  success: true;
+  balance: number;
   total_used: number;
 };
 
@@ -98,12 +103,10 @@ async function ensureGuestCredits(
     return;
   }
 
-  const {
-    data,
-    error,
-  } = await supabase.rpc(
-    "setup_guest_chat_credits"
-  );
+  const { data, error } =
+    await supabase.rpc(
+      "setup_guest_chat_credits"
+    );
 
   if (error) {
     console.error(
@@ -128,30 +131,19 @@ async function ensureGuestCredits(
   }
 }
 
-/**
- * Atomically consumes exactly ONE Chat Credit.
- *
- * We first lock the wallet row using a transaction-like
- * PostgreSQL RPC. Because a normal Supabase .update()
- * cannot safely perform balance = balance - 1 under
- * concurrent requests, this route uses the database
- * function below.
- */
 async function consumeOneChatCredit(
   supabase: Awaited<
     ReturnType<typeof createServerSupabaseClient>
   >
-) {
-  const {
-    data,
-    error,
-  } = await supabase.rpc(
-    "consume_feature_credit",
-    {
-      p_feature_key: "chat",
-      p_amount: 1,
-    }
-  );
+): Promise<CreditResult> {
+  const { data, error } =
+    await supabase.rpc(
+      "consume_feature_credit",
+      {
+        p_feature_key: "chat",
+        p_amount: 1,
+      }
+    );
 
   if (error) {
     console.error(
@@ -179,7 +171,8 @@ async function consumeOneChatCredit(
       | null;
 
     if (
-      result?.error === "INSUFFICIENT_CREDITS"
+      result?.error ===
+      "INSUFFICIENT_CREDITS"
     ) {
       throw new Error(
         "You don't have enough Chat Credits."
@@ -191,11 +184,7 @@ async function consumeOneChatCredit(
     );
   }
 
-  return data as {
-    success: true;
-    balance: number;
-    total_used: number;
-  };
+  return data as CreditResult;
 }
 
 export async function POST(
@@ -205,10 +194,11 @@ export async function POST(
     const supabase =
       await createServerSupabaseClient();
 
-    const user = await getAuthenticatedUser(
-      request,
-      supabase
-    );
+    const user =
+      await getAuthenticatedUser(
+        request,
+        supabase
+      );
 
     if (!user) {
       return jsonError(
@@ -235,7 +225,9 @@ export async function POST(
     if (rawMessages) {
       messages = rawMessages
         .filter(
-          (message: unknown): message is ChatMessage =>
+          (
+            message: unknown
+          ): message is ChatMessage =>
             Boolean(
               message &&
                 typeof message === "object" &&
@@ -243,20 +235,30 @@ export async function POST(
                 "content" in message
             )
         )
-        .map((message) => ({
-          role:
-            message.role === "assistant"
-              ? "assistant"
-              : message.role === "system"
-              ? "system"
-              : "user",
-          content:
-            typeof message.content === "string"
-              ? message.content
-              : String(message.content ?? ""),
-        }))
+        .map(
+          (
+            message: ChatMessage
+          ): ChatMessage => ({
+            role:
+              message.role === "assistant"
+                ? "assistant"
+                : message.role === "system"
+                ? "system"
+                : "user",
+
+            content:
+              typeof message.content ===
+              "string"
+                ? message.content
+                : String(
+                    message.content ?? ""
+                  ),
+          })
+        )
         .filter(
-          (message) =>
+          (
+            message: ChatMessage
+          ): boolean =>
             message.content.trim().length > 0
         );
     } else if (
@@ -278,11 +280,14 @@ export async function POST(
       );
     }
 
-    const hasUserMessage = messages.some(
-      (message) =>
-        message.role === "user" &&
-        message.content.trim().length > 0
-    );
+    const hasUserMessage =
+      messages.some(
+        (
+          message: ChatMessage
+        ): boolean =>
+          message.role === "user" &&
+          message.content.trim().length > 0
+      );
 
     if (!hasUserMessage) {
       return jsonError(
@@ -310,11 +315,8 @@ export async function POST(
       DEFAULT_MODEL;
 
     /*
-     * IMPORTANT:
-     *
-     * Do NOT deduct before Groq is successful.
-     *
-     * We first verify that a credit exists.
+     * Check the current Chat Credit balance
+     * before sending the request to Groq.
      */
     const {
       data: creditRow,
@@ -350,14 +352,13 @@ export async function POST(
       );
     }
 
-    if (
-      Number(wallet.balance) < 1
-    ) {
+    if (Number(wallet.balance) < 1) {
       return jsonError(
         "You don't have enough Chat Credits.",
         402,
         {
-          errorCode: "INSUFFICIENT_CREDITS",
+          errorCode:
+            "INSUFFICIENT_CREDITS",
           balance: Number(wallet.balance),
         }
       );
@@ -378,18 +379,22 @@ export async function POST(
         GROQ_URL,
         {
           method: "POST",
+
           headers: {
             "Content-Type":
               "application/json",
+
             Authorization:
               `Bearer ${groqApiKey}`,
           },
+
           body: JSON.stringify({
             model,
             messages,
             stream: true,
             temperature: 0.7,
           }),
+
           signal: controller.signal,
         }
       );
@@ -424,7 +429,8 @@ export async function POST(
           typeof providerMessage ===
           "string"
         ) {
-          groqError = providerMessage;
+          groqError =
+            providerMessage;
         }
 
         console.error(
@@ -454,17 +460,13 @@ export async function POST(
     }
 
     /*
-     * At this point Groq accepted the request and
-     * returned a valid stream.
+     * Groq successfully accepted the request.
+     * Consume exactly ONE Chat Credit.
      *
-     * We consume exactly ONE credit for this
-     * successful AI message.
+     * Short message = 1 credit
+     * Long message = 1 credit
      */
-    let creditResult: {
-      success: true;
-      balance: number;
-      total_used: number;
-    };
+    let creditResult: CreditResult;
 
     try {
       creditResult =
@@ -485,15 +487,6 @@ export async function POST(
       );
     }
 
-    /*
-     * Transform Groq's OpenAI-compatible SSE
-     * into the exact format used by the
-     * existing ZUQEN homepage parser:
-     *
-     * data: {"content":"..."}
-     *
-     * data: [DONE]
-     */
     const encoder =
       new TextEncoder();
 
@@ -505,7 +498,9 @@ export async function POST(
 
     const stream =
       new ReadableStream<Uint8Array>({
-        async start(controller) {
+        async start(
+          controller
+        ) {
           let buffer = "";
 
           try {
@@ -519,10 +514,13 @@ export async function POST(
                 break;
               }
 
-              buffer += decoder.decode(
-                value,
-                { stream: true }
-              );
+              buffer +=
+                decoder.decode(
+                  value,
+                  {
+                    stream: true,
+                  }
+                );
 
               const lines =
                 buffer.split("\n");
@@ -530,21 +528,29 @@ export async function POST(
               buffer =
                 lines.pop() || "";
 
-              for (const rawLine of lines) {
+              for (
+                const rawLine of lines
+              ) {
                 const line =
                   rawLine.trim();
 
                 if (
                   !line ||
-                  !line.startsWith("data:")
+                  !line.startsWith(
+                    "data:"
+                  )
                 ) {
                   continue;
                 }
 
                 const data =
-                  line.slice(5).trim();
+                  line
+                    .slice(5)
+                    .trim();
 
-                if (data === "[DONE]") {
+                if (
+                  data === "[DONE]"
+                ) {
                   continue;
                 }
 
@@ -558,7 +564,7 @@ export async function POST(
 
                   if (
                     typeof content ===
-                    "string" &&
+                      "string" &&
                     content.length > 0
                   ) {
                     controller.enqueue(
@@ -572,21 +578,22 @@ export async function POST(
                 } catch {
                   /*
                    * Ignore malformed provider
-                   * chunks rather than breaking
-                   * the entire stream.
+                   * chunks.
                    */
                 }
               }
             }
 
             /*
-             * Process any final buffered SSE line.
+             * Process final buffered SSE line.
              */
             const finalLine =
               buffer.trim();
 
             if (
-              finalLine.startsWith("data:")
+              finalLine.startsWith(
+                "data:"
+              )
             ) {
               const data =
                 finalLine
@@ -607,7 +614,7 @@ export async function POST(
 
                   if (
                     typeof content ===
-                    "string" &&
+                      "string" &&
                     content.length > 0
                   ) {
                     controller.enqueue(
@@ -619,7 +626,7 @@ export async function POST(
                     );
                   }
                 } catch {
-                  // Ignore final malformed chunk.
+                  // Ignore malformed final chunk.
                 }
               }
             }
@@ -659,12 +666,16 @@ export async function POST(
 
     return new Response(stream, {
       status: 200,
+
       headers: {
         "Content-Type":
           "text/event-stream; charset=utf-8",
+
         "Cache-Control":
           "no-cache, no-transform",
+
         Connection: "keep-alive",
+
         "X-ZUQEN-Chat-Credit-Balance":
           String(
             creditResult.balance
