@@ -229,9 +229,47 @@ async function downloadPackageToTempFile(
     let totalBytes = 0;
 
     try {
-      for await (
-        const chunk of response.body as AsyncIterable<Uint8Array>
-      ) {
+    const reader = response.body.getReader();
+
+try {
+  while (true) {
+    const { done, value } = await reader.read();
+
+    if (done) {
+      break;
+    }
+
+    if (!value) {
+      continue;
+    }
+
+    totalBytes += value.byteLength;
+
+    if (totalBytes > MAX_PACKAGE_SIZE) {
+      throw new Error(
+        "Template package exceeds the maximum supported size."
+      );
+    }
+
+    if (
+      expectedSize > 0 &&
+      totalBytes > expectedSize
+    ) {
+      throw new Error(
+        "Downloaded package is larger than its stored metadata."
+      );
+    }
+
+    if (!output.write(Buffer.from(value))) {
+      await new Promise<void>((resolve, reject) => {
+        output.once("drain", resolve);
+        output.once("error", reject);
+      });
+    }
+  }
+} finally {
+  reader.releaseLock();
+}
         totalBytes += chunk.byteLength;
 
         if (
