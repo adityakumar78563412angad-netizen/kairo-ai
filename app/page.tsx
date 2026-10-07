@@ -321,14 +321,13 @@ export default function HomePage() {
   const [chats, setChats] = useState<Chat[]>([]);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
-
+const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
 
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [searchOpen, setSearchOpen] = useState(false);
   const [search, setSearch] = useState("");
-
   const [agentOpen, setAgentOpen] = useState(false);
   const [selectedAgent, setSelectedAgent] = useState("ZUQEN AI");
 
@@ -652,6 +651,13 @@ export default function HomePage() {
       streamAbortRef.current?.abort();
     };
   }, [initializeAuth, loadChats, loadChatCredits]);
+
+useEffect(() => {
+  messagesEndRef.current?.scrollIntoView({
+    behavior: "smooth",
+    block: "end",
+  });
+}, [messages]);
 
   const handleAuthNavigation = useCallback(() => {
     window.location.href = "/auth";
@@ -3716,6 +3722,7 @@ export default function HomePage() {
                                       regenerate
                                     </button>
                                   </div>
+                                
                                 </div>
                               ) : (
                                 <>
@@ -3828,7 +3835,9 @@ export default function HomePage() {
                       }
                     )
                   )}
+                   <div ref={messagesEndRef} />
                 </div>
+               
               </div>
 
               <div className="zuqen-composer-area">
