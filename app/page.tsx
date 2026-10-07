@@ -2538,15 +2538,27 @@ export default function HomePage() {
           font-size: 9px;
         }
 
-        .zuqen-message-bubble {
-          padding: 17px 19px;
-          border: 1px solid var(--border);
-          border-radius: 17px;
-          font-size: 14px;
-          line-height: 1.75;
-          white-space: pre-wrap;
-          word-break: break-word;
-        }
+      .zuqen-message-bubble {
+  width: fit-content;
+  max-width: min(80%, 760px);
+  box-sizing: border-box;
+  padding: 12px 15px;
+  border-radius: 16px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: pre-wrap;
+  line-height: 1.6;
+}
+
+.zuqen-message-row.user
+  .zuqen-message-bubble {
+  margin-left: auto;
+}
+
+.zuqen-message-row.assistant
+  .zuqen-message-bubble {
+  margin-right: auto;
+}
 
         .user .zuqen-message-bubble {
           background: var(--panel-2);
