@@ -322,6 +322,9 @@ export default function HomePage() {
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
 const messagesEndRef = useRef<HTMLDivElement | null>(null);
+const messagesContainerRef = useRef<HTMLDivElement | null>(null);
+const [showScrollToBottom, setShowScrollToBottom] =
+  useState(false);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -658,6 +661,47 @@ useEffect(() => {
     block: "end",
   });
 }, [messages]);
+
+useEffect(() => {
+  const container = messagesContainerRef.current;
+
+  if (!container) return;
+
+  const handleScroll = () => {
+    const distanceFromBottom =
+      container.scrollHeight -
+      container.scrollTop -
+      container.clientHeight;
+
+    setShowScrollToBottom(
+      distanceFromBottom > 250
+    );
+  };
+
+  container.addEventListener(
+    "scroll",
+    handleScroll,
+    { passive: true }
+  );
+
+  handleScroll();
+
+  return () => {
+    container.removeEventListener(
+      "scroll",
+      handleScroll
+    );
+  };
+}, []);
+
+const scrollToLatest = useCallback(() => {
+  messagesEndRef.current?.scrollIntoView({
+    behavior: "smooth",
+    block: "end",
+  });
+
+  setShowScrollToBottom(false);
+}, []);
 
   const handleAuthNavigation = useCallback(() => {
     window.location.href = "/auth";
@@ -2486,10 +2530,11 @@ useEffect(() => {
         }
 
         .zuqen-messages {
-          flex: 1;
-          overflow-y: auto;
-          padding: 40px 25px 28px;
-        }
+  position: relative;
+  flex: 1;
+  overflow-y: auto;
+  padding: 40px 25px 28px;
+}
 
         .zuqen-message-list {
           width: min(930px, 100%);
@@ -2500,6 +2545,55 @@ useEffect(() => {
           display: flex;
           margin-bottom: 31px;
         }
+
+.zuqen-scroll-latest {
+  position: absolute;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+
+  height: 36px;
+  padding: 0 14px;
+
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+
+  background: var(--panel-2);
+  color: var(--text);
+
+  box-shadow: 0 10px 30px rgba(0,0,0,.22);
+
+  font-size: 11px;
+  font-weight: 700;
+
+  cursor: pointer;
+  z-index: 10;
+
+  backdrop-filter: blur(14px);
+
+  transition:
+    transform .2s ease,
+    background .2s ease,
+    border-color .2s ease,
+    box-shadow .2s ease;
+}
+
+.zuqen-scroll-latest:hover {
+  transform: translateX(-50%) translateY(-2px);
+  background: var(--panel-3);
+  border-color: var(--border-strong);
+  box-shadow: 0 14px 36px rgba(0,0,0,.28);
+}
+
+.zuqen-scroll-latest span {
+  font-size: 10px;
+  letter-spacing: .2px;
+}
 
         .zuqen-message-row.user {
           justify-content: flex-start;
@@ -3619,7 +3713,10 @@ useEffect(() => {
           ) : activeChatId &&
             activeChat ? (
             <div className="zuqen-chat-view">
-              <div className="zuqen-messages">
+            <div
+  className="zuqen-messages"
+  ref={messagesContainerRef}
+>
                 <div className="zuqen-message-list">
                   {messages.length ===
                   0 ? (
@@ -3836,6 +3933,17 @@ useEffect(() => {
                     )
                   )}
                    <div ref={messagesEndRef} />
+                   {showScrollToBottom && (
+  <button
+    className="zuqen-scroll-latest"
+    onClick={scrollToLatest}
+    aria-label="Jump to latest message"
+    title="Jump to latest"
+  >
+    ↓
+    <span>Latest</span>
+  </button>
+)}
                 </div>
                
               </div>
