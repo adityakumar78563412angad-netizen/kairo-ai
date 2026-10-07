@@ -315,8 +315,8 @@ export async function POST(
       DEFAULT_MODEL;
 
     /*
-     * Check the current Chat Credit balance
-     * before sending the request to Groq.
+     * Check credit balance before sending
+     * the request to Groq.
      */
     const {
       data: creditRow,
@@ -463,8 +463,7 @@ export async function POST(
      * Groq successfully accepted the request.
      * Consume exactly ONE Chat Credit.
      *
-     * Short message = 1 credit
-     * Long message = 1 credit
+     * 1 message = 1 credit.
      */
     let creditResult: CreditResult;
 
@@ -548,6 +547,10 @@ export async function POST(
                     .slice(5)
                     .trim();
 
+                /*
+                 * Groq sends [DONE] internally.
+                 * Do NOT forward it to the frontend.
+                 */
                 if (
                   data === "[DONE]"
                 ) {
@@ -585,7 +588,7 @@ export async function POST(
             }
 
             /*
-             * Process final buffered SSE line.
+             * Process the final buffered line.
              */
             const finalLine =
               buffer.trim();
@@ -600,6 +603,9 @@ export async function POST(
                   .slice(5)
                   .trim();
 
+              /*
+               * Never send [DONE] to the frontend.
+               */
               if (
                 data &&
                 data !== "[DONE]"
@@ -631,12 +637,10 @@ export async function POST(
               }
             }
 
-            controller.enqueue(
-              encoder.encode(
-                sse("[DONE]")
-              )
-            );
-
+            /*
+             * Close the stream without sending
+             * a visible [DONE] message.
+             */
             controller.close();
           } catch (error) {
             console.error(
@@ -650,12 +654,6 @@ export async function POST(
                   error:
                     "ZUQEN AI response stream failed.",
                 })
-              )
-            );
-
-            controller.enqueue(
-              encoder.encode(
-                sse("[DONE]")
               )
             );
 
