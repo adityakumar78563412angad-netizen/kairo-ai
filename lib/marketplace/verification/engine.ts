@@ -8,17 +8,9 @@ import path from "node:path";
 import { createServerSupabaseClient } from "@/lib/supabase-server";
 import { createB2DownloadUrl } from "@/lib/marketplace/b2";
 
-import {
-  normalizeVerificationResult,
-} from "./rule";
-
-import {
-  verifyTemplateWithGemini,
-} from "./gemini";
-
-import {
-  inspectTemplatePackage,
-} from "./package-inspector";
+import { normalizeVerificationResult } from "./rule";
+import { verifyTemplateWithGemini } from "./gemini";
+import { inspectTemplatePackage } from "./package-inspector";
 
 import type {
   VerificationMediaInput,
@@ -50,28 +42,18 @@ type TemplateFileRow = {
   storage_region: string | null;
 };
 
-const MAX_PACKAGE_SIZE =
-  2 * 1024 * 1024 * 1024;
+const MAX_PACKAGE_SIZE = 2 * 1024 * 1024 * 1024;
+const PACKAGE_DOWNLOAD_TIMEOUT_MS = 5 * 60 * 1000;
 
-const PACKAGE_DOWNLOAD_TIMEOUT_MS =
-  5 * 60 * 1000;
-
-function isValidStorageFile(
-  file: TemplateFileRow
-) {
+function isValidStorageFile(file: TemplateFileRow) {
   return (
-    file.storage_provider ===
-      "backblaze_b2" &&
-    Boolean(
-      file.storage_object_key?.trim()
-    ) &&
+    file.storage_provider === "backblaze_b2" &&
+    Boolean(file.storage_object_key?.trim()) &&
     Number(file.file_size || 0) > 0
   );
 }
 
-function getMimeType(
-  file: TemplateFileRow
-): string {
+function getMimeType(file: TemplateFileRow): string {
   if (
     typeof file.content_type === "string" &&
     file.content_type.trim()
@@ -79,42 +61,29 @@ function getMimeType(
     return file.content_type;
   }
 
-  const fileName =
-    file.file_name?.toLowerCase() || "";
+  const fileName = file.file_name?.toLowerCase() || "";
 
-  if (
-    fileName.endsWith(".zip")
-  ) {
+  if (fileName.endsWith(".zip")) {
     return "application/zip";
   }
 
-  if (
-    fileName.endsWith(".mp4")
-  ) {
+  if (fileName.endsWith(".mp4")) {
     return "video/mp4";
   }
 
-  if (
-    fileName.endsWith(".webm")
-  ) {
+  if (fileName.endsWith(".webm")) {
     return "video/webm";
   }
 
-  if (
-    fileName.endsWith(".png")
-  ) {
+  if (fileName.endsWith(".png")) {
     return "image/png";
   }
 
-  if (
-    fileName.endsWith(".webp")
-  ) {
+  if (fileName.endsWith(".webp")) {
     return "image/webp";
   }
 
-  if (
-    fileName.endsWith(".gif")
-  ) {
+  if (fileName.endsWith(".gif")) {
     return "image/gif";
   }
 
@@ -122,229 +91,162 @@ function getMimeType(
 }
 
 async function createMediaUrl(
-  file: TemplateFileRow
+  file: TemplateFileRow,
 ): Promise<string> {
   if (!file.storage_object_key) {
     throw new Error(
-      `Storage object key is missing for file ${file.id}.`
+      `Storage object key is missing for file ${file.id}.`,
     );
   }
 
-  return createB2DownloadUrl(
-    file.storage_object_key
-  );
+  return createB2DownloadUrl(file.storage_object_key);
 }
 
-/**
- * Downloads a marketplace package from B2
- * into a temporary server-side file.
- *
- * The package is never executed.
- */
 async function downloadPackageToTempFile(
-  file: TemplateFileRow
+  file: TemplateFileRow,
 ): Promise<string> {
   if (!file.storage_object_key) {
     throw new Error(
-      `Storage object key is missing for package ${file.id}.`
+      `Storage object key is missing for package ${file.id}.`,
     );
   }
 
-  const expectedSize = Number(
-    file.file_size || 0
-  );
+  const expectedSize = Number(file.file_size || 0);
 
   if (
     expectedSize <= 0 ||
     expectedSize > MAX_PACKAGE_SIZE
   ) {
     throw new Error(
-      "Template package size is invalid or exceeds the allowed limit."
+      "Template package size is invalid or exceeds the allowed limit.",
     );
   }
 
-  const signedUrl =
-    await createB2DownloadUrl(
-      file.storage_object_key
-    );
-
-  const controller =
-    new AbortController();
-
-  const timeout = setTimeout(
-    () => controller.abort(),
-    PACKAGE_DOWNLOAD_TIMEOUT_MS
+  const signedUrl = await createB2DownloadUrl(
+    file.storage_object_key,
   );
+
+  const controller = new AbortController();
+
+  const timeout = setTimeout(() => {
+    controller.abort();
+  }, PACKAGE_DOWNLOAD_TIMEOUT_MS);
 
   const tempFile = path.join(
     os.tmpdir(),
-    `zuqen-marketplace-package-${crypto.randomUUID()}.zip`
+    `zuqen-marketplace-package-${crypto.randomUUID()}.zip`,
   );
 
   try {
-    const response = await fetch(
-      signedUrl,
-      {
-        method: "GET",
-        signal: controller.signal,
-        cache: "no-store",
-      }
-    );
+    const response = await fetch(signedUrl, {
+      method: "GET",
+      signal: controller.signal,
+      cache: "no-store",
+    });
 
     if (!response.ok) {
       throw new Error(
-        `Unable to download template package from storage. HTTP ${response.status}.`
+        `Unable to download template package from storage. HTTP ${response.status}.`,
       );
     }
 
     const contentLength =
-      response.headers.get(
-        "content-length"
-      );
+      response.headers.get("content-length");
 
     if (
       contentLength &&
-      Number(contentLength) >
-        MAX_PACKAGE_SIZE
+      Number(contentLength) > MAX_PACKAGE_SIZE
     ) {
       throw new Error(
-        "Template package exceeds the maximum supported size."
+        "Template package exceeds the maximum supported size.",
       );
     }
 
     if (!response.body) {
       throw new Error(
-        "Template package download returned an empty response body."
+        "Template package download returned an empty response body.",
       );
     }
 
-    const output =
-      fs.createWriteStream(
-        tempFile,
-        {
-          flags: "wx",
-        }
-      );
+    const output = fs.createWriteStream(tempFile, {
+      flags: "wx",
+    });
 
     let totalBytes = 0;
 
     try {
-    const reader = response.body.getReader();
+      const reader = response.body.getReader();
 
-try {
-  while (true) {
-    const { done, value } = await reader.read();
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
 
-    if (done) {
-      break;
-    }
+          if (done) {
+            break;
+          }
 
-    if (!value) {
-      continue;
-    }
+          if (!value) {
+            continue;
+          }
 
-    totalBytes += value.byteLength;
+          totalBytes += value.byteLength;
 
-    if (totalBytes > MAX_PACKAGE_SIZE) {
-      throw new Error(
-        "Template package exceeds the maximum supported size."
-      );
-    }
+          if (totalBytes > MAX_PACKAGE_SIZE) {
+            throw new Error(
+              "Template package exceeds the maximum supported size.",
+            );
+          }
 
-    if (
-      expectedSize > 0 &&
-      totalBytes > expectedSize
-    ) {
-      throw new Error(
-        "Downloaded package is larger than its stored metadata."
-      );
-    }
+          if (
+            expectedSize > 0 &&
+            totalBytes > expectedSize
+          ) {
+            throw new Error(
+              "Downloaded package is larger than its stored metadata.",
+            );
+          }
 
-    if (!output.write(Buffer.from(value))) {
-      await new Promise<void>((resolve, reject) => {
-        output.once("drain", resolve);
-        output.once("error", reject);
-      });
-    }
-  }
-} finally {
-  reader.releaseLock();
-}
-        totalBytes += chunk.byteLength;
-
-        if (
-          totalBytes >
-          MAX_PACKAGE_SIZE
-        ) {
-          throw new Error(
-            "Template package exceeds the maximum supported size."
-          );
+          if (!output.write(Buffer.from(value))) {
+            await new Promise<void>((resolve, reject) => {
+              output.once("drain", resolve);
+              output.once("error", reject);
+            });
+          }
         }
-
-        if (
-          expectedSize > 0 &&
-          totalBytes > expectedSize
-        ) {
-          throw new Error(
-            "Downloaded package is larger than its stored metadata."
-          );
-        }
-
-        if (
-          !output.write(
-            Buffer.from(chunk)
-          )
-        ) {
-          await new Promise<void>(
-            (resolve, reject) => {
-              output.once(
-                "drain",
-                resolve
-              );
-              output.once(
-                "error",
-                reject
-              );
-            }
-          );
-        }
+      } finally {
+        reader.releaseLock();
       }
 
-      await new Promise<void>(
-        (resolve, reject) => {
-          output.end(() => resolve());
-          output.once(
-            "error",
-            reject
-          );
-        }
-      );
+      await new Promise<void>((resolve, reject) => {
+        output.end(() => resolve());
+        output.once("error", reject);
+      });
     } catch (error) {
       output.destroy();
+
+      await fs.promises
+        .rm(tempFile, { force: true })
+        .catch(() => undefined);
 
       throw error;
     }
 
-    const downloadedStat =
-      await fs.promises.stat(
-        tempFile
-      );
+    const downloadedStat = await fs.promises.stat(
+      tempFile,
+    );
 
-    if (
-      downloadedStat.size <= 0
-    ) {
+    if (downloadedStat.size <= 0) {
       throw new Error(
-        "Downloaded template package is empty."
+        "Downloaded template package is empty.",
       );
     }
 
     if (
       expectedSize > 0 &&
-      downloadedStat.size !==
-        expectedSize
+      downloadedStat.size !== expectedSize
     ) {
       throw new Error(
-        "Downloaded package size does not match stored file metadata."
+        "Downloaded package size does not match stored file metadata.",
       );
     }
 
@@ -355,55 +257,41 @@ try {
 }
 
 async function safelyRemoveTempFile(
-  filePath: string | null
+  filePath: string | null,
 ) {
-  if (!filePath) return;
+  if (!filePath) {
+    return;
+  }
 
   try {
-    await fs.promises.rm(
-      filePath,
-      {
-        force: true,
-      }
-    );
+    await fs.promises.rm(filePath, {
+      force: true,
+    });
   } catch {
-    // Cleanup failure must not hide the actual verification result.
+    // Ignore cleanup errors.
   }
 }
 
 function packageInspectionToChecks(
   packageInspection: Awaited<
     ReturnType<typeof inspectTemplatePackage>
-  >
+  >,
 ) {
   return {
-    status:
-      packageInspection.status,
-
-    package_type:
-      packageInspection.packageType,
-
-    archive_size:
-      packageInspection.archiveSize,
-
-    entry_count:
-      packageInspection.entryCount,
-
+    status: packageInspection.status,
+    package_type: packageInspection.packageType,
+    archive_size: packageInspection.archiveSize,
+    entry_count: packageInspection.entryCount,
     total_uncompressed_size:
       packageInspection.totalUncompressedSize,
-
     compression_ratio:
       packageInspection.compressionRatio,
-
     framework_hints:
       packageInspection.frameworkHints,
-
     important_files:
       packageInspection.importantFiles,
-
     suspicious_files:
       packageInspection.suspiciousFiles,
-
     findings:
       packageInspection.findings,
   };
@@ -417,23 +305,17 @@ function determineFinalResult(
   packageStatus:
     | "pass"
     | "warning"
-    | "fail"
+    | "fail",
 ):
   | "verified"
   | "review_required"
   | "rejected" {
-  if (
-    packageStatus === "fail"
-  ) {
+  if (packageStatus === "fail") {
     return "rejected";
   }
 
-  if (
-    packageStatus === "warning"
-  ) {
-    if (
-      aiResult === "rejected"
-    ) {
+  if (packageStatus === "warning") {
+    if (aiResult === "rejected") {
       return "rejected";
     }
 
@@ -448,38 +330,24 @@ function adjustScore(
   packageStatus:
     | "pass"
     | "warning"
-    | "fail"
+    | "fail",
 ): number {
-  if (
-    packageStatus === "fail"
-  ) {
-    return Math.min(
-      score,
-      59
-    );
+  if (packageStatus === "fail") {
+    return Math.min(score, 59);
   }
 
-  if (
-    packageStatus === "warning"
-  ) {
-    return Math.min(
-      score,
-      81
-    );
+  if (packageStatus === "warning") {
+    return Math.min(score, 81);
   }
 
   return score;
 }
 
 export async function runTemplateVerification(
-  verificationId: string
+  verificationId: string,
 ) {
   const supabase =
     await createServerSupabaseClient();
-
-  /*
-   * Load verification record.
-   */
 
   const {
     data: verification,
@@ -493,65 +361,40 @@ export async function runTemplateVerification(
         version_id,
         status,
         result
-      `
+      `,
     )
-    .eq(
-      "id",
-      verificationId
-    )
+    .eq("id", verificationId)
     .single();
 
   if (verificationError) {
     throw new Error(
-      `Unable to load verification: ${verificationError.message}`
+      `Unable to load verification: ${verificationError.message}`,
     );
   }
 
-  /*
-   * Prevent duplicate processing.
-   */
-
-  if (
-    verification.status ===
-    "completed"
-  ) {
+  if (verification.status === "completed") {
     return verification;
   }
 
-  /*
-   * Mark as processing.
-   */
-
-  const {
-    error: processingError,
-  } = await supabase
-    .from("template_verifications")
-    .update({
-      status: "processing",
-      started_at:
-        new Date().toISOString(),
-      error_message: null,
-    })
-    .eq(
-      "id",
-      verificationId
-    );
+  const { error: processingError } =
+    await supabase
+      .from("template_verifications")
+      .update({
+        status: "processing",
+        started_at: new Date().toISOString(),
+        error_message: null,
+      })
+      .eq("id", verificationId);
 
   if (processingError) {
     throw new Error(
-      `Unable to start verification: ${processingError.message}`
+      `Unable to start verification: ${processingError.message}`,
     );
   }
 
-  let packageTempFile:
-    | string
-    | null = null;
+  let packageTempFile: string | null = null;
 
   try {
-    /*
-     * Load template metadata.
-     */
-
     const {
       data: template,
       error: templateError,
@@ -569,27 +412,17 @@ export async function runTemplateVerification(
           requirements,
           tech_stack,
           license
-        `
+        `,
       )
-      .eq(
-        "id",
-        verification.template_id
-      )
+      .eq("id", verification.template_id)
       .single();
 
-    if (
-      templateError ||
-      !template
-    ) {
+    if (templateError || !template) {
       throw new Error(
         templateError?.message ||
-          "Template not found."
+          "Template not found.",
       );
     }
-
-    /*
-     * Load marketplace files.
-     */
 
     const {
       data: files,
@@ -607,288 +440,186 @@ export async function runTemplateVerification(
           storage_bucket,
           storage_object_key,
           storage_region
-        `
+        `,
       )
-      .eq(
-        "template_id",
-        verification.template_id
-      );
+      .eq("template_id", verification.template_id);
 
     if (filesError) {
       throw new Error(
-        `Unable to load template files: ${filesError.message}`
+        `Unable to load template files: ${filesError.message}`,
       );
     }
 
     const validFiles =
-      (
-        (files || []) as TemplateFileRow[]
-      ).filter(
-        isValidStorageFile
+      ((files || []) as TemplateFileRow[]).filter(
+        isValidStorageFile,
       );
 
-    /*
-     * Find required verification assets.
-     */
+    const thumbnail = validFiles.find(
+      (file) => file.file_role === "thumbnail",
+    );
 
-    const thumbnail =
-      validFiles.find(
-        (file) =>
-          file.file_role ===
-          "thumbnail"
-      );
+    const screenshots = validFiles.filter(
+      (file) => file.file_role === "screenshot",
+    );
 
-    const screenshots =
-      validFiles.filter(
-        (file) =>
-          file.file_role ===
-          "screenshot"
-      );
-
-    const demoVideo =
-      validFiles.find(
-        (file) =>
-          file.file_role ===
-          "demo_video"
-      );
-
-    /*
-     * Template package.
-     *
-     * We accept the explicit "template" role.
-     * ZIP content type / filename is used as a
-     * safe fallback for older marketplace records.
-     */
+    const demoVideo = validFiles.find(
+      (file) => file.file_role === "demo_video",
+    );
 
     const templatePackage =
       validFiles.find(
-        (file) =>
-          file.file_role ===
-          "template"
+        (file) => file.file_role === "template",
       ) ??
-      validFiles.find(
-        (file) => {
-          const name =
-            file.file_name
-              ?.toLowerCase() || "";
+      validFiles.find((file) => {
+        const name =
+          file.file_name?.toLowerCase() || "";
 
-          const mime =
-            file.content_type
-              ?.toLowerCase() || "";
+        const mime =
+          file.content_type?.toLowerCase() || "";
 
-          return (
-            name.endsWith(".zip") ||
-            mime ===
-              "application/zip" ||
-            mime ===
-              "application/x-zip-compressed"
-          );
-        }
-      );
+        return (
+          name.endsWith(".zip") ||
+          mime === "application/zip" ||
+          mime === "application/x-zip-compressed"
+        );
+      });
 
     if (!templatePackage) {
       throw new Error(
-        "Template verification requires the uploaded template package."
+        "Template verification requires the uploaded template package.",
       );
     }
 
     if (!thumbnail) {
       throw new Error(
-        "Template verification requires a thumbnail."
+        "Template verification requires a thumbnail.",
       );
     }
 
-    if (
-      screenshots.length === 0
-    ) {
+    if (screenshots.length === 0) {
       throw new Error(
-        "Template verification requires at least one screenshot."
+        "Template verification requires at least one screenshot.",
       );
     }
 
     if (!demoVideo) {
       throw new Error(
-        "Template verification requires a demo video."
+        "Template verification requires a demo video.",
       );
     }
 
     /*
-     * ---------------------------------------------------------
-     * STEP 1 — Secure package inspection
-     * ---------------------------------------------------------
-     *
-     * The package is downloaded to a temporary file.
-     *
-     * It is NEVER executed.
+     * Package inspection.
+     * The uploaded package is NEVER executed.
      */
 
     packageTempFile =
       await downloadPackageToTempFile(
-        templatePackage
+        templatePackage,
       );
 
     const packageInspection =
       await inspectTemplatePackage(
         packageTempFile,
-        Number(
-          templatePackage.file_size || 0
-        )
+        Number(templatePackage.file_size || 0),
       );
 
     /*
-     * ---------------------------------------------------------
-     * STEP 2 — Build media inputs
-     * ---------------------------------------------------------
+     * Build media inputs.
      */
 
-    const media:
-      VerificationMediaInput[] =
-      [];
+    const media: VerificationMediaInput[] = [];
 
     const thumbnailUrl =
-      await createMediaUrl(
-        thumbnail
-      );
+      await createMediaUrl(thumbnail);
 
     media.push({
       source: "thumbnail",
-      mimeType:
-        getMimeType(
-          thumbnail
-        ),
-      fileUri:
-        thumbnailUrl,
+      mimeType: getMimeType(thumbnail),
+      fileUri: thumbnailUrl,
     });
 
-    /*
-     * Limit screenshots to eight.
-     */
-
     const selectedScreenshots =
-      screenshots.slice(
-        0,
-        8
-      );
+      screenshots.slice(0, 8);
 
-    for (
-      const screenshot of
-        selectedScreenshots
-    ) {
+    for (const screenshot of selectedScreenshots) {
       const screenshotUrl =
-        await createMediaUrl(
-          screenshot
-        );
+        await createMediaUrl(screenshot);
 
       media.push({
         source: "screenshot",
-        mimeType:
-          getMimeType(
-            screenshot
-          ),
-        fileUri:
-          screenshotUrl,
+        mimeType: getMimeType(screenshot),
+        fileUri: screenshotUrl,
       });
     }
 
     const demoVideoUrl =
-      await createMediaUrl(
-        demoVideo
-      );
+      await createMediaUrl(demoVideo);
 
     media.push({
       source: "demo_video",
-      mimeType:
-        getMimeType(
-          demoVideo
-        ),
-      fileUri:
-        demoVideoUrl,
+      mimeType: getMimeType(demoVideo),
+      fileUri: demoVideoUrl,
     });
 
     /*
-     * ---------------------------------------------------------
-     * STEP 3 — Template metadata
-     * ---------------------------------------------------------
+     * Template metadata.
      */
 
-    const metadata:
-      VerificationTemplateMetadata =
-      {
-        id: template.id,
-        name: template.name,
-        category:
-          template.category,
-        description:
-          template.description,
-        price:
-          template.price,
-        currency:
-          template.currency,
-        features:
-          template.features,
-        requirements:
-          template.requirements,
-        tech_stack:
-          template.tech_stack,
-        license:
-          template.license,
-      };
+    const metadata: VerificationTemplateMetadata = {
+      id: template.id,
+      name: template.name,
+      category: template.category,
+      description: template.description,
+      price: template.price,
+      currency: template.currency,
+      features: template.features,
+      requirements: template.requirements,
+      tech_stack: template.tech_stack,
+      license: template.license,
+    };
 
     /*
-     * ---------------------------------------------------------
-     * STEP 4 — Gemini multimodal verification
-     * ---------------------------------------------------------
+     * Gemini verification.
      */
 
     const aiResponse =
       await verifyTemplateWithGemini(
         metadata,
-        media
+        media,
       );
 
     const normalized =
       normalizeVerificationResult(
-        aiResponse.result
+        aiResponse.result,
       );
 
     /*
-     * ---------------------------------------------------------
-     * STEP 5 — Combine package inspection + AI result
-     * ---------------------------------------------------------
+     * Combine package inspection
+     * with Gemini verification.
      */
 
     const finalResult =
       determineFinalResult(
         normalized.result,
-        packageInspection.status
+        packageInspection.status,
       );
 
     const finalScore =
       adjustScore(
         normalized.overall_score,
-        packageInspection.status
+        packageInspection.status,
       );
-
-    /*
-     * Store package inspection inside checks.
-     *
-     * Existing Gemini checks remain untouched.
-     */
 
     const combinedChecks = {
       ...normalized.checks,
 
       package_inspection:
         packageInspectionToChecks(
-          packageInspection
+          packageInspection,
         ),
     };
-
-    /*
-     * Keep the complete package inspection
-     * inside AI response as well, so the
-     * verification record remains auditable.
-     */
 
     const combinedAIResponse = {
       ...aiResponse.result,
@@ -898,57 +629,33 @@ export async function runTemplateVerification(
     };
 
     /*
-     * ---------------------------------------------------------
-     * STEP 6 — Store completed verification
-     * ---------------------------------------------------------
+     * Save final verification.
      */
 
     const {
       data: completed,
       error: completeError,
     } = await supabase
-      .from(
-        "template_verifications"
-      )
+      .from("template_verifications")
       .update({
         status: "completed",
-
-        result:
-          finalResult,
-
-        verification_score:
-          finalScore,
-
-        checks:
-          combinedChecks,
-
-        findings:
-          normalized.findings,
-
-        evidence:
-          normalized.evidence,
-
-        ai_model:
-          aiResponse.model,
-
-        ai_response:
-          combinedAIResponse,
-
-        completed_at:
-          new Date().toISOString(),
-
+        result: finalResult,
+        verification_score: finalScore,
+        checks: combinedChecks,
+        findings: normalized.findings,
+        evidence: normalized.evidence,
+        ai_model: aiResponse.model,
+        ai_response: combinedAIResponse,
+        completed_at: new Date().toISOString(),
         error_message: null,
       })
-      .eq(
-        "id",
-        verificationId
-      )
+      .eq("id", verificationId)
       .select()
       .single();
 
     if (completeError) {
       throw new Error(
-        `Unable to save verification result: ${completeError.message}`
+        `Unable to save verification result: ${completeError.message}`,
       );
     }
 
@@ -960,29 +667,18 @@ export async function runTemplateVerification(
         : "Template verification failed.";
 
     await supabase
-      .from(
-        "template_verifications"
-      )
+      .from("template_verifications")
       .update({
         status: "failed",
-        error_message:
-          message,
-        completed_at:
-          new Date().toISOString(),
+        error_message: message,
+        completed_at: new Date().toISOString(),
       })
-      .eq(
-        "id",
-        verificationId
-      );
+      .eq("id", verificationId);
 
     throw error;
   } finally {
-    /*
-     * Always remove the temporary
-     * downloaded package.
-     */
     await safelyRemoveTempFile(
-      packageTempFile
+      packageTempFile,
     );
   }
 }
