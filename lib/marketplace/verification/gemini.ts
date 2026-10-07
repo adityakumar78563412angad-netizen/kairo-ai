@@ -404,11 +404,9 @@ async function uploadMediaToGemini(
         file: localPath,
         config: {
           mimeType: item.mimeType,
-          displayName:
-            sanitizeFileName(
-              item.fileName ||
-                "ZUQEN marketplace verification media"
-            ),
+         displayName: sanitizeFileName(
+  `ZUQEN-marketplace-verification-${crypto.randomUUID()}`
+),
         },
       });
 
