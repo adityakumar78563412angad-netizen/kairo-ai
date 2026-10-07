@@ -2550,15 +2550,9 @@ export default function HomePage() {
   line-height: 1.6;
 }
 
-.zuqen-message-row.user
-  .zuqen-message-bubble {
-  margin-left: auto;
-}
 
-.zuqen-message-row.assistant
-  .zuqen-message-bubble {
-  margin-right: auto;
-}
+
+
 
         .user .zuqen-message-bubble {
           background: var(--panel-2);
