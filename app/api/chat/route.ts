@@ -1,442 +1,687 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabaseClient } from "@/lib/supabase-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const MAX_BODY_SIZE = 12000;
-const MAX_MESSAGE_LENGTH = 10000;
+const GROQ_URL =
+  "https://api.groq.com/openai/v1/chat/completions";
+
+const DEFAULT_MODEL =
+  "openai/gpt-oss-120b";
 
 type ChatMessage = {
   role: "system" | "user" | "assistant";
   content: string;
 };
 
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-
-  if (typeof error === "string") return error;
-
-  if (
-    error &&
-    typeof error === "object" &&
-    "message" in error &&
-    typeof error.message === "string"
-  ) {
-    return error.message;
-  }
-
-  return "An unexpected chat error occurred.";
-}
+type CreditRow = {
+  user_id: string;
+  feature_key: string;
+  balance: number;
+  total_granted: number;
+  total_used: number;
+};
 
 function jsonError(
   message: string,
-  status = 500,
-  errorCode = "CHAT_ERROR"
+  status = 400,
+  extra: Record<string, unknown> = {}
 ) {
   return NextResponse.json(
     {
       success: false,
       error: message,
-      errorCode,
+      ...extra,
     },
     { status }
   );
 }
 
-function isValidMessage(value: unknown): value is ChatMessage {
-  if (!value || typeof value !== "object") return false;
-
-  const message = value as Record<string, unknown>;
-
-  return (
-    (message.role === "user" ||
-      message.role === "assistant" ||
-      message.role === "system") &&
-    typeof message.content === "string" &&
-    message.content.trim().length > 0
-  );
+function sse(data: unknown) {
+  return `data: ${JSON.stringify(data)}\n\n`;
 }
 
-export async function POST(request: Request) {
-  try {
-    const contentLength = request.headers.get("content-length");
+async function getAuthenticatedUser(
+  request: NextRequest,
+  supabase: Awaited<
+    ReturnType<typeof createServerSupabaseClient>
+  >
+) {
+  const authorization =
+    request.headers.get("authorization");
 
-    if (contentLength) {
-      const size = Number(contentLength);
+  if (authorization?.startsWith("Bearer ")) {
+    const token = authorization.slice(7).trim();
 
-      if (Number.isFinite(size) && size > MAX_BODY_SIZE) {
-        return jsonError(
-          "Request body is too large.",
-          413,
-          "REQUEST_TOO_LARGE"
+    if (token) {
+      const {
+        data: { user },
+        error,
+      } = await supabase.auth.getUser(token);
+
+      if (user) {
+        return user;
+      }
+
+      if (error) {
+        console.error(
+          "Chat bearer authentication error:",
+          error
         );
       }
     }
+  }
 
-    const supabase = await createServerSupabaseClient();
+  const {
+    data: { user },
+    error,
+  } = await supabase.auth.getUser();
 
-    /*
-     * ---------------------------------------------------------
-     * AUTHENTICATION
-     * ---------------------------------------------------------
-     */
+  if (error) {
+    console.error(
+      "Chat cookie authentication error:",
+      error
+    );
+  }
 
-    const authorization = request.headers.get("authorization");
+  return user ?? null;
+}
 
-    const bearerToken =
-      authorization?.startsWith("Bearer ")
-        ? authorization.slice(7).trim()
-        : "";
+async function ensureGuestCredits(
+  supabase: Awaited<
+    ReturnType<typeof createServerSupabaseClient>
+  >,
+  isAnonymous: boolean
+) {
+  if (!isAnonymous) {
+    return;
+  }
 
-    let user = null;
+  const {
+    data,
+    error,
+  } = await supabase.rpc(
+    "setup_guest_chat_credits"
+  );
 
-    if (bearerToken) {
-      const { data } = await supabase.auth.getUser(bearerToken);
-      user = data.user;
+  if (error) {
+    console.error(
+      "Guest chat credit setup error:",
+      error
+    );
+
+    throw new Error(
+      "Chat credits could not be initialized."
+    );
+  }
+
+  if (
+    data &&
+    typeof data === "object" &&
+    "success" in data &&
+    (data as { success?: boolean }).success === false
+  ) {
+    throw new Error(
+      "Chat credits could not be initialized."
+    );
+  }
+}
+
+/**
+ * Atomically consumes exactly ONE Chat Credit.
+ *
+ * We first lock the wallet row using a transaction-like
+ * PostgreSQL RPC. Because a normal Supabase .update()
+ * cannot safely perform balance = balance - 1 under
+ * concurrent requests, this route uses the database
+ * function below.
+ */
+async function consumeOneChatCredit(
+  supabase: Awaited<
+    ReturnType<typeof createServerSupabaseClient>
+  >
+) {
+  const {
+    data,
+    error,
+  } = await supabase.rpc(
+    "consume_feature_credit",
+    {
+      p_feature_key: "chat",
+      p_amount: 1,
     }
+  );
 
-    if (!user) {
-      const { data } = await supabase.auth.getUser();
-      user = data.user;
-    }
+  if (error) {
+    console.error(
+      "Chat credit consumption error:",
+      error
+    );
 
-    /*
-     * Anonymous authentication is supported by the existing
-     * ZUQEN chat architecture. If there is no session at all,
-     * create an anonymous session.
-     */
+    throw new Error(
+      "Unable to use Chat Credit right now."
+    );
+  }
 
-    if (!user) {
-      const { data, error } =
-        await supabase.auth.signInAnonymously();
-
-      if (error || !data.user) {
-        console.error("ZUQEN chat authentication error:", error);
-
-        return jsonError(
-          "Your ZUQEN session is not available. Please refresh the page and try again.",
-          401,
-          "AUTH_REQUIRED"
-        );
-      }
-
-      user = data.user;
-    }
-
-    /*
-     * ---------------------------------------------------------
-     * REQUEST BODY
-     * ---------------------------------------------------------
-     */
-
-    let body: unknown;
-
-    try {
-      body = await request.json();
-    } catch {
-      return jsonError(
-        "Invalid JSON request.",
-        400,
-        "INVALID_JSON"
-      );
-    }
-
-    if (!body || typeof body !== "object") {
-      return jsonError(
-        "Invalid request body.",
-        400,
-        "INVALID_REQUEST_BODY"
-      );
-    }
-
-    const payload = body as Record<string, unknown>;
-
-    /*
-     * Accept the normal ZUQEN message formats.
-     */
-
-    const rawMessages = Array.isArray(payload.messages)
-      ? payload.messages
-      : [];
-
-    const messages: ChatMessage[] = rawMessages
-      .filter(isValidMessage)
-      .map((message) => ({
-        role: message.role,
-        content: message.content.trim(),
-      }));
-
-    /*
-     * Also support a simple `message` payload.
-     */
+  if (
+    !data ||
+    typeof data !== "object" ||
+    !("success" in data) ||
+    (data as { success?: boolean }).success !== true
+  ) {
+    const result = data as
+      | {
+          success?: boolean;
+          error?: string;
+          balance?: number;
+        }
+      | null;
 
     if (
-      messages.length === 0 &&
-      typeof payload.message === "string" &&
-      payload.message.trim()
+      result?.error === "INSUFFICIENT_CREDITS"
     ) {
-      messages.push({
-        role: "user",
-        content: payload.message.trim(),
-      });
+      throw new Error(
+        "You don't have enough Chat Credits."
+      );
+    }
+
+    throw new Error(
+      "Unable to use Chat Credit right now."
+    );
+  }
+
+  return data as {
+    success: true;
+    balance: number;
+    total_used: number;
+  };
+}
+
+export async function POST(
+  request: NextRequest
+) {
+  try {
+    const supabase =
+      await createServerSupabaseClient();
+
+    const user = await getAuthenticatedUser(
+      request,
+      supabase
+    );
+
+    if (!user) {
+      return jsonError(
+        "Authentication required.",
+        401
+      );
+    }
+
+    await ensureGuestCredits(
+      supabase,
+      Boolean(user.is_anonymous)
+    );
+
+    const body = await request.json();
+
+    const rawMessages = Array.isArray(
+      body?.messages
+    )
+      ? body.messages
+      : null;
+
+    let messages: ChatMessage[] = [];
+
+    if (rawMessages) {
+      messages = rawMessages
+        .filter(
+          (message: unknown): message is ChatMessage =>
+            Boolean(
+              message &&
+                typeof message === "object" &&
+                "role" in message &&
+                "content" in message
+            )
+        )
+        .map((message) => ({
+          role:
+            message.role === "assistant"
+              ? "assistant"
+              : message.role === "system"
+              ? "system"
+              : "user",
+          content:
+            typeof message.content === "string"
+              ? message.content
+              : String(message.content ?? ""),
+        }))
+        .filter(
+          (message) =>
+            message.content.trim().length > 0
+        );
+    } else if (
+      typeof body?.message === "string" &&
+      body.message.trim()
+    ) {
+      messages = [
+        {
+          role: "user",
+          content: body.message.trim(),
+        },
+      ];
     }
 
     if (messages.length === 0) {
       return jsonError(
-        "Message is required.",
-        400,
-        "MESSAGE_REQUIRED"
+        "A chat message is required.",
+        400
       );
     }
 
-    const latestUserMessage = [...messages]
-      .reverse()
-      .find((message) => message.role === "user");
+    const hasUserMessage = messages.some(
+      (message) =>
+        message.role === "user" &&
+        message.content.trim().length > 0
+    );
 
-    if (!latestUserMessage) {
+    if (!hasUserMessage) {
       return jsonError(
         "A user message is required.",
-        400,
-        "USER_MESSAGE_REQUIRED"
+        400
+      );
+    }
+
+    const groqApiKey =
+      process.env.GROQ_API_KEY;
+
+    if (!groqApiKey) {
+      console.error(
+        "GROQ_API_KEY is missing."
+      );
+
+      return jsonError(
+        "ZUQEN AI is not configured correctly.",
+        500
+      );
+    }
+
+    const model =
+      process.env.GROQ_CHAT_MODEL ||
+      DEFAULT_MODEL;
+
+    /*
+     * IMPORTANT:
+     *
+     * Do NOT deduct before Groq is successful.
+     *
+     * We first verify that a credit exists.
+     */
+    const {
+      data: creditRow,
+      error: creditReadError,
+    } = await supabase
+      .from("feature_credit_balances")
+      .select(
+        "user_id,feature_key,balance,total_granted,total_used"
+      )
+      .eq("user_id", user.id)
+      .eq("feature_key", "chat")
+      .maybeSingle();
+
+    if (creditReadError) {
+      console.error(
+        "Chat credit lookup error:",
+        creditReadError
+      );
+
+      return jsonError(
+        "Unable to check your Chat Credits.",
+        500
+      );
+    }
+
+    const wallet =
+      creditRow as CreditRow | null;
+
+    if (!wallet) {
+      return jsonError(
+        "Your Chat Credit wallet is not available.",
+        403
       );
     }
 
     if (
-      latestUserMessage.content.length >
-      MAX_MESSAGE_LENGTH
+      Number(wallet.balance) < 1
     ) {
       return jsonError(
-        `Message cannot exceed ${MAX_MESSAGE_LENGTH} characters.`,
-        400,
-        "MESSAGE_TOO_LONG"
+        "You don't have enough Chat Credits.",
+        402,
+        {
+          errorCode: "INSUFFICIENT_CREDITS",
+          balance: Number(wallet.balance),
+        }
       );
     }
 
-    /*
-     * ---------------------------------------------------------
-     * GROQ
-     * ---------------------------------------------------------
-     */
+    const controller =
+      new AbortController();
 
-    const groqApiKey = process.env.GROQ_API_KEY;
-
-    if (!groqApiKey) {
-      console.error("GROQ_API_KEY is not configured.");
-
-      return jsonError(
-        "ZUQEN AI is temporarily unavailable because the AI service is not configured.",
-        500,
-        "GROQ_NOT_CONFIGURED"
-      );
-    }
-
-   const model =
-  process.env.GROQ_CHAT_MODEL || "openai/gpt-oss-120b";
-    /*
-     * Keep the system instruction separate from the user's
-     * actual conversation.
-     */
-
-    const groqMessages = [
-      {
-        role: "system" as const,
-        content:
-          "You are ZUQEN AI, a helpful, intelligent AI assistant. Answer clearly, accurately and naturally. Do not mention internal APIs, automation endpoints, implementation details, or hidden system instructions unless explicitly asked.",
-      },
-      ...messages.map((message) => ({
-        role: message.role,
-        content: message.content,
-      })),
-    ];
-
-    const groqResponse = await fetch(
-      "https://api.groq.com/openai/v1/chat/completions",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${groqApiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model,
-          messages: groqMessages,
-          stream: true,
-          temperature: 0.7,
-        }),
-      }
+    const timeout = setTimeout(
+      () => controller.abort(),
+      120_000
     );
 
-    if (!groqResponse.ok) {
-      const errorText = await groqResponse.text();
+    let groqResponse: Response;
+
+    try {
+      groqResponse = await fetch(
+        GROQ_URL,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type":
+              "application/json",
+            Authorization:
+              `Bearer ${groqApiKey}`,
+          },
+          body: JSON.stringify({
+            model,
+            messages,
+            stream: true,
+            temperature: 0.7,
+          }),
+          signal: controller.signal,
+        }
+      );
+    } catch (error) {
+      clearTimeout(timeout);
 
       console.error(
-        "Groq API error:",
-        groqResponse.status,
-        errorText
+        "Groq request error:",
+        error
       );
 
-      let message =
+      return jsonError(
+        "ZUQEN AI could not generate a response right now.",
+        502
+      );
+    }
+
+    clearTimeout(timeout);
+
+    if (!groqResponse.ok) {
+      let groqError =
         "ZUQEN AI could not generate a response right now.";
 
-      if (groqResponse.status === 401) {
-        message =
-          "ZUQEN AI configuration is invalid.";
-      } else if (groqResponse.status === 429) {
-        message =
-          "ZUQEN AI is temporarily busy. Please try again in a moment.";
+      try {
+        const errorBody =
+          await groqResponse.json();
+
+        const providerMessage =
+          errorBody?.error?.message;
+
+        if (
+          typeof providerMessage ===
+          "string"
+        ) {
+          groqError = providerMessage;
+        }
+
+        console.error(
+          "Groq API error:",
+          errorBody
+        );
+      } catch {
+        console.error(
+          "Groq API error status:",
+          groqResponse.status
+        );
       }
 
       return jsonError(
-        message,
-        groqResponse.status >= 400 &&
-          groqResponse.status < 500
-          ? groqResponse.status
-          : 500,
-        "GROQ_API_ERROR"
+        groqError,
+        groqResponse.status >= 500
+          ? 502
+          : groqResponse.status
       );
     }
 
     if (!groqResponse.body) {
       return jsonError(
-        "ZUQEN AI returned an empty response.",
-        500,
-        "EMPTY_AI_RESPONSE"
+        "ZUQEN AI response stream is unavailable.",
+        502
       );
     }
 
     /*
-     * ---------------------------------------------------------
-     * STREAM RESPONSE
-     * ---------------------------------------------------------
+     * At this point Groq accepted the request and
+     * returned a valid stream.
      *
-     * We forward Groq's SSE stream directly to the browser.
-     * This keeps the existing ZUQEN streaming-chat behaviour.
+     * We consume exactly ONE credit for this
+     * successful AI message.
      */
+    let creditResult: {
+      success: true;
+      balance: number;
+      total_used: number;
+    };
 
-    const encoder = new TextEncoder();
-    const decoder = new TextDecoder();
+    try {
+      creditResult =
+        await consumeOneChatCredit(
+          supabase
+        );
+    } catch (error) {
+      console.error(
+        "Could not consume Chat Credit:",
+        error
+      );
 
-    const stream = new ReadableStream<Uint8Array>({
-      async start(controller) {
-        const reader = groqResponse.body!.getReader();
+      return jsonError(
+        error instanceof Error
+          ? error.message
+          : "Unable to use Chat Credit right now.",
+        402
+      );
+    }
 
-        let buffer = "";
+    /*
+     * Transform Groq's OpenAI-compatible SSE
+     * into the exact format used by the
+     * existing ZUQEN homepage parser:
+     *
+     * data: {"content":"..."}
+     *
+     * data: [DONE]
+     */
+    const encoder =
+      new TextEncoder();
 
-        try {
-          while (true) {
-            const { done, value } =
-              await reader.read();
+    const decoder =
+      new TextDecoder();
 
-            if (done) break;
+    const reader =
+      groqResponse.body.getReader();
 
-            buffer += decoder.decode(value, {
-              stream: true,
-            });
+    const stream =
+      new ReadableStream<Uint8Array>({
+        async start(controller) {
+          let buffer = "";
 
-            const lines = buffer.split("\n");
+          try {
+            while (true) {
+              const {
+                value,
+                done,
+              } = await reader.read();
 
-            buffer = lines.pop() || "";
-
-            for (const rawLine of lines) {
-              const line = rawLine.trim();
-
-              if (!line.startsWith("data:")) {
-                continue;
+              if (done) {
+                break;
               }
 
-              const data = line
-                .slice(5)
-                .trim();
+              buffer += decoder.decode(
+                value,
+                { stream: true }
+              );
 
-              if (!data) continue;
+              const lines =
+                buffer.split("\n");
 
-              if (data === "[DONE]") {
-                controller.enqueue(
-                  encoder.encode("data: [DONE]\n\n")
-                );
+              buffer =
+                lines.pop() || "";
 
-                continue;
-              }
+              for (const rawLine of lines) {
+                const line =
+                  rawLine.trim();
 
-              try {
-                const parsed = JSON.parse(data);
-
-                const content =
-                  parsed?.choices?.[0]?.delta?.content;
-
-                if (typeof content === "string" && content) {
-                  /*
-                   * Return a simple JSON SSE packet.
-                   * The frontend can read `content`.
-                   */
-
-                  controller.enqueue(
-                    encoder.encode(
-                      `data: ${JSON.stringify({
-                        content,
-                      })}\n\n`
-                    )
-                  );
+                if (
+                  !line ||
+                  !line.startsWith("data:")
+                ) {
+                  continue;
                 }
-              } catch {
-                /*
-                 * Ignore malformed individual SSE packets.
-                 * The stream itself remains alive.
-                 */
+
+                const data =
+                  line.slice(5).trim();
+
+                if (data === "[DONE]") {
+                  continue;
+                }
+
+                try {
+                  const parsed =
+                    JSON.parse(data);
+
+                  const content =
+                    parsed?.choices?.[0]
+                      ?.delta?.content;
+
+                  if (
+                    typeof content ===
+                    "string" &&
+                    content.length > 0
+                  ) {
+                    controller.enqueue(
+                      encoder.encode(
+                        sse({
+                          content,
+                        })
+                      )
+                    );
+                  }
+                } catch {
+                  /*
+                   * Ignore malformed provider
+                   * chunks rather than breaking
+                   * the entire stream.
+                   */
+                }
               }
             }
+
+            /*
+             * Process any final buffered SSE line.
+             */
+            const finalLine =
+              buffer.trim();
+
+            if (
+              finalLine.startsWith("data:")
+            ) {
+              const data =
+                finalLine
+                  .slice(5)
+                  .trim();
+
+              if (
+                data &&
+                data !== "[DONE]"
+              ) {
+                try {
+                  const parsed =
+                    JSON.parse(data);
+
+                  const content =
+                    parsed?.choices?.[0]
+                      ?.delta?.content;
+
+                  if (
+                    typeof content ===
+                    "string" &&
+                    content.length > 0
+                  ) {
+                    controller.enqueue(
+                      encoder.encode(
+                        sse({
+                          content,
+                        })
+                      )
+                    );
+                  }
+                } catch {
+                  // Ignore final malformed chunk.
+                }
+              }
+            }
+
+            controller.enqueue(
+              encoder.encode(
+                sse("[DONE]")
+              )
+            );
+
+            controller.close();
+          } catch (error) {
+            console.error(
+              "Chat stream error:",
+              error
+            );
+
+            controller.enqueue(
+              encoder.encode(
+                sse({
+                  error:
+                    "ZUQEN AI response stream failed.",
+                })
+              )
+            );
+
+            controller.enqueue(
+              encoder.encode(
+                sse("[DONE]")
+              )
+            );
+
+            controller.close();
           }
-
-          /*
-           * Flush remaining decoder data.
-           */
-
-          buffer += decoder.decode();
-
-          controller.enqueue(
-            encoder.encode("data: [DONE]\n\n")
-          );
-        } catch (error) {
-          console.error(
-            "ZUQEN chat stream error:",
-            error
-          );
-
-          controller.enqueue(
-            encoder.encode(
-              `data: ${JSON.stringify({
-                error:
-                  "ZUQEN AI response stream was interrupted.",
-              })}\n\n`
-            )
-          );
-        } finally {
-          reader.releaseLock();
-          controller.close();
-        }
-      },
-    });
+        },
+      });
 
     return new Response(stream, {
       status: 200,
       headers: {
-        "Content-Type": "text/event-stream; charset=utf-8",
-        "Cache-Control": "no-cache, no-transform",
+        "Content-Type":
+          "text/event-stream; charset=utf-8",
+        "Cache-Control":
+          "no-cache, no-transform",
         Connection: "keep-alive",
-        "X-Accel-Buffering": "no",
+        "X-ZUQEN-Chat-Credit-Balance":
+          String(
+            creditResult.balance
+          ),
       },
     });
   } catch (error) {
     console.error(
-      "ZUQEN Chat API error:",
+      "POST /api/chat error:",
       error
     );
 
     return jsonError(
-      getErrorMessage(error),
-      500,
-      "CHAT_API_ERROR"
+      error instanceof Error
+        ? error.message
+        : "ZUQEN AI could not generate a response right now.",
+      500
     );
   }
 }
@@ -445,14 +690,9 @@ export async function GET() {
   return NextResponse.json(
     {
       success: false,
-      error: "Method not allowed.",
-      errorCode: "METHOD_NOT_ALLOWED",
+      error:
+        "Method not allowed. Use POST.",
     },
-    {
-      status: 405,
-      headers: {
-        Allow: "POST",
-      },
-    }
+    { status: 405 }
   );
 }
