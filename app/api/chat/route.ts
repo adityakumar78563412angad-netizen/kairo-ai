@@ -231,10 +231,8 @@ export async function POST(request: Request) {
       );
     }
 
-    const model =
-      process.env.GROQ_CHAT_MODEL ||
-      "llama-3.3-70b-versatile";
-
+   const model =
+  process.env.GROQ_CHAT_MODEL || "openai/gpt-oss-120b";
     /*
      * Keep the system instruction separate from the user's
      * actual conversation.
