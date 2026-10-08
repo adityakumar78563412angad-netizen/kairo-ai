@@ -1705,15 +1705,20 @@ export default function HomePage() {
         workingMessages = [...workingMessages, userMessage];
       }
 
-      setMessages(workingMessages);
+    setMessages(workingMessages);
 
-      if (!options?.replaceExistingUserMessage) {
-        setInput("");
-        setAttachments([]);
-      }
+if (!options?.replaceExistingUserMessage) {
+  setInput("");
+  setAttachments([]);
+}
 
-      await saveMessages(
-        chatId,
+if (!chatId) {
+  setError("No active conversation was found.");
+  return;
+}
+
+await saveMessages(
+  chatId,
         workingMessages,
         activeChat?.title === "New conversation" || !activeChat
           ? generateChatTitle(text)
