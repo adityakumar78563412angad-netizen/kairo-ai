@@ -1543,6 +1543,83 @@ const scrollToLatest = useCallback(() => {
       }
     >
       <style>{`
+
+      .zuqen-messages {
+  position: relative;
+}
+
+.zuqen-scroll-latest {
+  position: absolute;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+
+  height: 36px;
+  padding: 0 13px;
+
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+
+  background: var(--panel);
+  color: var(--text);
+
+  box-shadow: 0 8px 28px rgba(0, 0, 0, .25);
+
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .1px;
+
+  cursor: pointer;
+  z-index: 20;
+
+  transition:
+    transform .18s ease,
+    background .18s ease,
+    box-shadow .18s ease;
+}
+
+.zuqen-scroll-latest:hover {
+  transform: translateX(-50%) translateY(-2px);
+  background: var(--panel-2);
+  box-shadow: 0 12px 34px rgba(0, 0, 0, .32);
+}
+
+.zuqen-scroll-latest-arrow {
+  width: 20px;
+  height: 20px;
+
+  display: grid;
+  place-items: center;
+
+  border-radius: 50%;
+  background: var(--panel-3);
+
+  font-size: 13px;
+  line-height: 1;
+}
+
+.light .zuqen-scroll-latest {
+  box-shadow: 0 8px 28px rgba(0, 0, 0, .12);
+}
+
+@media (max-width: 560px) {
+  .zuqen-scroll-latest {
+    bottom: 14px;
+    height: 34px;
+    padding: 0 11px;
+  }
+
+  .zuqen-scroll-latest-arrow {
+    width: 19px;
+    height: 19px;
+  }
+}
+  
         * {
           box-sizing: border-box;
         }
@@ -2574,27 +2651,7 @@ const scrollToLatest = useCallback(() => {
   cursor: pointer;
   z-index: 10;
 
-  backdrop-filter: blur(14px);
-
-  transition:
-    transform .2s ease,
-    background .2s ease,
-    border-color .2s ease,
-    box-shadow .2s ease;
-}
-
-.zuqen-scroll-latest:hover {
-  transform: translateX(-50%) translateY(-2px);
-  background: var(--panel-3);
-  border-color: var(--border-strong);
-  box-shadow: 0 14px 36px rgba(0,0,0,.28);
-}
-
-.zuqen-scroll-latest span {
-  font-size: 10px;
-  letter-spacing: .2px;
-}
-
+ 
         .zuqen-message-row.user {
           justify-content: flex-start;
         }
@@ -3932,19 +3989,23 @@ const scrollToLatest = useCallback(() => {
                       }
                     )
                   )}
-                   <div ref={messagesEndRef} />
-                   {showScrollToBottom && (
-  <button
-    className="zuqen-scroll-latest"
-    onClick={scrollToLatest}
-    aria-label="Jump to latest message"
-    title="Jump to latest"
-  >
-    ↓
-    <span>Latest</span>
-  </button>
-)}
+                               <div ref={messagesEndRef} />
                 </div>
+
+                {showScrollToBottom && (
+                  <button
+                    className="zuqen-scroll-latest"
+                    onClick={scrollToLatest}
+                    aria-label="Jump to latest message"
+                    title="Jump to latest"
+                    type="button"
+                  >
+                    <span className="zuqen-scroll-latest-arrow">
+                      ↓
+                    </span>
+                    <span>Latest</span>
+                  </button>
+                )}
                
               </div>
 
