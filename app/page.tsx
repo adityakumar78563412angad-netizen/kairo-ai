@@ -327,6 +327,8 @@ export default function HomePage() {
 
   const [agentOpen, setAgentOpen] = useState(false);
   const [selectedAgent, setSelectedAgent] = useState("ZUQEN AI");
+  const [selectedMode, setSelectedMode] = useState("Create");
+  const [voiceListening, setVoiceListening] = useState(false);
 
   const [creditsOpen, setCreditsOpen] = useState(false);
   const [chatCredits, setChatCredits] = useState<number | null>(null);
@@ -348,9 +350,10 @@ export default function HomePage() {
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
 
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const streamAbortRef = useRef<AbortController | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const shouldAutoScrollRef = useRef(true);
+  const streamAbortRef = useRef<AbortController | null>(null);
 
   const activeChat = useMemo(
     () => chats.find((chat) => chat.id === activeChatId) ?? null,
@@ -703,8 +706,6 @@ export default function HomePage() {
       ? chat.messages
       : [];
 
-    shouldAutoScrollRef.current = true;
-    setShowJumpToLatest(false);
     setMessages(storedMessages);
     setMenuId(null);
     setRenamingId(null);
@@ -979,7 +980,10 @@ export default function HomePage() {
 
   const sendMessage = useCallback(
     async (forcedMessages?: Message[]) => {
-      const text = input.trim();
+      const rawText = input.trim();
+      const text = rawText && selectedMode !== "Create"
+        ? `${selectedMode} mode: ${rawText}`
+        : rawText;
 
       if (loading) return;
 
@@ -1021,8 +1025,6 @@ export default function HomePage() {
       };
 
       if (!forcedMessages) {
-        shouldAutoScrollRef.current = true;
-        setShowJumpToLatest(false);
         workingMessages = [
           ...workingMessages,
           userMessage,
@@ -1057,8 +1059,6 @@ export default function HomePage() {
         initialAssistant,
       ];
 
-      shouldAutoScrollRef.current = true;
-      setShowJumpToLatest(false);
       setMessages(withAssistant);
 
       const controller = new AbortController();
@@ -1205,6 +1205,7 @@ export default function HomePage() {
     },
     [
       input,
+      selectedMode,
       loading,
       user,
       activeChatId,
@@ -1220,6 +1221,42 @@ export default function HomePage() {
 
   const handleSubmit = async () => {
     await sendMessage();
+  };
+
+  const startVoiceInput = () => {
+    if (voiceListening) return;
+    const SpeechRecognitionCtor =
+      typeof window !== "undefined"
+        ? (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+        : null;
+
+    if (!SpeechRecognitionCtor) {
+      setErrorMessage("Voice input is not supported in this browser. Try Chrome or type your message instead.");
+      return;
+    }
+
+    try {
+      const recognition = new SpeechRecognitionCtor();
+      recognition.lang = "en-IN";
+      recognition.interimResults = true;
+      recognition.continuous = false;
+      setVoiceListening(true);
+      recognition.onresult = (event: any) => {
+        const transcript = Array.from(event.results as ArrayLike<any>)
+          .map((result: any) => result[0]?.transcript || "")
+          .join(" ");
+        if (transcript) setInput((previous) => `${previous}${previous ? " " : ""}${transcript}`);
+      };
+      recognition.onerror = () => {
+        setVoiceListening(false);
+        setErrorMessage("Voice input could not be captured. Please try again or type your message.");
+      };
+      recognition.onend = () => setVoiceListening(false);
+      recognition.start();
+    } catch (error) {
+      setVoiceListening(false);
+      setErrorMessage(error instanceof Error ? error.message : "Unable to start voice input.");
+    }
   };
 
   const handleKeyDown = (
@@ -1377,6 +1414,8 @@ export default function HomePage() {
   };
 
   const startNewChat = () => {
+    shouldAutoScrollRef.current = true;
+    setShowJumpToLatest(false);
     setActiveChatId(null);
     setMessages([]);
     setInput("");
@@ -1425,35 +1464,26 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
-    const container = messagesContainerRef.current;
-    if (!container || !shouldAutoScrollRef.current) return;
-
-    container.scrollTo({
-      top: container.scrollHeight,
-      behavior: loading ? "auto" : "smooth",
+    if (!shouldAutoScrollRef.current) return;
+    const frame = window.requestAnimationFrame(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
     });
-  }, [messages, loading]);
+    return () => window.cancelAnimationFrame(frame);
+  }, [messages, loading, activeChatId]);
 
   const handleMessagesScroll = () => {
-    const container = messagesContainerRef.current;
-    if (!container) return;
-
-    const distanceFromBottom =
-      container.scrollHeight - container.scrollTop - container.clientHeight;
-    const nearBottom = distanceFromBottom < 150;
-
-    shouldAutoScrollRef.current = nearBottom;
-    setShowJumpToLatest(!nearBottom && messages.length > 0);
+    const element = messagesContainerRef.current;
+    if (!element) return;
+    const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
+    const atBottom = distanceFromBottom < 140;
+    shouldAutoScrollRef.current = atBottom;
+    setShowJumpToLatest(!atBottom && messages.length > 0);
   };
 
   const jumpToLatest = () => {
-    const container = messagesContainerRef.current;
     shouldAutoScrollRef.current = true;
     setShowJumpToLatest(false);
-    container?.scrollTo({
-      top: container.scrollHeight,
-      behavior: "smooth",
-    });
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   };
 
   const homeSuggestions = [
@@ -1498,1809 +1528,75 @@ export default function HomePage() {
       }
     >
       <style>{`
-/* ================================================================
-   ZUQEN / AURORA ATELIER — a new visual system, not a recolour.
-   Layered glass, editorial typography, deep ink, jade light, warm gold.
-   ================================================================ */
-:root {
-  color-scheme: dark;
-  --z-ink: #07110f;
-  --z-ink-soft: #0b1714;
-  --z-glass: rgba(12, 29, 25, .64);
-  --z-glass-strong: rgba(11, 24, 21, .84);
-  --z-glass-soft: rgba(226, 255, 239, .045);
-  --z-line: rgba(204, 255, 226, .105);
-  --z-line-strong: rgba(204, 255, 226, .19);
-  --z-white: #f4fff8;
-  --z-muted: #a2b8ad;
-  --z-muted-soft: #6e897b;
-  --z-jade: #a8ffcb;
-  --z-jade-strong: #6ce8a4;
-  --z-cyan: #8ee9f2;
-  --z-gold: #ffd28b;
-  --z-rose: #ff9eaa;
-  --z-shadow: 0 28px 100px rgba(0, 0, 0, .36);
-  --z-radius-xl: 30px;
-  --z-radius-lg: 22px;
-  --z-radius-md: 16px;
-  --z-radius-sm: 12px;
-  --z-motion: cubic-bezier(.2, .75, .25, 1);
-}* {
-  box-sizing: border-box;
-}html, body {
-  margin: 0;
-  padding: 0;
-  min-height: 100%;
-}body {
-  background: #07110f;
-  color: var(--z-white);
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-}button, input, textarea {
-  font: inherit;
-}button {
-  border: 0;
-}button:focus-visible, input:focus-visible, textarea:focus-visible {
-  outline: 2px solid var(--z-jade);
-  outline-offset: 3px;
-}::selection {
-  color: #06120d;
-  background: var(--z-jade);
-}.zuqen-app {
-  --bg: var(--z-ink);
-  --panel: rgba(9, 24, 20, .72);
-  --panel-2: rgba(220, 255, 234, .055);
-  --panel-3: rgba(220, 255, 234, .095);
-  --border: var(--z-line);
-  --border-strong: var(--z-line-strong);
-  --text: var(--z-white);
-  --muted: var(--z-muted);
-  --muted-2: var(--z-muted-soft);
-  --accent: var(--z-jade);
-  --accent-text: #07140e;
-  --danger: var(--z-rose);
-  min-height: 100dvh;
-  width: 100%;
-  display: flex;
-  position: relative;
-  isolation: isolate;
-  overflow: hidden;
-  color: var(--text);
-  background:
-    radial-gradient(ellipse at 78% 8%, rgba(39, 141, 103, .2), transparent 31%),
-    radial-gradient(ellipse at 5% 88%, rgba(32, 105, 99, .16), transparent 32%),
-    radial-gradient(ellipse at 48% 48%, rgba(22, 67, 52, .14), transparent 48%),
-    linear-gradient(138deg, #07110f 0%, #091713 48%, #081310 100%);
-  transition: background .35s ease, color .25s ease;
-}.zuqen-app::before,
-.zuqen-app::after {
-  content: "";
-  position: fixed;
-  pointer-events: none;
-  z-index: -1;
-  border-radius: 50%;
-  filter: blur(1px);
-}.zuqen-app::before {
-  width: 42vw;
-  height: 42vw;
-  min-width: 360px;
-  min-height: 360px;
-  right: -15vw;
-  top: -20vw;
-  background: radial-gradient(circle, rgba(101, 239, 165, .11), rgba(101, 239, 165, 0) 68%);
-  animation: auroraDrift 19s ease-in-out infinite alternate;
-}.zuqen-app::after {
-  width: 34vw;
-  height: 34vw;
-  min-width: 300px;
-  min-height: 300px;
-  left: 18vw;
-  bottom: -22vw;
-  background: radial-gradient(circle, rgba(255, 196, 117, .075), rgba(255, 196, 117, 0) 70%);
-  animation: auroraDrift 24s ease-in-out infinite alternate-reverse;
-}.zuqen-app.light {
-  color-scheme: light;
-  --bg: #f1f7f2;
-  --panel: rgba(249, 255, 250, .82);
-  --panel-2: rgba(20, 67, 44, .045);
-  --panel-3: rgba(20, 67, 44, .085);
-  --border: rgba(20, 67, 44, .105);
-  --border-strong: rgba(20, 67, 44, .18);
-  --text: #11271d;
-  --muted: #536d5e;
-  --muted-2: #819889;
-  --accent: #176d45;
-  --accent-text: #ffffff;
-  --danger: #b83c55;
-  background:
-    radial-gradient(ellipse at 78% 8%, rgba(103, 226, 159, .24), transparent 32%),
-    radial-gradient(ellipse at 4% 88%, rgba(130, 208, 200, .19), transparent 32%),
-    linear-gradient(138deg, #edf6ef 0%, #f7fbf6 52%, #e8f3eb 100%);
-}.zuqen-app.light::before {
-  background: radial-gradient(circle, rgba(58, 184, 111, .15), transparent 68%);
-}.zuqen-app.light::after {
-  background: radial-gradient(circle, rgba(236, 178, 96, .12), transparent 70%);
-}
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap');
+        *{box-sizing:border-box}
+        html,body{margin:0;padding:0;min-height:100%;background:#101713}
+        button,input,textarea{font:inherit}button{border:0}
+        .zuqen-app{
+          --bg:#101713;--panel:rgba(25,35,29,.88);--panel-2:rgba(33,45,37,.92);--panel-3:rgba(44,58,47,.88);
+          --border:rgba(229,241,220,.105);--border-strong:rgba(229,241,220,.18);--text:#f1f4ec;--muted:#a1aea1;--muted-2:#748276;
+          --accent:#d4f36a;--accent-text:#182017;--danger:#ff8c82;--shadow:0 24px 80px rgba(0,0,0,.32);
+          min-height:100dvh;height:100dvh;display:flex;color:var(--text);overflow:hidden;font-family:'DM Sans',sans-serif;
+          background:radial-gradient(ellipse at 72% -12%,rgba(118,155,85,.18),transparent 38%),radial-gradient(ellipse at 10% 100%,rgba(54,111,83,.13),transparent 40%),#101713;
+        }
+        .zuqen-app.light{--bg:#edf0e8;--panel:rgba(255,255,251,.88);--panel-2:rgba(247,249,241,.96);--panel-3:#e8ede0;--border:rgba(27,48,31,.11);--border-strong:rgba(27,48,31,.18);--text:#17231a;--muted:#657568;--muted-2:#849187;--accent:#315e3b;--accent-text:#f8fff3;--shadow:0 24px 80px rgba(33,49,34,.12);background:radial-gradient(ellipse at 80% 0%,rgba(194,220,158,.3),transparent 38%),#edf0e8}
+        .zuqen-sidebar{width:278px;flex:0 0 278px;height:100dvh;display:flex;flex-direction:column;background:rgba(14,21,17,.84);border-right:1px solid var(--border);backdrop-filter:blur(26px);transition:width .25s ease,flex-basis .25s ease;z-index:30;overflow:hidden}
+        .light .zuqen-sidebar{background:rgba(248,250,244,.88)}.zuqen-sidebar.closed{width:0;flex-basis:0;border:0}
+        .zuqen-brand{height:88px;min-height:88px;display:flex;align-items:center;padding:0 22px;gap:13px;border-bottom:1px solid var(--border)}
+        .zuqen-logo{width:42px;height:42px;border-radius:15px;display:grid;place-items:center;background:linear-gradient(145deg,#e3ff91,#a9d747 58%,#6c9b3f);box-shadow:0 8px 30px rgba(176,220,87,.17);position:relative;overflow:hidden}
+        .zuqen-logo:before{content:"";width:19px;height:19px;border:2px solid #1d2b17;border-radius:50%;position:absolute}.zuqen-logo:after{content:"";width:7px;height:7px;border-radius:50%;background:#1d2b17;position:absolute}
+        .zuqen-brand-name{font-family:Manrope,sans-serif;font-size:15px;font-weight:800;letter-spacing:1.6px}.zuqen-brand-sub{margin-top:4px;color:var(--muted-2);font-size:10px;letter-spacing:.35px}
+        .zuqen-sidebar-content{flex:1;min-height:0;overflow-y:auto;padding:18px 13px 14px;display:flex;flex-direction:column;gap:22px}
+        .zuqen-new-chat{width:100%;height:47px;padding:0 15px;display:flex;align-items:center;gap:11px;border-radius:13px;background:var(--accent);color:var(--accent-text);font-size:12px;font-weight:800;cursor:pointer;box-shadow:0 8px 24px rgba(151,197,77,.1);transition:transform .18s,filter .18s}
+        .zuqen-new-chat:hover{transform:translateY(-1px);filter:brightness(1.05)}
+        .zuqen-sidebar-section{min-height:0}.zuqen-sidebar-heading{height:32px;display:flex;align-items:center;justify-content:space-between;padding:0 9px;color:var(--muted-2);font-size:9px;font-weight:800;letter-spacing:1.6px;text-transform:uppercase}
+        .zuqen-sidebar-heading button{width:27px;height:27px;border-radius:8px;display:grid;place-items:center;color:var(--muted);background:transparent;cursor:pointer}.zuqen-sidebar-heading button:hover{background:var(--panel-3);color:var(--text)}
+        .zuqen-chat-list{display:flex;flex-direction:column;gap:4px;margin-top:5px}.zuqen-chat-item{position:relative;display:flex;align-items:center;min-height:43px;padding:0 9px 0 12px;border:1px solid transparent;border-radius:11px;cursor:pointer;color:var(--muted);transition:.18s}
+        .zuqen-chat-item:hover{background:rgba(255,255,255,.035);color:var(--text)}.zuqen-chat-item.active{background:rgba(196,235,121,.095);border-color:rgba(196,235,121,.16);color:var(--text)}.zuqen-chat-item.active:before{content:"";position:absolute;left:0;top:11px;bottom:11px;width:3px;border-radius:0 4px 4px 0;background:var(--accent)}
+        .zuqen-chat-main{min-width:0;flex:1}.zuqen-chat-title{font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.zuqen-chat-date{font-size:9px;color:var(--muted-2);margin-top:4px}.zuqen-chat-menu-button{opacity:0;color:var(--muted);background:transparent;cursor:pointer}.zuqen-chat-item:hover .zuqen-chat-menu-button,.zuqen-chat-item.active .zuqen-chat-menu-button{opacity:1}
+        .zuqen-chat-menu,.zuqen-agent-dropdown,.zuqen-credit-dropdown{background:#1b261e;border:1px solid var(--border-strong);border-radius:14px;box-shadow:var(--shadow);backdrop-filter:blur(24px);z-index:80}.light .zuqen-chat-menu,.light .zuqen-agent-dropdown,.light .zuqen-credit-dropdown{background:#fff}
+        .zuqen-chat-menu{position:absolute;right:8px;top:34px;width:155px;padding:5px}.zuqen-chat-menu button{width:100%;display:flex;align-items:center;gap:8px;padding:9px;border-radius:8px;text-align:left;background:transparent;color:var(--text);font-size:11px;cursor:pointer}.zuqen-chat-menu button:hover{background:var(--panel-3)}
+        .zuqen-rename{width:100%;min-width:0;padding:5px;border:1px solid var(--accent);border-radius:6px;background:var(--panel-2);color:var(--text);outline:0;font-size:11px}
+        .zuqen-sidebar-bottom{padding:14px;border-top:1px solid var(--border)}.zuqen-sidebar-user{display:flex;align-items:center;gap:10px;padding:10px;border:1px solid var(--border);background:rgba(255,255,255,.025);border-radius:13px}
+        .zuqen-user-avatar{width:34px;height:34px;display:grid;place-items:center;flex:0 0 34px;border-radius:11px;background:var(--panel-3);color:var(--accent);font-weight:800;font-size:12px}.zuqen-user-info{flex:1;min-width:0}.zuqen-user-name{font-size:11px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.zuqen-user-status{margin-top:3px;color:var(--muted-2);font-size:9px}.zuqen-signout{background:transparent;color:var(--muted);cursor:pointer}
+        .zuqen-sidebar-link{width:100%;min-height:40px;display:flex;align-items:center;gap:10px;padding:0 11px;border-radius:10px;color:var(--muted);background:transparent;text-align:left;font-size:11px;cursor:pointer}.zuqen-sidebar-link:hover{background:var(--panel-3);color:var(--text)}
+        .zuqen-main{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;position:relative}.zuqen-topbar{height:74px;min-height:74px;padding:0 27px;display:flex;align-items:center;justify-content:space-between;gap:14px;border-bottom:1px solid var(--border);background:rgba(17,25,19,.28);backdrop-filter:blur(18px);z-index:20}.light .zuqen-topbar{background:rgba(255,255,255,.32)}
+        .zuqen-top-left,.zuqen-top-right{display:flex;align-items:center;gap:11px;min-width:0}.zuqen-icon-button{width:38px;height:38px;display:grid;place-items:center;border:1px solid var(--border);border-radius:12px;background:rgba(255,255,255,.035);color:var(--muted);cursor:pointer;transition:.18s}.zuqen-icon-button:hover{color:var(--text);border-color:var(--border-strong);background:var(--panel-3)}
+        .zuqen-agent-selector,.zuqen-credit-wrap{position:relative}.zuqen-agent-button{display:flex;align-items:center;gap:10px;padding:7px 12px;border:1px solid var(--border);border-radius:13px;background:rgba(255,255,255,.025);color:var(--text);cursor:pointer;text-align:left}.zuqen-agent-button-icon{width:31px;height:31px;display:grid;place-items:center;border-radius:10px;background:rgba(204,240,117,.12);color:var(--accent);font-size:17px}.zuqen-agent-button-text{min-width:0}.zuqen-agent-button-name{font-size:11px;font-weight:800}.zuqen-agent-button-sub{margin-top:3px;color:var(--muted-2);font-size:9px}.zuqen-agent-dropdown{position:absolute;top:48px;left:0;width:275px;padding:7px}.zuqen-agent-option{width:100%;display:flex;align-items:center;gap:10px;padding:11px;border-radius:10px;background:transparent;color:var(--text);text-align:left;cursor:pointer}.zuqen-agent-option:hover,.zuqen-agent-option.selected{background:var(--panel-3)}.zuqen-agent-option-icon{width:34px;height:34px;display:grid;place-items:center;border-radius:10px;background:rgba(196,235,121,.1);color:var(--accent)}.zuqen-agent-option-content{flex:1}.zuqen-agent-option-name{font-size:11px;font-weight:700}.zuqen-agent-option-description{font-size:10px;color:var(--muted);margin-top:4px}.zuqen-agent-check{color:var(--accent)}
+        .zuqen-credit-button{display:flex;align-items:center;gap:8px;padding:10px 12px;border:1px solid var(--border);border-radius:12px;background:rgba(255,255,255,.025);color:var(--text);cursor:pointer}.zuqen-credit-icon{color:var(--accent)}.zuqen-credit-count{font-weight:800;font-size:12px}.zuqen-credit-label{font-size:10px;color:var(--muted)}.zuqen-credit-dropdown{position:absolute;right:0;top:48px;width:255px;padding:16px}.zuqen-credit-dropdown-title{font-size:11px;font-weight:800}.zuqen-credit-big{margin-top:8px;font:800 30px Manrope,sans-serif;letter-spacing:-1px}.zuqen-credit-small{margin-top:4px;color:var(--muted);font-size:10px}.zuqen-credit-line{height:1px;background:var(--border);margin:14px 0}.zuqen-credit-row{display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:8px}.zuqen-credit-row strong{color:var(--text)}
+        .zuqen-search-overlay{position:absolute;top:64px;left:24px;right:24px;max-width:560px;margin-left:0;padding:10px;border:1px solid var(--border-strong);border-radius:14px;background:var(--panel);backdrop-filter:blur(24px);box-shadow:var(--shadow);z-index:50}.zuqen-search-input-wrap{display:flex;align-items:center;gap:10px;padding:5px 8px;color:var(--muted)}.zuqen-search-input-wrap input{flex:1;min-width:0;border:0;outline:0;background:transparent;color:var(--text);font-size:12px}
+        .zuqen-content{flex:1;min-height:0;display:flex;flex-direction:column;position:relative}.zuqen-home{flex:1;overflow-y:auto;padding:clamp(34px,7vh,82px) 30px 45px}.zuqen-home-inner{width:min(1040px,100%);margin:0 auto}.zuqen-welcome{text-align:left;max-width:850px;margin:0 auto;position:relative;padding:0 0 20px 4px}.zuqen-welcome:before{content:'YOUR CREATIVE INTELLIGENCE WORKSPACE';display:block;margin-bottom:22px;color:var(--accent);font-size:9px;font-weight:800;letter-spacing:2.7px}.zuqen-welcome-mark{width:48px;height:48px;margin:0 0 22px;display:none;place-items:center;border-radius:16px;color:var(--accent-text);background:var(--accent);box-shadow:0 12px 32px rgba(174,218,92,.15);position:relative}.zuqen-welcome h1{max-width:800px;margin:0;font:500 clamp(38px,5.7vw,70px)/1.02 Manrope,sans-serif;letter-spacing:-3.8px;color:var(--text)}.zuqen-welcome h1 em{color:var(--accent);font-style:normal}.zuqen-welcome p{margin:18px 0 0;max-width:560px;color:var(--muted);font-size:13px;line-height:1.85}
+        .zuqen-search-card{margin:34px auto 0;width:min(850px,100%);min-height:84px;padding:15px 16px;display:flex;align-items:center;gap:13px;border:1px solid rgba(214,237,187,.18);border-radius:18px;background:linear-gradient(115deg,rgba(34,48,37,.92),rgba(23,33,27,.85));box-shadow:0 20px 60px rgba(0,0,0,.16),inset 0 1px rgba(255,255,255,.04);backdrop-filter:blur(22px)}.light .zuqen-search-card{background:rgba(255,255,255,.78)}.zuqen-search-card-icon{width:43px;height:43px;flex:0 0 43px;display:grid;place-items:center;border-radius:13px;background:rgba(202,238,121,.12);color:var(--accent)}.zuqen-search-card input{flex:1;min-width:0;border:0;outline:0;background:transparent;color:var(--text);font-size:14px}.zuqen-search-card input::placeholder{color:var(--muted-2)}.zuqen-search-shortcut{padding:6px 9px;border:1px solid var(--border);border-radius:8px;color:var(--muted-2);font-size:9px}
+        .zuqen-suggestion-grid{margin:16px auto 0;width:min(850px,100%);display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.zuqen-suggestion{position:relative;min-height:130px;padding:18px;text-align:left;border:1px solid var(--border);border-radius:15px;background:linear-gradient(145deg,rgba(37,50,40,.68),rgba(22,32,26,.55));color:var(--text);cursor:pointer;overflow:hidden;transition:transform .2s,border-color .2s,background .2s}.light .zuqen-suggestion{background:rgba(255,255,255,.65)}.zuqen-suggestion:before{content:"";position:absolute;left:18px;right:18px;top:0;height:2px;background:var(--card-accent,var(--accent));opacity:.8}.zuqen-suggestion:nth-child(2){--card-accent:#8bc9df}.zuqen-suggestion:nth-child(3){--card-accent:#d7b4ff}.zuqen-suggestion:nth-child(4){--card-accent:#f2b58e}.zuqen-suggestion:hover{transform:translateY(-3px);border-color:var(--border-strong);background:var(--panel-2)}.zuqen-suggestion-icon{color:var(--card-accent,var(--accent));font-size:17px}.zuqen-suggestion-title{margin-top:18px;font-size:12px;font-weight:800}.zuqen-suggestion-text{margin-top:7px;color:var(--muted);font-size:10px;line-height:1.6}
+        .zuqen-agent-strip{width:min(850px,100%);margin:34px auto 0}.zuqen-strip-title{color:var(--muted-2);text-transform:uppercase;letter-spacing:1.8px;font-size:9px;font-weight:800}.zuqen-agent-cards{margin-top:13px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.zuqen-mini-agent{display:flex;align-items:center;gap:11px;min-width:0;padding:13px;border:1px solid var(--border);background:rgba(255,255,255,.025);border-radius:13px;cursor:pointer;color:var(--text);text-align:left;transition:.2s}.zuqen-mini-agent:hover{background:var(--panel-2);border-color:var(--border-strong);transform:translateY(-2px)}.zuqen-mini-agent-icon{width:34px;height:34px;flex:0 0 34px;display:grid;place-items:center;border-radius:11px;background:var(--panel-3);color:var(--accent);font-size:14px}.zuqen-mini-agent-name{font-size:10px;font-weight:800;line-height:1.4}.zuqen-mini-agent-desc{color:var(--muted-2);font-size:9px;margin-top:4px;line-height:1.4}
+        .zuqen-chat-view{flex:1;min-height:0;display:flex;flex-direction:column;position:relative}.zuqen-messages{flex:1;overflow-y:auto;overscroll-behavior:contain;padding:34px 28px 28px;scroll-behavior:smooth}.zuqen-message-list{width:min(880px,100%);margin:0 auto}.zuqen-message-row{display:flex;margin-bottom:30px;animation:message-in .24s ease both}.zuqen-message-row.user{justify-content:flex-end}.zuqen-message-row.assistant{justify-content:flex-start}.zuqen-message-block{width:fit-content;max-width:min(790px,92%);min-width:0}.zuqen-message-row.assistant .zuqen-message-block{width:min(790px,100%);max-width:100%}.zuqen-message-label{display:flex;align-items:center;gap:8px;margin:0 0 9px 2px;color:var(--muted-2);font-size:9px;font-weight:800;letter-spacing:1.3px;text-transform:uppercase}.zuqen-message-label-mark{width:20px;height:20px;display:grid;place-items:center;border-radius:7px;background:rgba(202,238,121,.14);color:var(--accent)}.zuqen-message-row.user .zuqen-message-label{justify-content:flex-end;margin-right:3px}.zuqen-message-bubble{max-width:100%;padding:16px 19px;border-radius:17px;font-size:13px;line-height:1.8;white-space:pre-wrap;overflow-wrap:anywhere;word-break:normal}.zuqen-message-row.user .zuqen-message-bubble{background:linear-gradient(140deg,#d6f184,#b7dc66);color:#1a2816;border:1px solid rgba(234,255,185,.35);border-bottom-right-radius:5px;box-shadow:0 10px 28px rgba(151,194,80,.08)}.zuqen-message-row.assistant .zuqen-message-bubble{background:rgba(255,255,255,.035);border:1px solid var(--border);border-bottom-left-radius:5px;color:var(--text)}.light .zuqen-message-row.assistant .zuqen-message-bubble{background:rgba(255,255,255,.7)}.zuqen-message-actions{display:flex;gap:5px;margin-top:8px;opacity:.68}.zuqen-message-row.user .zuqen-message-actions{justify-content:flex-end}.zuqen-action{width:29px;height:29px;display:grid;place-items:center;border:1px solid transparent;border-radius:8px;background:transparent;color:var(--muted);cursor:pointer}.zuqen-action:hover{border-color:var(--border);background:var(--panel-3);color:var(--text)}.zuqen-typing{display:flex;align-items:center;gap:5px;padding:5px 0}.zuqen-typing span{width:6px;height:6px;border-radius:50%;background:var(--accent);animation:typing 1s infinite ease-in-out}.zuqen-typing span:nth-child(2){animation-delay:.15s}.zuqen-typing span:nth-child(3){animation-delay:.3s}.zuqen-attachment-list{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}.zuqen-attachment-chip{display:flex;align-items:center;gap:8px;max-width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:10px;background:var(--panel-2);color:var(--muted);font-size:10px}.zuqen-attachment-chip-name{max-width:210px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)}.zuqen-attachment-remove{display:grid;place-items:center;background:transparent;color:var(--muted);cursor:pointer}.zuqen-edit-area{padding:12px;border:1px solid var(--border-strong);border-radius:14px;background:var(--panel)}.zuqen-edit-area textarea{width:100%;resize:vertical;min-height:110px;border:0;outline:0;background:transparent;color:var(--text);font-size:13px;line-height:1.7}.zuqen-edit-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:9px}.zuqen-small-button{padding:8px 11px;border-radius:8px;background:var(--panel-3);color:var(--text);font-size:10px;cursor:pointer}.zuqen-small-button.primary{background:var(--accent);color:var(--accent-text);font-weight:800}
+        .zuqen-composer-area{position:relative;padding:12px 25px 19px;background:linear-gradient(0deg,var(--bg) 65%,transparent)}.zuqen-composer{width:min(880px,100%);margin:0 auto;padding:10px 11px 9px;border:1px solid rgba(212,243,106,.23);border-radius:19px;background:rgba(27,39,30,.93);box-shadow:0 18px 60px rgba(0,0,0,.18),inset 0 1px rgba(255,255,255,.04);backdrop-filter:blur(25px)}.light .zuqen-composer{background:rgba(255,255,255,.92)}.zuqen-composer-row{display:flex;align-items:flex-end;gap:10px}.zuqen-attach-label{width:39px;height:39px;flex:0 0 39px;display:grid;place-items:center;border-radius:12px;background:var(--panel-3);color:var(--muted);cursor:pointer}.zuqen-attach-label:hover{color:var(--accent)}.zuqen-attach-label input{display:none}.zuqen-composer textarea{flex:1;min-width:0;max-height:220px;min-height:39px;padding:10px 2px 7px;resize:none;border:0;outline:0;background:transparent;color:var(--text);font-size:13px;line-height:1.6}.zuqen-composer textarea::placeholder{color:var(--muted-2)}.zuqen-send{width:39px;height:39px;flex:0 0 39px;display:grid;place-items:center;border-radius:12px;background:var(--accent);color:var(--accent-text);cursor:pointer;transition:.18s}.zuqen-send:hover:not(:disabled){transform:translateY(-1px);filter:brightness(1.06)}.zuqen-send:disabled{opacity:.35;cursor:not-allowed}.zuqen-composer-footer{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 4px 0;color:var(--muted-2);font-size:9px}.zuqen-jump-latest{position:absolute;z-index:12;left:50%;bottom:112px;transform:translateX(-50%);display:flex;align-items:center;gap:8px;padding:10px 14px;border:1px solid var(--border-strong);border-radius:999px;background:rgba(35,49,38,.96);color:var(--text);box-shadow:0 10px 30px rgba(0,0,0,.2);backdrop-filter:blur(18px);font-size:10px;font-weight:700;cursor:pointer;animation:message-in .18s ease}.light .zuqen-jump-latest{background:rgba(255,255,255,.95)}
+        .zuqen-error{display:flex;align-items:center;gap:10px;margin:12px 22px;padding:12px 14px;border:1px solid rgba(255,140,130,.28);border-radius:12px;background:rgba(255,100,90,.08);color:var(--danger);font-size:11px}.zuqen-empty-chat{flex:1;min-height:260px;display:flex;align-items:center;justify-content:center;padding:30px}.zuqen-empty-chat-inner{text-align:center;max-width:360px}.zuqen-empty-chat-icon{width:52px;height:52px;margin:0 auto 17px;display:grid;place-items:center;border:1px solid var(--border);border-radius:17px;background:var(--panel-2);color:var(--accent)}.zuqen-empty-chat h2{margin:0;font:700 19px Manrope,sans-serif;letter-spacing:-.5px}.zuqen-empty-chat p{margin:10px 0 0;color:var(--muted);font-size:12px;line-height:1.7}
+        .zuqen-mobile-overlay{display:none}.zuqen-app ::-webkit-scrollbar{width:7px;height:7px}.zuqen-app ::-webkit-scrollbar-thumb{border:2px solid transparent;border-radius:10px;background:rgba(151,175,146,.25);background-clip:padding-box}.zuqen-app ::-webkit-scrollbar-thumb:hover{background:rgba(151,175,146,.42);background-clip:padding-box}
+        @keyframes typing{0%,60%,100%{transform:translateY(0);opacity:.45}30%{transform:translateY(-4px);opacity:1}}@keyframes message-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+        @media(max-width:1100px){.zuqen-suggestion-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.zuqen-agent-cards{grid-template-columns:repeat(2,minmax(0,1fr))}.zuqen-welcome h1{letter-spacing:-2.7px}.zuqen-topbar{padding:0 18px}}
+        @media(max-width:760px){.zuqen-mobile-overlay{display:block}.zuqen-sidebar{position:fixed;left:0;top:0;bottom:0;height:100dvh;width:min(300px,86vw);flex-basis:min(300px,86vw);box-shadow:var(--shadow)}.zuqen-sidebar.closed{width:0;flex-basis:0;box-shadow:none}.zuqen-mobile-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);backdrop-filter:blur(3px);z-index:25}.zuqen-topbar{height:64px;min-height:64px;padding:0 12px}.zuqen-top-left,.zuqen-top-right{gap:7px}.zuqen-agent-button{padding:6px 8px;gap:7px}.zuqen-agent-button-icon{width:28px;height:28px}.zuqen-agent-button-sub,.zuqen-credit-label{display:none}.zuqen-credit-button{padding:9px}.zuqen-home{padding:44px 17px 30px}.zuqen-welcome h1{font-size:clamp(38px,10vw,58px);letter-spacing:-2.5px}.zuqen-welcome p{font-size:12px}.zuqen-search-card{margin-top:26px;min-height:72px;padding:10px;gap:9px}.zuqen-search-card input{font-size:12px}.zuqen-suggestion-grid{gap:8px}.zuqen-suggestion{min-height:118px;padding:14px}.zuqen-suggestion-title{font-size:11px}.zuqen-suggestion-text{font-size:9px}.zuqen-agent-cards{gap:8px}.zuqen-mini-agent{padding:10px;gap:8px}.zuqen-mini-agent-desc{font-size:8px}.zuqen-messages{padding:22px 13px 22px}.zuqen-message-block{max-width:96%}.zuqen-message-row.assistant .zuqen-message-block{width:100%}.zuqen-message-bubble{padding:13px 14px;font-size:12px}.zuqen-composer-area{padding:8px 10px 12px}.zuqen-composer{border-radius:16px}.zuqen-composer-footer{font-size:8px}.zuqen-jump-latest{bottom:105px}.zuqen-search-overlay{left:10px;right:10px;top:58px}}
+        @media(max-width:420px){.zuqen-agent-button-name{max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.zuqen-topbar .zuqen-top-left>.zuqen-icon-button:nth-child(2){display:none}.zuqen-suggestion-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.zuqen-agent-cards{grid-template-columns:1fr}.zuqen-mini-agent{min-height:58px}.zuqen-welcome:before{font-size:8px;letter-spacing:1.8px}.zuqen-credit-count{font-size:11px}}
+        @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
+        /* ZUQEN ivory + burnt-orange visual system */
+        .zuqen-app{--bg:#f4f0e9;--panel:rgba(255,252,246,.96);--panel-2:#eee7dc;--panel-3:#e7ded1;--border:rgba(49,48,40,.12);--border-strong:rgba(49,48,40,.22);--text:#252923;--muted:#746c61;--muted-2:#928779;--accent:#d8794b;--accent-text:#fffaf5;--danger:#a63d32;--shadow:0 24px 70px rgba(64,48,31,.12);background:#f4f0e9;color:#252923}
+        .zuqen-app.light{--bg:#faf7f1;--panel:rgba(255,255,252,.98);--panel-2:#f0e9df;--panel-3:#e9dfd3;--border:rgba(49,48,40,.13);--border-strong:rgba(49,48,40,.23);--text:#252923;--muted:#746c61;--muted-2:#928779;--accent:#c9693f;--accent-text:#fffaf5;background:#faf7f1}
+        .zuqen-sidebar{background:#eee8de;border-right-color:#ded5c8}.light .zuqen-sidebar{background:#f8f4ec}.zuqen-brand{border-bottom-color:#ded5c8}.zuqen-logo{background:#252923;box-shadow:none}.zuqen-logo:before{border-color:#f4f0e9}.zuqen-logo:after{background:#d8794b}.zuqen-brand-name{color:#252923}.zuqen-brand-sub{color:#81776b}
+        .zuqen-new-chat{background:#252923;color:#fffaf5;box-shadow:0 8px 24px rgba(37,41,35,.12)}.zuqen-new-chat:hover{filter:brightness(1.15)}.zuqen-sidebar-heading{color:#928779}.zuqen-chat-item{color:#746c61}.zuqen-chat-item:hover{background:#e6ded2;color:#252923}.zuqen-chat-item.active{background:#f6e2d5;border-color:#e7c5b0;color:#252923}.zuqen-chat-item.active:before{background:#d8794b}.zuqen-chat-date{color:#928779}.zuqen-chat-menu,.zuqen-agent-dropdown,.zuqen-credit-dropdown{background:#fffaf3;color:#252923;border-color:#ded5c8}.zuqen-chat-menu button{color:#746c61}.zuqen-chat-menu button:hover{background:#f0e7dc;color:#252923}.zuqen-sidebar-bottom{border-top-color:#ded5c8}.zuqen-sidebar-user{border-color:#ded5c8;background:rgba(255,255,255,.45)}.zuqen-user-avatar{background:#252923;color:#f4f0e9}.zuqen-sidebar-link{color:#746c61}.zuqen-sidebar-link:hover{background:#e6ded2;color:#252923}
+        .zuqen-topbar{background:rgba(244,240,233,.9);border-bottom-color:#ded5c8;backdrop-filter:blur(18px)}.light .zuqen-topbar{background:rgba(250,247,241,.92)}.zuqen-icon-button,.zuqen-agent-button,.zuqen-credit-button{background:rgba(255,255,255,.58);border-color:#ded5c8;color:#5e5a51}.zuqen-icon-button:hover{background:#e9dfd3;color:#252923}.zuqen-agent-button-icon{background:#f6e2d5;color:#b9653c}.zuqen-agent-option{color:#252923}.zuqen-agent-option:hover,.zuqen-agent-option.selected{background:#f0e7dc}.zuqen-agent-option-icon{background:#f6e2d5;color:#b9653c}.zuqen-agent-check,.zuqen-credit-icon{color:#b9653c}.zuqen-credit-count{color:#252923}.zuqen-credit-dropdown-title,.zuqen-credit-row strong{color:#252923}
+        .zuqen-content{background:#f4f0e9}.zuqen-home{padding:clamp(26px,5vh,56px) 30px 48px;background:radial-gradient(ellipse at 82% 0%,rgba(216,121,75,.09),transparent 32%),#f4f0e9}.zuqen-home-inner{width:min(1050px,100%)}.zuqen-welcome{max-width:900px;padding:0 0 6px 2px}.zuqen-welcome:before{content:'WELCOME TO ZUQEN CORE';color:#b9653c;letter-spacing:2.2px;margin-bottom:18px}.zuqen-welcome h1{font-size:clamp(42px,5.2vw,66px);letter-spacing:-3.5px;font-weight:600;color:#252923}.zuqen-welcome h1 em{color:#b9653c}.zuqen-welcome p{color:#746c61;font-size:13px;margin-top:14px}
+        .zuqen-search-card{margin:25px auto 0;width:min(900px,100%);min-height:0;padding:16px 16px 13px;display:flex;flex-wrap:wrap;align-items:center;gap:12px;border:1px solid #464940;border-radius:22px;background:#252923;box-shadow:0 22px 55px rgba(43,38,31,.17),inset 0 1px rgba(255,255,255,.05);backdrop-filter:blur(22px)}.zuqen-search-card-icon{width:38px;height:38px;flex:0 0 38px;background:#3b3d33;color:#f1a477;border-radius:12px}.zuqen-search-card input{color:#f4f0e9;font-size:14px;min-height:38px}.zuqen-search-card input::placeholder{color:#aaa99e}.zuqen-search-shortcut{color:#c8c1b5;border-color:#494a40}.zuqen-search-card:after{content:'ATTACH FILES  ·  CHOOSE AN AGENT  ·  ENTER TO SEND';flex-basis:100%;padding:8px 3px 0;border-top:1px solid #494a40;color:#aaa99e;font-size:8px;letter-spacing:1.1px}
+        .zuqen-suggestion-grid{margin:25px auto 0;width:min(900px,100%);grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.zuqen-suggestion{min-height:0;padding:17px;border-color:#ded5c8;border-radius:18px;background:#e6e0d6;color:#252923}.zuqen-suggestion:before{left:0;right:0;height:3px;background:var(--card-accent,#d8794b)}.zuqen-suggestion:nth-child(2){--card-accent:#8a619b}.zuqen-suggestion:nth-child(3){--card-accent:#688064}.zuqen-suggestion:nth-child(4){--card-accent:#b9653c}.zuqen-suggestion:hover{background:#f9f5ed;border-color:#d6c7b7}.zuqen-suggestion-icon{color:var(--card-accent,#b9653c);font-size:18px}.zuqen-suggestion-title{margin-top:10px;font-size:13px;color:#252923}.zuqen-suggestion-text{font-size:10px;color:#746c61}.zuqen-agent-strip{width:min(900px,100%);margin:30px auto 0}.zuqen-strip-title{color:#928779}.zuqen-agent-cards{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.zuqen-mini-agent{border-color:#ded5c8;background:rgba(255,255,255,.48);color:#252923}.zuqen-mini-agent:hover{background:#fffaf3;border-color:#d6c7b7}.zuqen-mini-agent-icon{background:#f6e2d5;color:#b9653c}.zuqen-mini-agent-desc{color:#81776b}
+        .zuqen-message-row.user .zuqen-message-bubble{background:linear-gradient(140deg,#d8794b,#bd623d);color:#fffaf5;border-color:rgba(185,101,60,.25);box-shadow:0 10px 28px rgba(185,101,60,.12)}.zuqen-message-row.assistant .zuqen-message-bubble{background:#fffaf3;border-color:#e3dbd0;color:#252923}.zuqen-message-label{color:#928779}.zuqen-message-label-mark{background:#f6e2d5;color:#b9653c}.zuqen-action{color:#81776b}.zuqen-action:hover{background:#eee7dc;color:#252923}.zuqen-composer-area{background:linear-gradient(0deg,#f4f0e9 72%,rgba(244,240,233,0))}.zuqen-composer{border-color:#494a40;background:#252923;box-shadow:0 18px 48px rgba(43,38,31,.15)}.light .zuqen-composer{background:#252923}.zuqen-composer textarea{color:#f4f0e9}.zuqen-composer textarea::placeholder{color:#aaa99e}.zuqen-attach-label{background:#34372f;color:#e5dfd3}.zuqen-attach-label:hover{color:#f1a477}.zuqen-send{background:#d8794b;color:#fffaf5}.zuqen-composer-footer{color:#aaa99e}.zuqen-jump-latest{background:#fffaf3;color:#252923;border-color:#ded5c8}.zuqen-error{background:#fff0ed;border-color:#e5b6ae;color:#a63d32}.zuqen-empty-chat-icon{background:#f6e2d5;color:#b9653c}.zuqen-empty-chat h2{color:#252923}.zuqen-empty-chat p{color:#746c61}
+        .zuqen-home-tools{width:min(900px,100%);margin:29px auto 0}.zuqen-home-tools-title{font:700 16px Manrope,sans-serif;color:#252923;margin:0 0 13px}.zuqen-home-tools-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.zuqen-home-tool{display:flex;align-items:center;gap:13px;width:100%;padding:16px;text-align:left;border:1px solid #ded5c8;border-radius:17px;background:#e8d5c2;color:#252923;cursor:pointer;transition:transform .18s,border-color .18s,background .18s}.zuqen-home-tool:hover{transform:translateY(-2px);background:#f7e9dc;border-color:#d6b9a2}.zuqen-home-tool.marketplace{background:#e3e4d9}.zuqen-home-tool.marketplace:hover{background:#f1f0e8}.zuqen-home-tool-icon{display:grid;place-items:center;flex:0 0 46px;width:46px;height:46px;border-radius:13px;background:#b9653c;color:#fffaf5;font-size:23px}.zuqen-home-tool.marketplace .zuqen-home-tool-icon{background:#303c35}.zuqen-home-tool-copy{flex:1;min-width:0}.zuqen-home-tool-title{font-weight:800;font-size:13px}.zuqen-home-tool-desc{margin-top:5px;font-size:10px;line-height:1.6;color:#6d6257}.zuqen-home-tool-link{margin-top:8px;font-size:8px;letter-spacing:1px;font-weight:800;color:#8b4e32}.zuqen-home-footer{width:min(900px,100%);margin:17px auto 0;padding:18px 20px;border-radius:17px;background:#252923;color:#f7f2e9}.zuqen-home-footer-label{font-size:9px;font-weight:800;letter-spacing:1.7px;color:#d8794b}.zuqen-home-footer-title{margin-top:8px;font:700 21px/1.2 Manrope,sans-serif}.zuqen-home-footer-sub{margin-top:7px;font-size:10px;color:#c8c5b9}
+        .zuqen-mode-row{display:flex;flex-wrap:wrap;gap:7px;flex-basis:100%;padding:0 0 11px;border-bottom:1px solid #494a40}.zuqen-mode-chip{padding:7px 12px;border-radius:999px;background:#34372f;color:#d9d4c9;font-size:10px;cursor:pointer}.zuqen-mode-chip.active{background:#d8794b;color:#fff}.zuqen-home-voice{border:1px solid #494a40;border-radius:11px;width:38px;height:38px;background:#34372f;color:#e5dfd3;cursor:pointer}.zuqen-home-voice.listening{background:#d8794b;color:#fff}
+        .zuqen-home-composer{display:block;padding:16px 17px 13px}.zuqen-home-composer-heading{display:flex;align-items:center;gap:10px;color:#f1a477;font-size:9px;font-weight:800;letter-spacing:1.3px}.zuqen-home-composer-heading .zuqen-search-card-icon{width:34px;height:34px;flex:0 0 34px}.zuqen-composer-status{margin-left:auto;color:#aaa99e;font-size:8px;letter-spacing:.8px}.zuqen-home-composer>input{display:block;width:100%;min-height:55px;margin:5px 0 8px;padding:8px 2px;border:0;outline:0;background:transparent;color:#f4f0e9;font-size:14px}.zuqen-home-composer>input::placeholder{color:#aaa99e}.zuqen-home-composer .zuqen-mode-row{margin-top:3px}.zuqen-home-composer-toolbar{display:flex;align-items:center;gap:9px;padding-top:11px}.zuqen-home-composer-toolbar .zuqen-attach-label{margin:0}.zuqen-home-selected-agent{font-size:10px;color:#e5dfd3;padding:9px 11px;border-radius:10px;background:#34372f;border:0;cursor:pointer}.zuqen-home-selected-agent:hover{background:#41443a}.zuqen-home-composer-toolbar .zuqen-search-shortcut{margin-left:auto}.zuqen-home-attachments{margin:0 0 10px}.zuqen-agent-cards{grid-template-columns:repeat(2,minmax(0,1fr));align-items:stretch}.zuqen-mini-agent.picture-card{display:flex;flex-direction:column;align-items:stretch;gap:7px;padding:12px;text-align:left;min-height:0;border:1px solid #ded5c8;border-radius:17px;background:#e9e2d8;overflow:hidden}.zuqen-mini-agent.picture-card:hover{background:#fffaf3;border-color:#d6c7b7;transform:translateY(-3px)}.zuqen-card-art{display:block;width:100%;height:auto;aspect-ratio:2/1;object-fit:cover;border-radius:11px;margin-bottom:4px}.zuqen-card-meta{display:block;font-size:8px;letter-spacing:1.1px;font-weight:800;color:#b9653c}.zuqen-card-meta.purple{color:#8a619b}.zuqen-card-meta.green{color:#688064}.zuqen-card-meta.orange{color:#b9653c}.zuqen-mini-agent.picture-card .zuqen-mini-agent-name{font-size:13px;color:#252923}.zuqen-mini-agent.picture-card .zuqen-mini-agent-desc{font-size:10px;line-height:1.5;color:#746c61}.zuqen-mini-agent.picture-card:nth-child(1){background:#dce5e2}.zuqen-mini-agent.picture-card:nth-child(2){background:#e6dceb}.zuqen-mini-agent.picture-card:nth-child(3){background:#dde5d9}.zuqen-mini-agent.picture-card:nth-child(4){background:#f0dccb}.zuqen-mini-agent.picture-card:nth-child(5){grid-column:1/-1;display:grid;grid-template-columns:125px 1fr;grid-template-rows:auto auto auto;column-gap:15px;align-items:center;background:#e6ded0}.zuqen-mini-agent.picture-card:nth-child(5) .zuqen-chat-card-art{grid-column:1;grid-row:1/4;position:relative;display:grid;place-items:center;min-height:95px;border-radius:12px;background:radial-gradient(circle at 50% 50%,#d8794b 0 8%,#b9653c 9% 18%,#303c35 19% 40%,#252923 41% 100%);color:#fffaf5;font-size:34px;overflow:hidden}.zuqen-chat-card-art>span:first-child{position:relative;z-index:2}.zuqen-chat-orbit{position:absolute;width:83px;height:83px;border:1px solid rgba(255,250,245,.5);border-radius:50%}.zuqen-chat-orbit.orbit-two{width:106px;height:58px;transform:rotate(-35deg)}.zuqen-mini-agent.picture-card:nth-child(5) .zuqen-card-meta,.zuqen-mini-agent.picture-card:nth-child(5) .zuqen-mini-agent-name,.zuqen-mini-agent.picture-card:nth-child(5) .zuqen-mini-agent-desc{grid-column:2}.zuqen-mini-agent.picture-card:nth-child(5) .zuqen-card-meta{grid-row:1}.zuqen-mini-agent.picture-card:nth-child(5) .zuqen-mini-agent-name{grid-row:2}.zuqen-mini-agent.picture-card:nth-child(5) .zuqen-mini-agent-desc{grid-row:3}
+        @media(max-width:760px){.zuqen-home-composer-toolbar{gap:6px}.zuqen-home-selected-agent{display:none}.zuqen-composer-status{font-size:7px}.zuqen-mini-agent.picture-card:nth-child(5){grid-template-columns:95px 1fr}.zuqen-mini-agent.picture-card:nth-child(5) .zuqen-chat-card-art{min-height:80px}}
 
-/* The navigation is a floating glass object, not a flat rail. */
-.zuqen-sidebar {
-  width: 292px;
-  flex: 0 0 292px;
-  height: 100dvh;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  position: relative;
-  z-index: 40;
-  overflow: hidden;
-  background: linear-gradient(160deg, rgba(17, 39, 31, .79), rgba(7, 19, 15, .74));
-  border-right: 1px solid rgba(205, 255, 225, .1);
-  backdrop-filter: blur(32px) saturate(145%);
-  -webkit-backdrop-filter: blur(32px) saturate(145%);
-  box-shadow: 14px 0 60px rgba(0, 0, 0, .09), inset -1px 0 0 rgba(255, 255, 255, .025);
-  transition: width .42s var(--z-motion), flex-basis .42s var(--z-motion), transform .42s var(--z-motion);
-}.light .zuqen-sidebar {
-  background: linear-gradient(160deg, rgba(255,255,255,.82), rgba(236,247,239,.76));
-  border-right-color: rgba(26, 82, 50, .1);
-  box-shadow: 12px 0 48px rgba(25, 67, 43, .055);
-}.zuqen-sidebar.closed {
-  width: 0;
-  flex-basis: 0;
-  border-right: 0;
-}.zuqen-brand {
-  min-height: 92px;
-  padding: 0 23px;
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  position: relative;
-}.zuqen-brand::after {
-  content: "";
-  position: absolute;
-  left: 23px;
-  right: 23px;
-  bottom: 0;
-  height: 1px;
-  background: linear-gradient(90deg, rgba(168,255,203,.3), rgba(168,255,203,0));
-}.zuqen-logo {
-  width: 43px;
-  height: 43px;
-  flex: 0 0 43px;
-  display: grid;
-  place-items: center;
-  position: relative;
-  overflow: hidden;
-  border-radius: 15px;
-  background: linear-gradient(145deg, #c6ffda 0%, #69e5a1 42%, #1f8860 100%);
-  box-shadow: 0 8px 28px rgba(76, 226, 142, .23), inset 0 1px 0 rgba(255,255,255,.75);
-  animation: logoBreath 5s ease-in-out infinite;
-}.zuqen-logo::before {
-  content: "";
-  width: 21px;
-  height: 21px;
-  border: 2px solid #092017;
-  border-radius: 50% 50% 46% 50%;
-  transform: rotate(-35deg);
-  position: absolute;
-  box-shadow: inset 0 0 0 4px rgba(9,32,23,.06);
-}.zuqen-logo::after {
-  content: "";
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #092017;
-  position: absolute;
-  box-shadow: 0 0 0 5px rgba(9,32,23,.08);
-}.zuqen-brand-text {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  min-width: 0;
-}.zuqen-brand-name {
-  font-size: 17px;
-  line-height: 1;
-  letter-spacing: 2.1px;
-  font-weight: 850;
-}.zuqen-brand-sub {
-  color: var(--muted-2);
-  font-size: 9px;
-  letter-spacing: 2px;
-  text-transform: uppercase;
-  white-space: nowrap;
-}.zuqen-sidebar-content {
-  padding: 18px 14px 15px;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  flex: 1;
-}.zuqen-new-chat {
-  width: 100%;
-  min-height: 49px;
-  padding: 0 15px;
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  border: 1px solid rgba(168,255,203,.24);
-  border-radius: 15px;
-  color: #082017;
-  background: linear-gradient(115deg, #c5ffda, #79edab 65%, #5bd28e);
-  box-shadow: 0 8px 28px rgba(80, 214, 137, .12), inset 0 1px 0 rgba(255,255,255,.65);
-  cursor: pointer;
-  transition: transform .25s var(--z-motion), box-shadow .25s ease, filter .25s ease;
-}.zuqen-new-chat:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 13px 34px rgba(80,214,137,.21);
-  filter: saturate(1.08);
-}.zuqen-new-chat:active {
-  transform: translateY(0) scale(.99);
-}.zuqen-new-chat span:last-child {
-  font-size: 12px;
-  font-weight: 760;
-  letter-spacing: .1px;
-}.zuqen-quick-links {
-  display: grid;
-  gap: 7px;
-  margin-top: 13px;
-}.zuqen-quick-link {
-  width: 100%;
-  min-height: 43px;
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  padding: 0 12px;
-  border: 1px solid transparent;
-  border-radius: 13px;
-  background: transparent;
-  color: var(--muted);
-  text-align: left;
-  cursor: pointer;
-  transition: color .22s ease, background .22s ease, border-color .22s ease, transform .22s ease;
-}.zuqen-quick-link:hover {
-  color: var(--text);
-  background: rgba(216,255,231,.06);
-  border-color: var(--border);
-  transform: translateX(2px);
-}.zuqen-quick-link .quick-icon {
-  width: 29px;
-  height: 29px;
-  display: grid;
-  place-items: center;
-  border-radius: 10px;
-  background: rgba(216,255,231,.065);
-  color: var(--z-jade);
-}.zuqen-quick-link .quick-copy {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}.zuqen-quick-link .quick-title {
-  color: var(--text);
-  font-size: 11px;
-  font-weight: 690;
-}.zuqen-quick-link .quick-subtitle {
-  color: var(--muted-2);
-  font-size: 9px;
-}.zuqen-quick-link .quick-tag {
-  padding: 4px 6px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--muted-2);
-  font-size: 8px;
-  letter-spacing: .5px;
-}.zuqen-sidebar-section {
-  margin-top: 24px;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-}.zuqen-sidebar-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 8px 11px;
-  color: var(--muted-2);
-  font-size: 9px;
-  text-transform: uppercase;
-  letter-spacing: 1.8px;
-  font-weight: 800;
-}.zuqen-sidebar-heading button {
-  width: 27px;
-  height: 27px;
-  display: grid;
-  place-items: center;
-  color: var(--muted);
-  background: transparent;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: background .2s ease, color .2s ease;
-}.zuqen-sidebar-heading button:hover {
-  color: var(--text);
-  background: var(--panel-3);
-}.zuqen-chat-list {
-  overflow-y: auto;
-  padding-right: 2px;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(168,255,203,.15) transparent;
-}.zuqen-chat-list::-webkit-scrollbar, .zuqen-messages::-webkit-scrollbar {
-  width: 5px;
-}.zuqen-chat-list::-webkit-scrollbar-thumb, .zuqen-messages::-webkit-scrollbar-thumb {
-  background: rgba(168,255,203,.16);
-  border-radius: 99px;
-}.zuqen-chat-item {
-  position: relative;
-  display: flex;
-  align-items: center;
-  width: 100%;
-  min-height: 49px;
-  padding: 8px 8px 8px 11px;
-  border: 1px solid transparent;
-  border-radius: 13px;
-  color: var(--muted);
-  background: transparent;
-  cursor: pointer;
-  text-align: left;
-  margin-bottom: 3px;
-  transition: background .2s ease, border-color .2s ease, color .2s ease;
-}.zuqen-chat-item:hover {
-  color: var(--text);
-  background: rgba(220,255,235,.045);
-}.zuqen-chat-item.active {
-  color: var(--text);
-  background: linear-gradient(110deg, rgba(168,255,203,.105), rgba(168,255,203,.025));
-  border-color: rgba(168,255,203,.13);
-  box-shadow: inset 3px 0 0 var(--z-jade);
-}.zuqen-chat-main {
-  min-width: 0;
-  flex: 1;
-}.zuqen-chat-title {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 11px;
-  font-weight: 590;
-  letter-spacing: .05px;
-}.zuqen-chat-date {
-  margin-top: 4px;
-  font-size: 9px;
-  color: var(--muted-2);
-}.zuqen-chat-menu-button {
-  width: 28px;
-  height: 28px;
-  flex: 0 0 28px;
-  display: grid;
-  place-items: center;
-  color: var(--muted-2);
-  background: transparent;
-  border-radius: 9px;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity .2s ease, background .2s ease, color .2s ease;
-}.zuqen-chat-item:hover .zuqen-chat-menu-button, .zuqen-chat-menu-button.open, .zuqen-chat-menu-button:focus-visible {
-  opacity: 1;
-}.zuqen-chat-menu-button:hover {
-  color: var(--text);
-  background: var(--panel-3);
-}.zuqen-rename {
-  width: 100%;
-  padding: 8px;
-  border-radius: 9px;
-  border: 1px solid var(--border-strong);
-  outline: none;
-  background: var(--panel);
-  color: var(--text);
-  font-size: 11px;
-}.zuqen-floating-menu {
-  position: absolute;
-  right: 8px;
-  top: 42px;
-  width: 176px;
-  padding: 6px;
-  border-radius: 15px;
-  background: rgba(10,26,20,.96);
-  border: 1px solid var(--border-strong);
-  box-shadow: var(--z-shadow);
-  backdrop-filter: blur(24px);
-  z-index: 70;
-  animation: popIn .18s var(--z-motion);
-}.light .zuqen-floating-menu {
-  background: rgba(250,255,251,.97);
-}.zuqen-menu-item {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 10px;
-  border-radius: 10px;
-  background: transparent;
-  color: var(--muted);
-  text-align: left;
-  cursor: pointer;
-  font-size: 11px;
-  transition: background .18s ease, color .18s ease;
-}.zuqen-menu-item:hover {
-  background: var(--panel-3);
-  color: var(--text);
-}.zuqen-menu-item.danger:hover {
-  color: var(--danger);
-}.zuqen-sidebar-bottom {
-  padding-top: 13px;
-  border-top: 1px solid var(--border);
-  margin-top: auto;
-}.zuqen-sidebar-user {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 9px;
-  border-radius: 13px;
-}.zuqen-user-dot {
-  width: 34px;
-  height: 34px;
-  display: grid;
-  place-items: center;
-  flex: 0 0 34px;
-  border-radius: 12px;
-  background: linear-gradient(145deg, rgba(168,255,203,.24), rgba(168,255,203,.06));
-  border: 1px solid rgba(168,255,203,.2);
-  color: var(--z-jade);
-  font-size: 11px;
-  font-weight: 850;
-}.zuqen-user-info {
-  min-width: 0;
-  flex: 1;
-}.zuqen-user-name {
-  font-size: 10px;
-  font-weight: 720;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}.zuqen-user-status {
-  color: var(--muted-2);
-  font-size: 9px;
-  margin-top: 4px;
-}.zuqen-auth-button {
-  width: 100%;
-  min-height: 37px;
-  margin-top: 7px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  border-radius: 11px;
-  background: var(--panel-2);
-  border: 1px solid var(--border);
-  color: var(--text);
-  cursor: pointer;
-  font-size: 10px;
-  font-weight: 680;
-  transition: background .2s ease, border-color .2s ease;
-}.zuqen-auth-button:hover {
-  background: var(--panel-3);
-  border-color: var(--border-strong);
-}.zuqen-auth-button.primary {
-  color: #082017;
-  background: var(--z-jade);
-  border-color: transparent;
-}.zuqen-auth-button:disabled {
-  opacity: .55;
-  cursor: wait;
-}
+        @media(max-width:760px){.zuqen-home{padding:35px 16px 28px}.zuqen-welcome h1{font-size:clamp(39px,10vw,55px);letter-spacing:-2.3px}.zuqen-home-tools-grid{grid-template-columns:1fr}.zuqen-search-card{padding:13px}.zuqen-search-card:after{font-size:7px;letter-spacing:.6px}.zuqen-suggestion-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.zuqen-agent-cards{grid-template-columns:1fr}.zuqen-topbar{background:#f4f0e9}}
+      `}</style>
 
-/* Main canvas and floating command bar. */
-.zuqen-main { min-width: 0; flex: 1; height: 100dvh; display: flex; flex-direction: column; position: relative; overflow: hidden; }.zuqen-topbar {
-  min-height: 78px;
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 15px;
-  padding: 13px 25px;
-  position: relative;
-  z-index: 25;
-  background: linear-gradient(180deg, rgba(11,28,22,.54), rgba(11,28,22,.23));
-  border-bottom: 1px solid rgba(204,255,226,.075);
-  backdrop-filter: blur(26px);
-  -webkit-backdrop-filter: blur(26px);
-}.light .zuqen-topbar {
-  background: linear-gradient(180deg, rgba(250,255,251,.72), rgba(250,255,251,.3));
-}.zuqen-top-left, .zuqen-top-right {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  min-width: 0;
-}.zuqen-icon-button {
-  width: 39px;
-  height: 39px;
-  flex: 0 0 39px;
-  display: grid;
-  place-items: center;
-  border: 1px solid var(--border);
-  border-radius: 13px;
-  background: rgba(220,255,235,.035);
-  color: var(--muted);
-  cursor: pointer;
-  transition: color .2s ease, background .2s ease, border-color .2s ease, transform .2s ease;
-}.zuqen-icon-button:hover {
-  color: var(--text);
-  background: rgba(220,255,235,.085);
-  border-color: var(--border-strong);
-  transform: translateY(-1px);
-}.zuqen-agent-selector {
-  position: relative;
-  min-width: 0;
-}.zuqen-agent-button {
-  min-height: 43px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 5px 11px;
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  color: var(--text);
-  background: rgba(220,255,235,.045);
-  cursor: pointer;
-  transition: background .2s ease, border-color .2s ease;
-}.zuqen-agent-button:hover {
-  background: rgba(220,255,235,.08);
-  border-color: var(--border-strong);
-}.zuqen-agent-button-icon {
-  width: 31px;
-  height: 31px;
-  display: grid;
-  place-items: center;
-  border-radius: 10px;
-  color: #082017;
-  background: linear-gradient(145deg, #c6ffda, #61dc98);
-  box-shadow: 0 5px 18px rgba(95,220,152,.13);
-}.zuqen-agent-button-text {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  text-align: left;
-}.zuqen-agent-button-name {
-  font-size: 11px;
-  font-weight: 760;
-  white-space: nowrap;
-}.zuqen-agent-button-sub {
-  color: var(--muted-2);
-  font-size: 8px;
-  letter-spacing: .6px;
-  text-transform: uppercase;
-}.zuqen-agent-dropdown {
-  position: absolute;
-  top: calc(100% + 10px);
-  left: 0;
-  width: min(320px, calc(100vw - 32px));
-  padding: 8px;
-  border: 1px solid var(--border-strong);
-  border-radius: 19px;
-  background: rgba(8,24,18,.96);
-  box-shadow: var(--z-shadow);
-  backdrop-filter: blur(28px);
-  z-index: 80;
-  animation: popIn .2s var(--z-motion);
-}.light .zuqen-agent-dropdown {
-  background: rgba(250,255,251,.97);
-}.zuqen-agent-option {
-  width: 100%;
-  min-height: 57px;
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  padding: 8px 10px;
-  border: 1px solid transparent;
-  border-radius: 13px;
-  background: transparent;
-  color: var(--muted);
-  text-align: left;
-  cursor: pointer;
-  transition: background .18s ease, border-color .18s ease;
-}.zuqen-agent-option:hover, .zuqen-agent-option.selected {
-  background: var(--panel-2);
-  border-color: var(--border);
-}.zuqen-agent-option-icon {
-  width: 35px;
-  height: 35px;
-  display: grid;
-  place-items: center;
-  flex: 0 0 35px;
-  border-radius: 11px;
-  background: rgba(168,255,203,.08);
-  color: var(--z-jade);
-  font-size: 16px;
-}.zuqen-agent-option-content {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-  flex: 1;
-}.zuqen-agent-option-name {
-  color: var(--text);
-  font-size: 11px;
-  font-weight: 750;
-}.zuqen-agent-option-description {
-  color: var(--muted-2);
-  font-size: 9px;
-}.zuqen-agent-check {
-  color: var(--z-jade);
-}.zuqen-top-right {
-  gap: 8px;
-}.zuqen-top-action {
-  min-height: 39px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 0 12px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: rgba(220,255,235,.035);
-  color: var(--muted);
-  cursor: pointer;
-  white-space: nowrap;
-  font-size: 10px;
-  font-weight: 730;
-  transition: color .2s ease, background .2s ease, border-color .2s ease, transform .2s ease;
-}.zuqen-top-action:hover {
-  color: var(--text);
-  background: rgba(220,255,235,.085);
-  border-color: var(--border-strong);
-  transform: translateY(-1px);
-}.zuqen-top-action.automation-action .action-symbol {
-  color: var(--z-cyan);
-}.zuqen-top-action.templates-action .action-symbol {
-  color: var(--z-gold);
-}.zuqen-credit-wrap {
-  position: relative;
-}.zuqen-credit-button {
-  min-height: 39px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 12px;
-  border: 1px solid rgba(168,255,203,.16);
-  border-radius: 12px;
-  color: var(--text);
-  background: rgba(168,255,203,.06);
-  cursor: pointer;
-  transition: background .2s ease, border-color .2s ease;
-}.zuqen-credit-button:hover {
-  background: rgba(168,255,203,.11);
-  border-color: rgba(168,255,203,.3);
-}.zuqen-credit-icon {
-  color: var(--z-jade);
-  font-size: 16px;
-}.zuqen-credit-count {
-  font-size: 11px;
-  font-weight: 820;
-  font-variant-numeric: tabular-nums;
-}.zuqen-credit-label {
-  color: var(--muted);
-  font-size: 9px;
-}.zuqen-credit-dropdown {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 10px);
-  width: 240px;
-  padding: 18px;
-  border: 1px solid var(--border-strong);
-  border-radius: 19px;
-  background: rgba(8,24,18,.96);
-  box-shadow: var(--z-shadow);
-  backdrop-filter: blur(28px);
-  z-index: 80;
-  animation: popIn .2s var(--z-motion);
-}.light .zuqen-credit-dropdown {
-  background: rgba(250,255,251,.97);
-}.zuqen-credit-dropdown-title {
-  font-size: 11px;
-  font-weight: 800;
-}.zuqen-credit-big {
-  margin-top: 15px;
-  color: var(--z-jade);
-  font-size: 38px;
-  line-height: 1;
-  font-weight: 800;
-  letter-spacing: -2px;
-}.zuqen-credit-small {
-  margin-top: 7px;
-  color: var(--muted);
-  font-size: 10px;
-}.zuqen-credit-line {
-  height: 1px;
-  margin: 16px 0 10px;
-  background: var(--border);
-}.zuqen-credit-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 7px 0;
-  color: var(--muted);
-  font-size: 10px;
-}.zuqen-credit-row strong {
-  color: var(--text);
-  font-weight: 700;
-}.zuqen-search-overlay {
-  position: absolute;
-  top: 72px;
-  left: 50%;
-  width: min(570px, calc(100% - 32px));
-  transform: translateX(-50%);
-  z-index: 60;
-  padding: 10px;
-  border: 1px solid var(--border-strong);
-  border-radius: 18px;
-  background: rgba(8,24,18,.95);
-  box-shadow: var(--z-shadow);
-  backdrop-filter: blur(28px);
-  animation: popIn .18s var(--z-motion);
-}.light .zuqen-search-overlay {
-  background: rgba(250,255,251,.97);
-}.zuqen-search-input-wrap {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 0 11px;
-}.zuqen-search-input-wrap > svg {
-  color: var(--muted);
-  flex: 0 0 auto;
-}.zuqen-search-input-wrap input {
-  width: 100%;
-  height: 43px;
-  border: 0;
-  outline: 0;
-  background: transparent;
-  color: var(--text);
-  font-size: 12px;
-}.zuqen-search-input-wrap input::placeholder {
-  color: var(--muted-2);
-}
-
-/* Workspace body. */
-.zuqen-content { min-height: 0; flex: 1; display: flex; flex-direction: column; position: relative; overflow: hidden; }.zuqen-error {
-  width: min(920px, calc(100% - 36px));
-  margin: 12px auto 0;
-  padding: 12px 15px;
-  border: 1px solid rgba(255,158,170,.25);
-  border-radius: 13px;
-  background: rgba(117,28,47,.18);
-  color: #ffc2ca;
-  font-size: 11px;
-  line-height: 1.5;
-}.light .zuqen-error {
-  color: #9b2f46;
-  background: rgba(255,158,170,.16);
-}.zuqen-empty-chat {
-  min-height: 0;
-  flex: 1;
-  display: grid;
-  place-items: center;
-  padding: 36px 22px;
-}.zuqen-empty-chat-inner {
-  max-width: 410px;
-  text-align: center;
-  animation: riseIn .7s var(--z-motion) both;
-}.zuqen-empty-chat-icon {
-  width: 62px;
-  height: 62px;
-  display: grid;
-  place-items: center;
-  margin: 0 auto 20px;
-  border: 1px solid rgba(168,255,203,.25);
-  border-radius: 22px;
-  background: linear-gradient(145deg, rgba(168,255,203,.16), rgba(168,255,203,.025));
-  color: var(--z-jade);
-  box-shadow: 0 14px 45px rgba(68,210,132,.09);
-}.zuqen-empty-chat h2 {
-  margin: 0;
-  color: var(--text);
-  font-size: clamp(23px, 3vw, 31px);
-  font-weight: 650;
-  letter-spacing: -1.2px;
-}.zuqen-empty-chat p {
-  margin: 11px auto 0;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.8;
-}.zuqen-chat-view {
-  min-height: 0;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  position: relative;
-  overflow: hidden;
-}.zuqen-messages {
-  min-height: 0;
-  flex: 1;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scroll-behavior: smooth;
-  padding: 29px 24px 30px;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(168,255,203,.16) transparent;
-}.zuqen-message-list {
-  width: min(920px, 100%);
-  margin: 0 auto;
-  display: flex;
-  flex-direction: column;
-  gap: 25px;
-}.zuqen-message-row {
-  width: 100%;
-  display: flex;
-  animation: messageIn .32s var(--z-motion) both;
-}.zuqen-message-row.user {
-  justify-content: flex-end;
-}.zuqen-message-row.assistant {
-  justify-content: flex-start;
-}.zuqen-message-block {
-  width: fit-content;
-  max-width: min(78%, 780px);
-  min-width: 0;
-}.zuqen-message-row.assistant .zuqen-message-block {
-  width: 100%;
-  max-width: 100%;
-}.zuqen-message-label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0 0 9px;
-  color: var(--muted-2);
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: 1.4px;
-  text-transform: uppercase;
-}.zuqen-message-row.user .zuqen-message-label {
-  justify-content: flex-end;
-}.zuqen-message-label-mark {
-  width: 23px;
-  height: 23px;
-  display: grid;
-  place-items: center;
-  border: 1px solid rgba(168,255,203,.22);
-  border-radius: 8px;
-  background: rgba(168,255,203,.1);
-  color: var(--z-jade);
-}.zuqen-message-bubble {
-  width: 100%;
-  min-width: 0;
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-size: 13px;
-  line-height: 1.85;
-  letter-spacing: .005em;
-  color: var(--text);
-}.user .zuqen-message-bubble {
-  padding: 13px 17px;
-  border: 1px solid rgba(168,255,203,.18);
-  border-radius: 21px 21px 7px 21px;
-  background: linear-gradient(135deg, rgba(96,190,133,.2), rgba(42,112,80,.12));
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 12px 30px rgba(0,0,0,.06);
-}.assistant .zuqen-message-bubble {
-  padding: 0 0 1px;
-  background: transparent;
-}.light .user .zuqen-message-bubble {
-  background: linear-gradient(135deg, rgba(88,191,126,.18), rgba(50,135,92,.09));
-}.zuqen-message-bubble p {
-  margin: 0 0 12px;
-}.zuqen-message-bubble p:last-child {
-  margin-bottom: 0;
-}.zuqen-message-bubble h1, .zuqen-message-bubble h2, .zuqen-message-bubble h3 {
-  margin: 20px 0 9px;
-  line-height: 1.3;
-  letter-spacing: -.5px;
-}.zuqen-message-bubble h1 {
-  font-size: 23px;
-}.zuqen-message-bubble h2 {
-  font-size: 19px;
-}.zuqen-message-bubble h3 {
-  font-size: 15px;
-}.zuqen-message-bubble ul, .zuqen-message-bubble ol {
-  padding-left: 23px;
-  margin: 10px 0 15px;
-}.zuqen-message-bubble li {
-  padding-left: 4px;
-  margin: 5px 0;
-}.zuqen-message-bubble blockquote {
-  margin: 14px 0;
-  padding: 5px 0 5px 15px;
-  border-left: 2px solid var(--z-jade-strong);
-  color: var(--muted);
-}.zuqen-message-bubble a {
-  color: var(--z-cyan);
-  text-decoration: underline;
-  text-decoration-color: rgba(142,233,242,.35);
-  text-underline-offset: 3px;
-}.zuqen-message-bubble code {
-  padding: 2px 5px;
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  background: rgba(0,0,0,.17);
-  color: var(--z-jade);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: .9em;
-}.zuqen-message-bubble pre {
-  max-width: 100%;
-  overflow: auto;
-  margin: 14px 0;
-  padding: 17px;
-  border: 1px solid var(--border);
-  border-radius: 15px;
-  background: rgba(2,11,8,.62);
-  color: #d8f6e3;
-  line-height: 1.65;
-}.zuqen-message-bubble pre code {
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: inherit;
-}.zuqen-message-bubble table {
-  width: 100%;
-  border-collapse: collapse;
-  margin: 14px 0;
-  font-size: 11px;
-}.zuqen-message-bubble th, .zuqen-message-bubble td {
-  padding: 9px 10px;
-  border: 1px solid var(--border);
-  text-align: left;
-}.zuqen-message-bubble th {
-  background: rgba(168,255,203,.07);
-}.zuqen-typing {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  min-height: 26px;
-  padding: 3px 0;
-}.zuqen-typing span {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--z-jade);
-  animation: typingPulse 1.15s infinite ease-in-out;
-}.zuqen-typing span:nth-child(2) {
-  animation-delay: .15s;
-}.zuqen-typing span:nth-child(3) {
-  animation-delay: .3s;
-}.zuqen-attachment-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
-  margin: 10px 0;
-}.zuqen-attachment-chip {
-  max-width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 7px 9px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: rgba(220,255,235,.045);
-  color: var(--muted);
-  font-size: 10px;
-}.zuqen-attachment-chip-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}.zuqen-attachment-remove {
-  width: 23px;
-  height: 23px;
-  display: grid;
-  place-items: center;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-}.zuqen-attachment-remove:hover {
-  background: var(--panel-3);
-  color: var(--text);
-}.zuqen-message-actions {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  margin-top: 10px;
-  opacity: .76;
-  transition: opacity .2s ease;
-}.zuqen-message-block:hover .zuqen-message-actions {
-  opacity: 1;
-}.user .zuqen-message-actions {
-  justify-content: flex-end;
-}.assistant .zuqen-message-actions {
-  justify-content: flex-start;
-}.zuqen-action {
-  width: 31px;
-  height: 29px;
-  display: grid;
-  place-items: center;
-  color: var(--muted-2);
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 9px;
-  cursor: pointer;
-  transition: color .18s ease, background .18s ease, border-color .18s ease;
-}.zuqen-action:hover {
-  color: var(--z-jade);
-  background: rgba(168,255,203,.07);
-  border-color: var(--border);
-}.zuqen-action:disabled {
-  opacity: .35;
-  cursor: not-allowed;
-}.zuqen-edit-box {
-  width: 100%;
-  padding: 13px;
-  border: 1px solid var(--border-strong);
-  border-radius: 17px;
-  background: rgba(8,24,18,.75);
-  backdrop-filter: blur(20px);
-}.light .zuqen-edit-box {
-  background: rgba(250,255,251,.9);
-}.zuqen-edit-box textarea {
-  width: 100%;
-  min-height: 100px;
-  resize: vertical;
-  border: 0;
-  outline: 0;
-  background: transparent;
-  color: var(--text);
-  line-height: 1.65;
-  font-size: 13px;
-}.zuqen-edit-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 7px;
-  margin-top: 8px;
-}.zuqen-small-button {
-  min-height: 34px;
-  padding: 0 13px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--panel-2);
-  color: var(--muted);
-  cursor: pointer;
-  font-size: 10px;
-  font-weight: 750;
-}.zuqen-small-button:hover {
-  color: var(--text);
-  background: var(--panel-3);
-}.zuqen-small-button.primary {
-  color: var(--accent-text);
-  background: var(--accent);
-  border-color: transparent;
-}.zuqen-jump-latest {
-  position: absolute;
-  z-index: 18;
-  bottom: 143px;
-  left: 50%;
-  transform: translateX(-50%);
-  min-height: 39px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 0 15px;
-  border: 1px solid rgba(168,255,203,.25);
-  border-radius: 999px;
-  background: rgba(9,28,20,.83);
-  color: var(--z-jade);
-  box-shadow: 0 12px 35px rgba(0,0,0,.24);
-  backdrop-filter: blur(22px);
-  cursor: pointer;
-  font-size: 10px;
-  font-weight: 800;
-  animation: riseIn .22s var(--z-motion);
-  transition: background .2s ease, transform .2s ease;
-}.zuqen-jump-latest:hover {
-  background: rgba(26,68,45,.92);
-  transform: translate(-50%, -2px);
-}.light .zuqen-jump-latest {
-  background: rgba(249,255,250,.9);
-  color: #176d45;
-}
-
-/* The message field is a suspended glass object with its own lighting. */
-.zuqen-composer-area { position: relative; z-index: 15; flex: 0 0 auto; padding: 12px 24px 20px; background: linear-gradient(180deg, rgba(7,17,15,0), rgba(7,17,15,.54) 28%, rgba(7,17,15,.72)); }.light .zuqen-composer-area {
-  background: linear-gradient(180deg, rgba(237,246,239,0), rgba(237,246,239,.68) 28%, rgba(237,246,239,.84));
-}.zuqen-composer {
-  width: min(920px, 100%);
-  margin: 0 auto;
-  padding: 12px 13px 9px;
-  position: relative;
-  border: 1px solid rgba(207,255,226,.17);
-  border-radius: 24px;
-  background: linear-gradient(135deg, rgba(20,45,34,.79), rgba(9,26,20,.75));
-  box-shadow: 0 20px 70px rgba(0,0,0,.22), inset 0 1px 0 rgba(255,255,255,.055), 0 0 0 5px rgba(168,255,203,.018);
-  backdrop-filter: blur(30px) saturate(145%);
-  -webkit-backdrop-filter: blur(30px) saturate(145%);
-  transition: border-color .25s ease, box-shadow .25s ease, transform .25s ease;
-}.zuqen-composer:focus-within {
-  border-color: rgba(168,255,203,.36);
-  box-shadow: 0 24px 78px rgba(0,0,0,.27), inset 0 1px 0 rgba(255,255,255,.065), 0 0 0 5px rgba(168,255,203,.035);
-}.light .zuqen-composer {
-  background: linear-gradient(135deg, rgba(255,255,255,.88), rgba(242,251,244,.8));
-  border-color: rgba(30,105,64,.16);
-  box-shadow: 0 18px 55px rgba(28,78,47,.1), inset 0 1px 0 rgba(255,255,255,.85);
-}.zuqen-composer-row {
-  display: flex;
-  align-items: flex-end;
-  gap: 10px;
-}.zuqen-attach-label {
-  width: 38px;
-  height: 38px;
-  flex: 0 0 38px;
-  display: grid;
-  place-items: center;
-  margin-bottom: 1px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  color: var(--muted);
-  background: rgba(220,255,235,.04);
-  cursor: pointer;
-  transition: color .2s ease, background .2s ease, border-color .2s ease;
-}.zuqen-attach-label:hover {
-  color: var(--z-jade);
-  background: rgba(168,255,203,.08);
-  border-color: rgba(168,255,203,.25);
-}.zuqen-attach-label input {
-  display: none;
-}.zuqen-composer-row textarea {
-  min-width: 0;
-  flex: 1;
-  max-height: 220px;
-  min-height: 39px;
-  padding: 10px 2px 8px;
-  resize: none;
-  border: 0;
-  outline: 0;
-  background: transparent;
-  color: var(--text);
-  font-size: 13px;
-  line-height: 1.6;
-  scrollbar-width: thin;
-}.zuqen-composer-row textarea::placeholder {
-  color: var(--muted-2);
-}.zuqen-composer-row textarea:disabled {
-  opacity: .65;
-}.zuqen-send {
-  width: 39px;
-  height: 39px;
-  flex: 0 0 39px;
-  display: grid;
-  place-items: center;
-  margin-bottom: 1px;
-  border: 1px solid rgba(168,255,203,.28);
-  border-radius: 13px;
-  background: linear-gradient(145deg, #c5ffda, #64df9a);
-  color: #071b11;
-  cursor: pointer;
-  box-shadow: 0 6px 22px rgba(82,219,139,.16);
-  transition: transform .2s ease, box-shadow .2s ease, filter .2s ease;
-}.zuqen-send:hover:not(:disabled) {
-  transform: translateY(-2px) rotate(-3deg);
-  box-shadow: 0 10px 28px rgba(82,219,139,.25);
-  filter: saturate(1.1);
-}.zuqen-send:active:not(:disabled) {
-  transform: scale(.95);
-}.zuqen-send:disabled {
-  color: rgba(8,32,23,.5);
-  background: rgba(168,255,203,.25);
-  border-color: transparent;
-  box-shadow: none;
-  cursor: not-allowed;
-}.zuqen-composer-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 9px 3px 0;
-  color: var(--muted-2);
-  font-size: 8px;
-  letter-spacing: .15px;
-}.zuqen-composer-footer span:last-child {
-  white-space: nowrap;
-}
-
-/* Landing experience: editorial, asymmetric and cinematic. */
-.zuqen-home { min-height: 0; flex: 1; overflow-y: auto; display: flex; flex-direction: column; align-items: center; padding: clamp(22px, 4vh, 42px) 24px 36px; scrollbar-width: thin; scrollbar-color: rgba(168,255,203,.14) transparent; }.zuqen-home-inner {
-  width: min(980px, 100%);
-  margin: auto;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 12px 0 20px;
-}.zuqen-welcome {
-  width: 100%;
-  text-align: center;
-  position: relative;
-  animation: riseIn .7s var(--z-motion) both;
-}.zuqen-welcome::before {
-  content: "";
-  width: 420px;
-  height: 250px;
-  position: absolute;
-  top: -100px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: radial-gradient(ellipse, rgba(98,225,151,.12), transparent 70%);
-  pointer-events: none;
-  z-index: -1;
-}.zuqen-welcome-mark {
-  width: 86px;
-  height: 86px;
-  display: grid;
-  place-items: center;
-  position: relative;
-  margin: 0 auto 24px;
-  border: 1px solid rgba(168,255,203,.21);
-  border-radius: 29px;
-  background: linear-gradient(145deg, rgba(168,255,203,.15), rgba(168,255,203,.025));
-  box-shadow: 0 16px 65px rgba(49,186,111,.11), inset 0 1px 0 rgba(255,255,255,.06);
-  backdrop-filter: blur(18px);
-}.zuqen-welcome-mark::before, .zuqen-welcome-mark::after {
-  content: "";
-  position: absolute;
-  border-radius: 50%;
-  pointer-events: none;
-}.zuqen-welcome-mark::before {
-  inset: -11px;
-  border: 1px solid rgba(168,255,203,.1);
-  animation: orbitSpin 18s linear infinite;
-}.zuqen-welcome-mark::after {
-  width: 8px;
-  height: 8px;
-  right: -12px;
-  top: 11px;
-  background: var(--z-gold);
-  box-shadow: 0 0 17px rgba(255,210,139,.55);
-}.zuqen-welcome-mark span {
-  width: 39px;
-  height: 39px;
-  display: block;
-  position: relative;
-  border-radius: 50%;
-  background: conic-gradient(from 15deg, #c5ffda, #6ce8a4 27%, #62b9a3 48%, #ffd28b 69%, #c5ffda);
-  box-shadow: 0 0 35px rgba(105,231,159,.28);
-  animation: logoBreath 4.8s ease-in-out infinite;
-}.zuqen-welcome-mark span::before {
-  content: "";
-  position: absolute;
-  inset: 8px;
-  border-radius: 50%;
-  background: #0b1b14;
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,.2);
-}.zuqen-welcome-mark span::after {
-  content: "";
-  position: absolute;
-  width: 9px;
-  height: 9px;
-  left: 15px;
-  top: 15px;
-  border-radius: 50%;
-  background: #d7ffe4;
-  box-shadow: 0 0 14px #8cffb9;
-}.zuqen-welcome h1 {
-  max-width: 800px;
-  margin: 0 auto;
-  color: var(--text);
-  font-family: ui-serif, Georgia, Cambria, "Times New Roman", serif;
-  font-size: clamp(43px, 6.2vw, 76px);
-  font-weight: 500;
-  letter-spacing: -3.8px;
-  line-height: .99;
-}.zuqen-welcome h1 .gradient-word {
-  color: var(--z-jade);
-  font-style: italic;
-  font-weight: 500;
-}.zuqen-welcome p {
-  max-width: 490px;
-  margin: 19px auto 0;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.9;
-  letter-spacing: .05px;
-}.zuqen-search-card {
-  width: min(740px, 100%);
-  min-height: 67px;
-  margin: 34px auto 0;
-  padding: 9px 11px 9px 17px;
-  display: flex;
-  align-items: center;
-  gap: 13px;
-  border: 1px solid rgba(207,255,226,.19);
-  border-radius: 20px;
-  background: linear-gradient(120deg, rgba(19,44,33,.79), rgba(9,25,19,.72));
-  box-shadow: 0 20px 65px rgba(0,0,0,.17), inset 0 1px 0 rgba(255,255,255,.055);
-  backdrop-filter: blur(28px);
-  transition: border-color .25s ease, box-shadow .25s ease, transform .25s ease;
-}.zuqen-search-card:focus-within {
-  border-color: rgba(168,255,203,.4);
-  box-shadow: 0 23px 72px rgba(0,0,0,.22), 0 0 0 5px rgba(168,255,203,.035);
-  transform: translateY(-2px);
-}.light .zuqen-search-card {
-  background: linear-gradient(120deg, rgba(255,255,255,.9), rgba(239,249,242,.83));
-}.zuqen-search-card-icon {
-  width: 37px;
-  height: 37px;
-  flex: 0 0 37px;
-  display: grid;
-  place-items: center;
-  border-radius: 12px;
-  background: rgba(168,255,203,.1);
-  color: var(--z-jade);
-}.zuqen-search-card input {
-  width: 100%;
-  min-width: 0;
-  height: 45px;
-  border: 0;
-  outline: 0;
-  background: transparent;
-  color: var(--text);
-  font-size: 13px;
-}.zuqen-search-card input::placeholder {
-  color: var(--muted-2);
-}.zuqen-search-shortcut {
-  padding: 7px 9px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  color: var(--muted-2);
-  background: rgba(220,255,235,.035);
-  font-size: 9px;
-}.zuqen-suggestion-grid {
-  width: min(740px, 100%);
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0,1fr));
-  gap: 9px;
-  margin: 12px auto 0;
-}.zuqen-suggestion {
-  min-height: 126px;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  padding: 14px;
-  border: 1px solid var(--border);
-  border-radius: 17px;
-  background: rgba(220,255,235,.035);
-  color: var(--text);
-  text-align: left;
-  cursor: pointer;
-  backdrop-filter: blur(15px);
-  transition: transform .25s var(--z-motion), background .25s ease, border-color .25s ease, box-shadow .25s ease;
-}.zuqen-suggestion:hover {
-  transform: translateY(-4px);
-  background: rgba(220,255,235,.07);
-  border-color: rgba(168,255,203,.23);
-  box-shadow: 0 15px 36px rgba(0,0,0,.1);
-}.zuqen-suggestion-icon {
-  width: 32px;
-  height: 32px;
-  display: grid;
-  place-items: center;
-  margin-bottom: 15px;
-  border: 1px solid rgba(168,255,203,.15);
-  border-radius: 11px;
-  background: rgba(168,255,203,.07);
-  color: var(--z-jade);
-  font-size: 16px;
-}.zuqen-suggestion:nth-child(2) .zuqen-suggestion-icon {
-  color: var(--z-cyan);
-  border-color: rgba(142,233,242,.16);
-  background: rgba(142,233,242,.06);
-}.zuqen-suggestion:nth-child(3) .zuqen-suggestion-icon {
-  color: var(--z-gold);
-  border-color: rgba(255,210,139,.17);
-  background: rgba(255,210,139,.06);
-}.zuqen-suggestion:nth-child(4) .zuqen-suggestion-icon {
-  color: #d5b6ff;
-  border-color: rgba(213,182,255,.17);
-  background: rgba(213,182,255,.06);
-}.zuqen-suggestion-title {
-  font-size: 10px;
-  font-weight: 790;
-  letter-spacing: .05px;
-}.zuqen-suggestion-text {
-  margin-top: 6px;
-  color: var(--muted-2);
-  font-size: 9px;
-  line-height: 1.6;
-}.zuqen-agent-strip {
-  width: min(740px, 100%);
-  margin: 30px auto 0;
-}.zuqen-strip-title {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 12px;
-  color: var(--muted-2);
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: 1.8px;
-  text-transform: uppercase;
-}.zuqen-strip-title::after {
-  content: "";
-  height: 1px;
-  flex: 1;
-  background: linear-gradient(90deg, var(--border), transparent);
-}.zuqen-agent-cards {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0,1fr));
-  gap: 9px;
-}.zuqen-mini-agent {
-  min-width: 0;
-  min-height: 120px;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  padding: 13px;
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  background: linear-gradient(145deg, rgba(220,255,235,.045), rgba(220,255,235,.015));
-  color: var(--text);
-  text-align: left;
-  cursor: pointer;
-  transition: transform .24s var(--z-motion), background .24s ease, border-color .24s ease;
-}.zuqen-mini-agent:hover {
-  transform: translateY(-3px);
-  background: rgba(220,255,235,.075);
-  border-color: var(--border-strong);
-}.zuqen-mini-agent-icon {
-  width: 30px;
-  height: 30px;
-  display: grid;
-  place-items: center;
-  margin-bottom: 13px;
-  border-radius: 10px;
-  background: rgba(168,255,203,.09);
-  color: var(--z-jade);
-  font-size: 15px;
-}.zuqen-mini-agent:nth-child(2) .zuqen-mini-agent-icon {
-  color: var(--z-cyan);
-  background: rgba(142,233,242,.08);
-}.zuqen-mini-agent:nth-child(3) .zuqen-mini-agent-icon {
-  color: var(--z-gold);
-  background: rgba(255,210,139,.08);
-}.zuqen-mini-agent:nth-child(4) .zuqen-mini-agent-icon {
-  color: #d5b6ff;
-  background: rgba(213,182,255,.08);
-}.zuqen-mini-agent-name {
-  font-size: 10px;
-  font-weight: 780;
-  line-height: 1.35;
-}.zuqen-mini-agent-desc {
-  margin-top: 5px;
-  color: var(--muted-2);
-  font-size: 8px;
-  line-height: 1.55;
-}.zuqen-mobile-overlay {
-  display: none;
-}
-
-/* Motion is quiet by design: a little life, never distraction. */
-@keyframes auroraDrift {0% {
-  transform: translate3d(0,0,0) scale(1);
-}100% {
-  transform: translate3d(-5vw,4vh,0) scale(1.12);
-} }
-@keyframes logoBreath {0%,100% {
-  filter: saturate(1);
-  transform: scale(1);
-}50% {
-  filter: saturate(1.16);
-  transform: scale(1.035);
-} }
-@keyframes orbitSpin {from {
-  transform: rotate(0deg);
-}to {
-  transform: rotate(360deg);
-} }
-@keyframes typingPulse {0%,60%,100% {
-  transform: translateY(0);
-  opacity: .45;
-}30% {
-  transform: translateY(-4px);
-  opacity: 1;
-} }
-@keyframes popIn {from {
-  opacity: 0;
-  transform: translateY(-5px) scale(.985);
-}to {
-  opacity: 1;
-  transform: translateY(0) scale(1);
-} }
-@keyframes riseIn {from {
-  opacity: 0;
-  transform: translateY(12px);
-}to {
-  opacity: 1;
-  transform: translateY(0);
-} }
-@keyframes messageIn {from {
-  opacity: 0;
-  transform: translateY(7px);
-}to {
-  opacity: 1;
-  transform: translateY(0);
-} }
-@media (prefers-reduced-motion: reduce) {*, *::before, *::after {
-  animation-duration: .01ms !important;
-  animation-iteration-count: 1 !important;
-  scroll-behavior: auto !important;
-  transition-duration: .01ms !important;
-}
-}
-
-/* Large desktop composition. */
-@media (min-width: 1500px) {.zuqen-sidebar {
-  width: 310px;
-  flex-basis: 310px;
-}.zuqen-topbar {
-  padding-left: 34px;
-  padding-right: 34px;
-}.zuqen-messages {
-  padding-top: 38px;
-}.zuqen-message-list {
-  width: min(980px, 100%);
-}.zuqen-home-inner {
-  width: min(1080px, 100%);
-}.zuqen-search-card, .zuqen-suggestion-grid, .zuqen-agent-strip {
-  width: min(790px, 100%);
-}.zuqen-welcome h1 {
-  font-size: clamp(72px, 5.2vw, 90px);
-}
-}
-@media (max-width: 1180px) {.zuqen-sidebar {
-  width: 265px;
-  flex-basis: 265px;
-}.zuqen-topbar {
-  padding-left: 17px;
-  padding-right: 17px;
-}.zuqen-top-action {
-  padding: 0 9px;
-  gap: 6px;
-}.zuqen-top-action .action-label {
-  font-size: 9px;
-}.zuqen-credit-label {
-  display: none;
-}.zuqen-suggestion-grid, .zuqen-agent-cards {
-  gap: 7px;
-}.zuqen-suggestion, .zuqen-mini-agent {
-  padding: 11px;
-}
-}
-@media (max-width: 900px) {.zuqen-sidebar {
-  position: fixed;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: min(310px, 86vw);
-  flex-basis: auto;
-  transform: translateX(0);
-  box-shadow: 20px 0 80px rgba(0,0,0,.28);
-}.zuqen-sidebar.closed {
-  width: min(310px, 86vw);
-  transform: translateX(-105%);
-}.zuqen-mobile-overlay {
-  display: block;
-  position: fixed;
-  inset: 0;
-  z-index: 35;
-  background: rgba(0,0,0,.38);
-  backdrop-filter: blur(5px);
-}.zuqen-main {
-  width: 100%;
-}.zuqen-topbar {
-  min-height: 69px;
-  padding: 11px 14px;
-}.zuqen-top-right {
-  gap: 6px;
-}.zuqen-top-action {
-  min-height: 37px;
-  padding: 0 9px;
-}.zuqen-top-action .action-label {
-  display: none;
-}.zuqen-top-action .action-symbol {
-  font-size: 16px;
-}.zuqen-messages {
-  padding: 23px 20px 25px;
-}.zuqen-composer-area {
-  padding: 10px 18px 16px;
-}.zuqen-message-block {
-  max-width: 86%;
-}.zuqen-message-row.assistant .zuqen-message-block {
-  max-width: 100%;
-}.zuqen-welcome h1 {
-  font-size: clamp(48px, 7vw, 68px);
-}
-}
-@media (max-width: 640px) {.zuqen-topbar {
-  gap: 7px;
-  padding: 9px 10px;
-  min-height: 63px;
-}.zuqen-top-left, .zuqen-top-right {
-  gap: 5px;
-}.zuqen-icon-button {
-  width: 35px;
-  height: 35px;
-  flex-basis: 35px;
-  border-radius: 11px;
-}.zuqen-agent-button {
-  min-height: 37px;
-  gap: 6px;
-  padding: 3px 7px;
-  border-radius: 11px;
-}.zuqen-agent-button-icon {
-  width: 27px;
-  height: 27px;
-}.zuqen-agent-button-name {
-  max-width: 100px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 10px;
-}.zuqen-agent-button-sub, .zuqen-agent-button > svg {
-  display: none;
-}.zuqen-credit-button {
-  min-height: 35px;
-  padding: 0 8px;
-  gap: 5px;
-}.zuqen-credit-count {
-  font-size: 10px;
-}.zuqen-credit-icon {
-  font-size: 13px;
-}.zuqen-top-action {
-  width: 35px;
-  min-height: 35px;
-  padding: 0;
-  border-radius: 11px;
-}.zuqen-top-action .action-label {
-  display: none;
-}.zuqen-top-action .action-symbol {
-  font-size: 15px;
-}.zuqen-home {
-  padding: 22px 14px 25px;
-}.zuqen-home-inner {
-  padding-top: 8px;
-}.zuqen-welcome-mark {
-  width: 69px;
-  height: 69px;
-  margin-bottom: 22px;
-  border-radius: 24px;
-}.zuqen-welcome-mark span {
-  width: 33px;
-  height: 33px;
-}.zuqen-welcome-mark span::before {
-  inset: 7px;
-}.zuqen-welcome-mark span::after {
-  left: 12px;
-  top: 12px;
-}.zuqen-welcome h1 {
-  font-size: clamp(41px, 11vw, 57px);
-  letter-spacing: -2.6px;
-  line-height: 1.02;
-}.zuqen-welcome p {
-  max-width: 340px;
-  margin-top: 14px;
-  font-size: 11px;
-}.zuqen-search-card {
-  min-height: 59px;
-  margin-top: 25px;
-  padding: 7px 8px 7px 11px;
-  gap: 8px;
-  border-radius: 17px;
-}.zuqen-search-card-icon {
-  width: 31px;
-  height: 31px;
-  flex-basis: 31px;
-}.zuqen-search-card input {
-  height: 40px;
-  font-size: 12px;
-}.zuqen-search-shortcut {
-  display: none;
-}.zuqen-suggestion-grid {
-  grid-template-columns: repeat(2, minmax(0,1fr));
-  gap: 8px;
-  margin-top: 9px;
-}.zuqen-suggestion {
-  min-height: 112px;
-  padding: 12px;
-  border-radius: 15px;
-}.zuqen-suggestion-icon {
-  margin-bottom: 11px;
-}.zuqen-suggestion-title {
-  font-size: 10px;
-}.zuqen-suggestion-text {
-  font-size: 8px;
-}.zuqen-agent-strip {
-  margin-top: 24px;
-}.zuqen-agent-cards {
-  grid-template-columns: repeat(2, minmax(0,1fr));
-  gap: 8px;
-}.zuqen-mini-agent {
-  min-height: 105px;
-  padding: 11px;
-}.zuqen-mini-agent-icon {
-  margin-bottom: 9px;
-}.zuqen-strip-title {
-  font-size: 8px;
-}.zuqen-messages {
-  padding: 19px 13px 21px;
-}.zuqen-message-list {
-  gap: 22px;
-}.zuqen-message-block {
-  max-width: 92%;
-}.zuqen-message-row.assistant .zuqen-message-block {
-  max-width: 100%;
-}.zuqen-message-bubble {
-  font-size: 12px;
-  line-height: 1.8;
-}.user .zuqen-message-bubble {
-  padding: 11px 13px;
-  border-radius: 17px 17px 6px 17px;
-}.zuqen-message-label {
-  margin-bottom: 7px;
-  font-size: 8px;
-}.zuqen-composer-area {
-  padding: 8px 10px 12px;
-}.zuqen-composer {
-  padding: 9px 9px 7px;
-  border-radius: 19px;
-}.zuqen-composer-row {
-  gap: 7px;
-}.zuqen-attach-label {
-  width: 34px;
-  height: 34px;
-  flex-basis: 34px;
-  border-radius: 11px;
-}.zuqen-composer-row textarea {
-  min-height: 35px;
-  padding-top: 8px;
-  font-size: 12px;
-}.zuqen-send {
-  width: 35px;
-  height: 35px;
-  flex-basis: 35px;
-  border-radius: 11px;
-}.zuqen-composer-footer {
-  padding-top: 7px;
-  font-size: 7px;
-}.zuqen-composer-footer span:first-child {
-  display: none;
-}.zuqen-composer-footer span:last-child {
-  margin-left: auto;
-}.zuqen-jump-latest {
-  bottom: 125px;
-  min-height: 35px;
-  font-size: 9px;
-}.zuqen-error {
-  width: calc(100% - 20px);
-  padding: 10px 12px;
-  font-size: 10px;
-}
-}
-@media (max-width: 390px) {.zuqen-agent-button {
-  max-width: 128px;
-}.zuqen-agent-button-name {
-  max-width: 78px;
-}.zuqen-credit-button {
-  padding: 0 6px;
-}.zuqen-credit-count {
-  display: none;
-}.zuqen-top-action {
-  width: 32px;
-  min-height: 34px;
-}.zuqen-topbar {
-  padding-left: 7px;
-  padding-right: 7px;
-}.zuqen-welcome h1 {
-  font-size: 39px;
-  letter-spacing: -2px;
-}.zuqen-suggestion {
-  padding: 10px;
-}.zuqen-message-block {
-  max-width: 96%;
-}
-}
-`}</style>
-
-      {!sidebarOpen && (
+      {sidebarOpen && (
         <div
           className="zuqen-mobile-overlay"
           onClick={() =>
@@ -3323,7 +1619,7 @@ export default function HomePage() {
             </div>
 
             <div className="zuqen-brand-sub">
-              Ideas into momentum
+              Intelligent workspace
             </div>
           </div>
         </div>
@@ -3336,33 +1632,6 @@ export default function HomePage() {
             <Icon name="plus" size={17} />
             <span>New conversation</span>
           </button>
-
-          <div className="zuqen-quick-links" aria-label="Workspace shortcuts">
-            <button
-              className="zuqen-quick-link"
-              onClick={() => { window.location.href = "/automation"; }}
-              title="Open independent Automation Mode"
-            >
-              <span className="quick-icon"><Icon name="spark" size={15} /></span>
-              <span className="quick-copy">
-                <span className="quick-title">Automation Mode</span>
-                <span className="quick-subtitle">Build and run workflows</span>
-              </span>
-              <span className="quick-tag">BETA</span>
-            </button>
-            <button
-              className="zuqen-quick-link"
-              onClick={() => { window.location.href = "/marketplace"; }}
-              title="Browse and sell templates"
-            >
-              <span className="quick-icon" aria-hidden="true">▦</span>
-              <span className="quick-copy">
-                <span className="quick-title">Buy / Sell Templates</span>
-                <span className="quick-subtitle">Discover or sell templates</span>
-              </span>
-              <span className="quick-tag">SHOP</span>
-            </button>
-          </div>
 
           <div className="zuqen-sidebar-section">
             <div className="zuqen-sidebar-heading">
@@ -3726,22 +1995,6 @@ export default function HomePage() {
           </div>
 
           <div className="zuqen-top-right">
-            <button
-              className="zuqen-top-action automation-action"
-              onClick={() => { window.location.href = "/automation"; }}
-              title="Open Automation Mode"
-            >
-              <span className="action-symbol">✳</span>
-              <span className="action-label">Automation Mode</span>
-            </button>
-            <button
-              className="zuqen-top-action templates-action"
-              onClick={() => { window.location.href = "/marketplace"; }}
-              title="Open Template Marketplace"
-            >
-              <span className="action-symbol">◈</span>
-              <span className="action-label">Buy / Sell Templates</span>
-            </button>
             <div className="zuqen-credit-wrap">
               <button
                 className="zuqen-credit-button"
@@ -3927,11 +2180,7 @@ export default function HomePage() {
           ) : activeChatId &&
             activeChat ? (
             <div className="zuqen-chat-view">
-              <div
-                className="zuqen-messages"
-                ref={messagesContainerRef}
-                onScroll={handleMessagesScroll}
-              >
+              <div className="zuqen-messages" ref={messagesContainerRef} onScroll={handleMessagesScroll}>
                 <div className="zuqen-message-list">
                   {messages.length ===
                   0 ? (
@@ -4147,16 +2396,12 @@ export default function HomePage() {
                     )
                   )}
                 </div>
+                <div ref={messagesEndRef} aria-hidden="true" />
               </div>
 
               {showJumpToLatest && (
-                <button
-                  type="button"
-                  className="zuqen-jump-latest"
-                  onClick={jumpToLatest}
-                  aria-label="Jump to latest message"
-                >
-                  <span aria-hidden="true">↓</span>
+                <button className="zuqen-jump-latest" onClick={jumpToLatest} type="button">
+                  <span aria-hidden="true" style={{ fontSize: 15, lineHeight: 1 }}>↓</span>
                   Jump to latest
                 </button>
               )}
@@ -4245,7 +2490,7 @@ export default function HomePage() {
                       onKeyDown={
                         handleKeyDown
                       }
-                      placeholder="Write your next thought…"
+                      placeholder="Write a thought, ask a question, start something…"
                       rows={1}
                       disabled={loading}
                     />
@@ -4288,153 +2533,89 @@ export default function HomePage() {
             <div className="zuqen-home">
               <div className="zuqen-home-inner">
                 <div className="zuqen-welcome">
-                  <div className="zuqen-welcome-mark">
-                    <span />
-                  </div>
-
-                  <h1>
-                    Make room for
-                    <br />
-                    <span className="gradient-word">what&apos;s next.</span>
-                  </h1>
-
-                  <p>
-                    One calm space for ambitious ideas, useful answers and work that moves forward.
-                    Bring a question, a rough draft or your next big build.
-                  </p>
+                  <h1>Imagine more.<br /><em>Create beyond.</em></h1>
+                  <p>Your ideas, amplified by intelligence. One thoughtful workspace to create, build, explore and get things done.</p>
                 </div>
 
-                <div className="zuqen-search-card">
-                  <div className="zuqen-search-card-icon">
-                    <Icon
-                      name="search"
-                      size={18}
-                    />
-                  </div>
-
+                <div className="zuqen-search-card zuqen-home-composer">
+                  <div className="zuqen-home-composer-heading"><span className="zuqen-search-card-icon"><Icon name="spark" size={19} /></span><span> ZUQEN CREATIVE SPACE</span><span className="zuqen-composer-status">READY TO CREATE</span></div>
                   <input
                     value={input}
-                    onChange={(event) => {
-                      setInput(
-                        event.target.value
-                      );
-
-                      if (
-                        textareaRef.current
-                      ) {
-                        textareaRef.current.value =
-                          event.target.value;
-                      }
-                    }}
+                    onChange={(event) => setInput(event.target.value)}
                     onKeyDown={(event) => {
-                      if (
-                        event.key ===
-                          "Enter" &&
-                        !event.shiftKey
-                      ) {
+                      if (event.key === "Enter" && !event.shiftKey) {
                         event.preventDefault();
                         handleSubmit();
                       }
                     }}
-                    placeholder="Describe what you want to make happen…"
+                    placeholder="Describe an idea, ask a question, or tell ZUQEN what to build..."
+                    aria-label="Message ZUQEN AI"
                   />
-
-                  <span className="zuqen-search-shortcut">
-                    Enter
-                  </span>
-                </div>
-
-                <div className="zuqen-suggestion-grid">
-                  {homeSuggestions.map(
-                    (suggestion) => (
-                      <button
-                        key={
-                          suggestion.title
-                        }
-                        className="zuqen-suggestion"
-                        onClick={() =>
-                          setInput(
-                            suggestion.text
-                          )
-                        }
-                      >
-                        <div className="zuqen-suggestion-icon">
-                          {
-                            suggestion.icon
-                          }
-                        </div>
-
-                        <div className="zuqen-suggestion-title">
-                          {
-                            suggestion.title
-                          }
-                        </div>
-
-                        <div className="zuqen-suggestion-text">
-                          {
-                            suggestion.text
-                          }
-                        </div>
-                      </button>
-                    )
-                  )}
+                  {attachments.length > 0 && <div className="zuqen-attachment-list zuqen-home-attachments">{attachments.map((file) => <div className="zuqen-attachment-chip" key={file.id}><span className="zuqen-attachment-chip-name">{file.name}</span><button type="button" className="zuqen-attachment-remove" onClick={() => removeAttachment(file.id)} aria-label={`Remove ${file.name}`}><Icon name="close" size={13} /></button></div>)}</div>}
+                  <div className="zuqen-mode-row" aria-label="Prompt mode">
+                    {["Create", "Research", "Build"].map((mode) => (
+                      <button type="button" key={mode} className={`zuqen-mode-chip ${selectedMode === mode ? "active" : ""}`} onClick={() => setSelectedMode(mode)}>{mode === "Create" ? "✦  Create" : mode === "Research" ? "⌕  Research" : "⌘  Build"}</button>
+                    ))}
+                  </div>
+                  <div className="zuqen-home-composer-toolbar">
+                    <label className="zuqen-attach-label" title="Attach files" aria-label="Attach files"><Icon name="paperclip" size={17} /><input type="file" multiple onChange={handleAttachment} /></label>
+                    <button type="button" className="zuqen-home-selected-agent" onClick={() => setAgentOpen((previous) => !previous)} title="Choose an agent">✦ &nbsp; {selectedAgent}⌄</button>
+                    <span className="zuqen-search-shortcut">Enter ↵</span>
+                    <button type="button" className={`zuqen-home-voice ${voiceListening ? "listening" : ""}`} onClick={startVoiceInput} title={voiceListening ? "Listening" : "Voice input"} aria-label="Voice input">{voiceListening ? "●" : "◖))"}</button>
+                    <button type="button" className="zuqen-send" disabled={loading || !input.trim()} onClick={handleSubmit} title="Send message" aria-label="Send message"><Icon name="send" size={17} /></button>
+                  </div>
                 </div>
 
                 <div className="zuqen-agent-strip">
-                  <div className="zuqen-strip-title">
-                    Explore ZUQEN agents
-                  </div>
-
+                  <div className="zuqen-strip-title">EXPLORE YOUR WORKSPACE · 5 AI AGENTS</div>
                   <div className="zuqen-agent-cards">
-                    {AGENTS.slice(
-                      1
-                    ).map((agent) => (
-                      <button
-                        key={
-                          agent.name
-                        }
-                        className="zuqen-mini-agent"
-                        onClick={() =>
-                          navigateAgent(
-                            agent
-                          )
-                        }
-                      >
-                        <div className="zuqen-mini-agent-icon">
-                          {
-                            agent.icon
-                          }
-                        </div>
-
-                        <div className="zuqen-mini-agent-name">
-                          {
-                            agent.name
-                          }
-                        </div>
-
-                        <div className="zuqen-mini-agent-desc">
-                          {
-                            agent.description
-                          }
-                        </div>
-                      </button>
-                    ))}
+                    <button type="button" className="zuqen-mini-agent picture-card" onClick={() => navigateAgent(AGENTS[1])}>
+                      <svg className="zuqen-card-art" viewBox="0 0 300 150" role="img" aria-label="Website design artwork"><rect width="300" height="150" rx="14" fill="#dce5e2"/><rect x="22" y="13" width="256" height="124" rx="9" fill="#faf8f2" stroke="#9bb2a8"/><path d="M22 37H278" stroke="#9bb2a8"/><circle cx="35" cy="25" r="3" fill="#d8794b"/><circle cx="46" cy="25" r="3" fill="#b9c9c2"/><circle cx="57" cy="25" r="3" fill="#b9c9c2"/><rect x="39" y="51" width="94" height="7" rx="3" fill="#293c38"/><rect x="39" y="65" width="75" height="4" rx="2" fill="#9aada5"/><rect x="39" y="76" width="48" height="15" rx="4" fill="#d8794b"/><rect x="158" y="49" width="99" height="73" rx="6" fill="#bfd1ca"/><circle cx="208" cy="69" r="15" fill="#e7c9a8"/><path d="M166 115Q208 59 249 115" fill="#577a70"/></svg>
+                      <span className="zuqen-card-meta">01 / BUILD</span><span className="zuqen-mini-agent-name">Website Builder</span><span className="zuqen-mini-agent-desc">Turn ideas into beautiful websites.</span>
+                    </button>
+                    <button type="button" className="zuqen-mini-agent picture-card" onClick={() => navigateAgent(AGENTS[2])}>
+                      <svg className="zuqen-card-art" viewBox="0 0 300 150" role="img" aria-label="Generative image artwork"><rect width="300" height="150" rx="14" fill="#e6dceb"/><circle cx="150" cy="75" r="52" fill="#a28ab9"/><ellipse cx="150" cy="51" rx="18" ry="35" fill="#f5d9b2"/><ellipse cx="150" cy="99" rx="18" ry="35" fill="#f5d9b2"/><ellipse cx="126" cy="75" rx="35" ry="18" fill="#f5d9b2"/><ellipse cx="174" cy="75" rx="35" ry="18" fill="#f5d9b2"/><circle cx="150" cy="75" r="15" fill="#b9653c"/><circle cx="60" cy="32" r="4" fill="#fffaf5"/><circle cx="241" cy="112" r="5" fill="#fffaf5"/></svg>
+                      <span className="zuqen-card-meta purple">02 / IMAGINE</span><span className="zuqen-mini-agent-name">Text to Image</span><span className="zuqen-mini-agent-desc">Create original visuals with AI.</span>
+                    </button>
+                    <button type="button" className="zuqen-mini-agent picture-card" onClick={() => navigateAgent(AGENTS[3])}>
+                      <svg className="zuqen-card-art" viewBox="0 0 300 150" role="img" aria-label="Cinematic video artwork"><rect width="300" height="150" rx="14" fill="#dce5d8"/><circle cx="231" cy="34" r="16" fill="#f5d9b2"/><path d="M0 106L85 45L143 101L198 54L300 111V150H0Z" fill="#82977c"/><path d="M0 124L81 86L149 118L223 82L300 126V150H0Z" fill="#344d43"/><circle cx="150" cy="75" r="23" fill="#faf7f1" fillOpacity=".94"/><path d="M144 61L164 75L144 89Z" fill="#b9653c"/></svg>
+                      <span className="zuqen-card-meta green">03 / MOTION</span><span className="zuqen-mini-agent-name">Text to Video</span><span className="zuqen-mini-agent-desc">Bring stories and concepts to life.</span>
+                    </button>
+                    <button type="button" className="zuqen-mini-agent picture-card" onClick={() => navigateAgent(AGENTS[4])}>
+                      <svg className="zuqen-card-art" viewBox="0 0 300 150" role="img" aria-label="Voice waveform artwork"><rect width="300" height="150" rx="14" fill="#f0dccb"/>{[18,28,41,54,66,79,92,105,118,131,144,157,170,183,196,209,222,235,248,261,274,286].map((x,i)=><rect key={x} x={x} y={75-[18,32,48,26,59,39,52,24,43,30,61,35,48,26,55,34,46,20,38,29,50,22][i]/2} width="6" height={[18,32,48,26,59,39,52,24,43,30,61,35,48,26,55,34,46,20,38,29,50,22][i]} rx="3" fill={i%2===0?"#b9653c":"#754a37"}/>)}</svg>
+                      <span className="zuqen-card-meta orange">04 / SOUND</span><span className="zuqen-mini-agent-name">Voice Generator</span><span className="zuqen-mini-agent-desc">Give words a natural voice.</span>
+                    </button>
+                    <button type="button" className="zuqen-mini-agent picture-card chat-picture-card" onClick={() => navigateAgent(AGENTS[0])}>
+                      <span className="zuqen-chat-card-art"><span>✦</span><span className="zuqen-chat-orbit orbit-one"/><span className="zuqen-chat-orbit orbit-two"/></span>
+                      <span className="zuqen-card-meta">05 / THINK</span><span className="zuqen-mini-agent-name">ZUQEN AI Chat</span><span className="zuqen-mini-agent-desc">Ask questions, explore ideas and work through conversations.</span>
+                    </button>
                   </div>
                 </div>
 
-                <div
-                  style={{
-                    marginTop: 38,
-                    textAlign: "center",
-                    color:
-                      "var(--muted-2)",
-                    fontSize: 9,
-                  }}
-                >
-                  {chatCredits ===
-                  null
-                    ? "Loading your Chat Credits..."
-                    : `${chatCredits.toLocaleString()} Chat Credits available`}
+                <div className="zuqen-home-tools">
+                  <h2 className="zuqen-home-tools-title">More power for your ideas</h2>
+                  <div className="zuqen-home-tools-grid">
+                    <button type="button" className="zuqen-home-tool" onClick={() => { window.location.href = "/automation"; }}>
+                      <span className="zuqen-home-tool-icon" aria-hidden="true">⤨</span>
+                      <span className="zuqen-home-tool-copy"><span className="zuqen-home-tool-title" style={{ display: "block" }}>Automation Mode</span><span className="zuqen-home-tool-desc" style={{ display: "block" }}>Plan tasks, use dedicated tools and automate workflows.</span><span className="zuqen-home-tool-link" style={{ display: "block" }}>OPEN AUTOMATION ↗</span></span>
+                      <span aria-hidden="true">↗</span>
+                    </button>
+                    <button type="button" className="zuqen-home-tool marketplace" onClick={() => { window.location.href = "/marketplace"; }}>
+                      <span className="zuqen-home-tool-icon" aria-hidden="true">▣</span>
+                      <span className="zuqen-home-tool-copy"><span className="zuqen-home-tool-title" style={{ display: "block" }}>Template Buy / Sell</span><span className="zuqen-home-tool-desc" style={{ display: "block" }}>Discover digital templates or list your own for sale.</span><span className="zuqen-home-tool-link" style={{ display: "block" }}>EXPLORE MARKETPLACE ↗</span></span>
+                      <span aria-hidden="true">↗</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="zuqen-home-footer">
+                  <div className="zuqen-home-footer-label">ZUQEN CORE</div>
+                  <div className="zuqen-home-footer-title">More than a tool. A creative advantage.</div>
+                  <div className="zuqen-home-footer-sub">Think. Design. Build. Execute.</div>
+                </div>
+
+                <div style={{ marginTop: 16, textAlign: "center", color: "#928779", fontSize: 10 }}>
+                  {chatCredits === null ? "Loading your Chat Credits..." : `${chatCredits.toLocaleString()} Chat Credits available`}
                 </div>
               </div>
             </div>
