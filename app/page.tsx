@@ -152,6 +152,14 @@ function Icon({
         </svg>
       );
 
+    case "arrow-down":
+      return (
+        <svg {...common}>
+          <path d="M12 5v14" />
+          <path d="m6 13 6 6 6-6" />
+        </svg>
+      );
+
     case "archive":
       return (
         <svg {...common}>
@@ -358,6 +366,35 @@ export default function HomePage() {
 
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const streamAbortRef = useRef<AbortController | null>(null);
+  const messagesContainerRef = useRef<HTMLDivElement | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const shouldAutoScrollRef = useRef(true);
+  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
+
+  const scrollToLatest = useCallback((behavior: ScrollBehavior = "smooth") => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    container.scrollTo({ top: container.scrollHeight, behavior });
+    shouldAutoScrollRef.current = true;
+    setShowJumpToLatest(false);
+  }, []);
+
+  useEffect(() => {
+    shouldAutoScrollRef.current = true;
+    setShowJumpToLatest(false);
+  }, [activeChatId]);
+
+  useEffect(() => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    if (shouldAutoScrollRef.current) {
+      const frame = window.requestAnimationFrame(() => {
+        container.scrollTo({ top: container.scrollHeight, behavior: loading ? "auto" : "smooth" });
+      });
+      setShowJumpToLatest(false);
+      return () => window.cancelAnimationFrame(frame);
+    }
+  }, [messages, loading, activeChatId]);
 
   const activeChat = useMemo(
     () => chats.find((chat) => chat.id === activeChatId) ?? null,
@@ -3391,6 +3428,207 @@ export default function HomePage() {
         @media (prefers-reduced-motion: reduce) {
           .zuqen-app *, .zuqen-app *::before, .zuqen-app *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
         }
+
+        /* TRANSPARENT GLASS WORKSPACE — ChatGPT-inspired, ZUQEN identity */
+        html, body { background: transparent !important; }
+        .zuqen-app {
+          --bg: transparent;
+          --panel: rgba(18, 20, 28, .48);
+          --panel-2: rgba(28, 31, 43, .43);
+          --panel-3: rgba(48, 52, 68, .40);
+          --border: rgba(255,255,255,.12);
+          --border-strong: rgba(255,255,255,.20);
+          --text: #f7f8fc;
+          --muted: #c0c4d1;
+          --muted-2: #9299aa;
+          --accent: #b5a0ff;
+          --accent-text: #171322;
+          position: relative;
+          isolation: isolate;
+          background: transparent !important;
+          font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+          letter-spacing: -.012em;
+        }
+        .zuqen-app::before {
+          content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+          background:
+            radial-gradient(ellipse at 15% 8%, rgba(91, 141, 255, .16), transparent 34%),
+            radial-gradient(ellipse at 82% 18%, rgba(184, 101, 255, .14), transparent 33%),
+            radial-gradient(ellipse at 62% 90%, rgba(47, 208, 195, .09), transparent 38%),
+            linear-gradient(135deg, rgba(255,255,255,.025), transparent 46%, rgba(255,255,255,.018));
+          animation: zuqen-glass-ambient 18s ease-in-out infinite alternate;
+        }
+        .zuqen-app.light {
+          --bg: transparent;
+          --panel: rgba(255,255,255,.48);
+          --panel-2: rgba(255,255,255,.42);
+          --panel-3: rgba(255,255,255,.60);
+          --border: rgba(45,48,65,.12);
+          --border-strong: rgba(45,48,65,.20);
+          --text: #202230;
+          --muted: #53596b;
+          --muted-2: #72798a;
+          --accent: #7554db;
+          --accent-text: #fff;
+          background: transparent !important;
+        }
+        .zuqen-app.light::before {
+          background:
+            radial-gradient(ellipse at 12% 8%, rgba(111,151,255,.20), transparent 35%),
+            radial-gradient(ellipse at 85% 15%, rgba(204,132,255,.17), transparent 34%),
+            radial-gradient(ellipse at 60% 92%, rgba(79,213,197,.13), transparent 38%),
+            linear-gradient(135deg, rgba(255,255,255,.22), transparent 55%);
+        }
+        .zuqen-sidebar {
+          background: rgba(18,20,29,.48) !important;
+          border-right: 1px solid rgba(255,255,255,.13) !important;
+          box-shadow: 10px 0 45px rgba(0,0,0,.10) !important;
+          backdrop-filter: blur(32px) saturate(160%);
+          -webkit-backdrop-filter: blur(32px) saturate(160%);
+        }
+        .zuqen-app.light .zuqen-sidebar { background: rgba(255,255,255,.46) !important; border-right-color: rgba(48,51,70,.12) !important; }
+        .zuqen-main, .zuqen-content, .zuqen-chat-view { background: transparent !important; }
+        .zuqen-topbar {
+          background: rgba(18,20,29,.24) !important;
+          border-bottom: 1px solid rgba(255,255,255,.10) !important;
+          backdrop-filter: blur(24px) saturate(150%);
+          -webkit-backdrop-filter: blur(24px) saturate(150%);
+        }
+        .zuqen-app.light .zuqen-topbar { background: rgba(255,255,255,.28) !important; border-bottom-color: rgba(45,48,65,.10) !important; }
+        .zuqen-sidebar-action, .zuqen-chat-item, .zuqen-utility-action { background-color: rgba(255,255,255,.025); }
+        .zuqen-sidebar-action.primary { background: linear-gradient(120deg, rgba(146,119,255,.23), rgba(83,165,255,.12)) !important; border-color: rgba(190,171,255,.30) !important; }
+        .zuqen-chat-item.active, .zuqen-chat-item:hover { background: rgba(255,255,255,.085) !important; border-color: rgba(255,255,255,.08) !important; }
+        .zuqen-app.light .zuqen-chat-item.active, .zuqen-app.light .zuqen-chat-item:hover { background: rgba(85,76,145,.09) !important; }
+        .zuqen-logo { box-shadow: 0 0 0 1px rgba(255,255,255,.23) inset, 0 5px 26px rgba(113,100,255,.38) !important; }
+        .zuqen-welcome-redesign, .zuqen-home-redesign { background: transparent !important; }
+        .zuqen-welcome-redesign h1 { text-shadow: 0 2px 30px rgba(112,124,255,.16); }
+        .zuqen-suggestion-redesign, .zuqen-mini-agent-redesign {
+          background: rgba(255,255,255,.055) !important;
+          border: 1px solid rgba(255,255,255,.13) !important;
+          backdrop-filter: blur(18px) saturate(145%);
+          -webkit-backdrop-filter: blur(18px) saturate(145%);
+          box-shadow: 0 8px 28px rgba(0,0,0,.06) !important;
+        }
+        .zuqen-suggestion-redesign:hover, .zuqen-mini-agent-redesign:hover {
+          background: rgba(255,255,255,.105) !important;
+          border-color: rgba(176,156,255,.38) !important;
+          box-shadow: 0 12px 34px rgba(0,0,0,.12), 0 0 26px rgba(126,108,255,.09) !important;
+        }
+        .zuqen-app.light .zuqen-suggestion-redesign, .zuqen-app.light .zuqen-mini-agent-redesign { background: rgba(255,255,255,.47) !important; border-color: rgba(56,61,84,.12) !important; }
+        .zuqen-messages {
+          position: relative;
+          background: transparent !important;
+          padding: 28px clamp(18px, 4vw, 56px) 26px !important;
+          scrollbar-color: rgba(180,185,205,.35) transparent !important;
+          overscroll-behavior: contain;
+          scroll-behavior: smooth;
+        }
+        .zuqen-messages::-webkit-scrollbar { width: 8px; }
+        .zuqen-messages::-webkit-scrollbar-thumb { background: rgba(180,185,205,.28); border-radius: 99px; border: 2px solid transparent; background-clip: padding-box; }
+        .zuqen-message-list { width: min(800px, 100%) !important; }
+        .zuqen-message-row { margin-bottom: 30px !important; animation: zuqen-message-in .24s ease-out both; }
+        .zuqen-message-block { width: 100% !important; max-width: 100% !important; }
+        .zuqen-message-label { color: var(--muted) !important; font-size: 11px !important; margin-bottom: 7px !important; }
+        .zuqen-message-bubble {
+          display: block;
+          width: fit-content;
+          max-width: min(100%, 76ch);
+          min-width: 0;
+          padding: 13px 17px !important;
+          border: 1px solid rgba(255,255,255,.12) !important;
+          border-radius: 18px !important;
+          background: rgba(255,255,255,.065) !important;
+          color: var(--text) !important;
+          backdrop-filter: blur(20px) saturate(145%);
+          -webkit-backdrop-filter: blur(20px) saturate(145%);
+          overflow-wrap: anywhere;
+          white-space: pre-wrap;
+          line-height: 1.75 !important;
+          font-size: 14px !important;
+          box-shadow: 0 7px 25px rgba(0,0,0,.045), inset 0 1px rgba(255,255,255,.045);
+        }
+        .zuqen-message-row.user .zuqen-message-bubble {
+          margin-left: auto;
+          max-width: min(100%, 72ch);
+          border-color: rgba(160,149,255,.24) !important;
+          background: linear-gradient(135deg, rgba(125,112,255,.19), rgba(77,161,255,.13), rgba(255,255,255,.055)) !important;
+        }
+        .zuqen-message-row.user .zuqen-message-label { text-align: right; }
+        .zuqen-message-row.assistant .zuqen-message-bubble { margin-right: auto; background: rgba(20,23,32,.23) !important; }
+        .zuqen-app.light .zuqen-message-bubble { background: rgba(255,255,255,.43) !important; border-color: rgba(44,49,70,.12) !important; color: #252737 !important; }
+        .zuqen-app.light .zuqen-message-row.user .zuqen-message-bubble { background: linear-gradient(135deg, rgba(132,111,255,.14), rgba(71,164,255,.11), rgba(255,255,255,.35)) !important; }
+        .zuqen-message-actions { opacity: .68; transition: opacity .18s ease; }
+        .zuqen-message-row:hover .zuqen-message-actions { opacity: 1; }
+        .zuqen-action { border-radius: 9px !important; }
+        .zuqen-action:hover { background: rgba(255,255,255,.09) !important; }
+        .zuqen-composer-area {
+          position: relative;
+          z-index: 3;
+          padding: 14px clamp(14px, 3vw, 36px) max(16px, env(safe-area-inset-bottom)) !important;
+          background: linear-gradient(to top, rgba(11,13,20,.36), rgba(11,13,20,.16) 60%, transparent) !important;
+          backdrop-filter: blur(6px);
+          -webkit-backdrop-filter: blur(6px);
+        }
+        .zuqen-app.light .zuqen-composer-area { background: linear-gradient(to top, rgba(247,248,252,.40), rgba(247,248,252,.17) 60%, transparent) !important; }
+        .zuqen-composer {
+          width: min(850px, 100%) !important;
+          border: 1px solid rgba(255,255,255,.19) !important;
+          border-radius: 25px !important;
+          background: rgba(29,32,43,.47) !important;
+          box-shadow: 0 18px 60px rgba(0,0,0,.15), inset 0 1px rgba(255,255,255,.10) !important;
+          backdrop-filter: blur(34px) saturate(165%);
+          -webkit-backdrop-filter: blur(34px) saturate(165%);
+        }
+        .zuqen-app.light .zuqen-composer { background: rgba(255,255,255,.55) !important; border-color: rgba(46,52,74,.17) !important; }
+        .zuqen-composer:focus-within { border-color: rgba(174,160,255,.48) !important; box-shadow: 0 18px 60px rgba(0,0,0,.14), 0 0 0 3px rgba(139,117,255,.08), inset 0 1px rgba(255,255,255,.11) !important; }
+        .zuqen-composer textarea { font-size: 15px !important; line-height: 1.55 !important; }
+        .zuqen-composer-footer { color: var(--muted-2) !important; }
+        .zuqen-send, .zuqen-hero-submit { background: linear-gradient(135deg, #9b82ff, #6b8cff 56%, #44c8d7) !important; color: #fff !important; box-shadow: 0 5px 24px rgba(105,112,255,.28) !important; }
+        .zuqen-jump-latest {
+          position: absolute;
+          z-index: 5;
+          bottom: 126px;
+          left: 50%;
+          transform: translateX(-50%);
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          padding: 10px 15px;
+          border-radius: 999px;
+          color: var(--text);
+          background: rgba(37,40,53,.70);
+          border: 1px solid rgba(255,255,255,.19);
+          box-shadow: 0 10px 32px rgba(0,0,0,.18);
+          backdrop-filter: blur(24px) saturate(160%);
+          -webkit-backdrop-filter: blur(24px) saturate(160%);
+          font-size: 12px;
+          font-weight: 600;
+          cursor: pointer;
+          animation: zuqen-jump-in .18s ease-out both;
+        }
+        .zuqen-jump-latest:hover { background: rgba(73,76,98,.82); border-color: rgba(190,177,255,.35); }
+        .zuqen-app.light .zuqen-jump-latest { background: rgba(255,255,255,.76); border-color: rgba(45,48,65,.16); color: #252737; }
+        .zuqen-empty-chat-inner { background: rgba(255,255,255,.045) !important; border-color: rgba(255,255,255,.11) !important; backdrop-filter: blur(20px); }
+        .zuqen-mobile-overlay { background: rgba(6,8,14,.40) !important; backdrop-filter: blur(8px); }
+        @keyframes zuqen-glass-ambient { from { transform: scale(1); opacity: .8; } to { transform: scale(1.035); opacity: 1; } }
+        @keyframes zuqen-message-in { from { opacity: .45; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes zuqen-jump-in { from { opacity: 0; transform: translate(-50%, 6px); } to { opacity: 1; transform: translate(-50%, 0); } }
+        @media (max-width: 760px) {
+          .zuqen-sidebar { background: rgba(17,19,28,.78) !important; backdrop-filter: blur(32px) saturate(160%); }
+          .zuqen-app.light .zuqen-sidebar { background: rgba(255,255,255,.82) !important; }
+          .zuqen-messages { padding: 22px 14px 20px !important; }
+          .zuqen-message-row { margin-bottom: 24px !important; }
+          .zuqen-message-bubble { max-width: 100%; padding: 12px 14px !important; font-size: 14px !important; }
+          .zuqen-composer-area { padding: 10px 11px max(12px, env(safe-area-inset-bottom)) !important; }
+          .zuqen-composer { border-radius: 21px !important; }
+          .zuqen-jump-latest { bottom: 112px; font-size: 11px; padding: 9px 13px; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .zuqen-app::before { animation: none !important; }
+          .zuqen-message-row, .zuqen-jump-latest { animation: none !important; }
+        }
+
       `}</style>
 
       {!sidebarOpen && (
@@ -3999,7 +4237,17 @@ export default function HomePage() {
           ) : activeChatId &&
             activeChat ? (
             <div className="zuqen-chat-view">
-              <div className="zuqen-messages">
+              <div
+                className="zuqen-messages"
+                ref={messagesContainerRef}
+                onScroll={(event) => {
+                  const element = event.currentTarget;
+                  const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
+                  const nearBottom = distanceFromBottom < 140;
+                  shouldAutoScrollRef.current = nearBottom;
+                  setShowJumpToLatest(!nearBottom && messages.length > 0);
+                }}
+              >
                 <div className="zuqen-message-list">
                   {messages.length ===
                   0 ? (
@@ -4214,8 +4462,22 @@ export default function HomePage() {
                       }
                     )
                   )}
+                  <div ref={messagesEndRef} aria-hidden="true" />
                 </div>
               </div>
+
+              {showJumpToLatest && (
+                <button
+                  type="button"
+                  className="zuqen-jump-latest"
+                  onClick={() => scrollToLatest("smooth")}
+                  aria-label="Jump to latest message"
+                  title="Jump to latest"
+                >
+                  <Icon name="arrow-down" size={16} />
+                  <span>Jump to latest</span>
+                </button>
+              )}
 
               <div className="zuqen-composer-area">
                 {attachments.length >
