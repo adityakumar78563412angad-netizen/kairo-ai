@@ -276,6 +276,16 @@ function Icon({
         </svg>
       );
 
+    case "grid":
+      return (
+        <svg {...common}>
+          <rect x="4" y="4" width="6" height="6" rx="1" />
+          <rect x="14" y="4" width="6" height="6" rx="1" />
+          <rect x="4" y="14" width="6" height="6" rx="1" />
+          <rect x="14" y="14" width="6" height="6" rx="1" />
+        </svg>
+      );
+
     case "spark":
       return (
         <svg {...common}>
@@ -425,6 +435,9 @@ export default function HomePage() {
       setAuthReady(false);
       setErrorMessage("");
 
+      /*
+       * Restore an existing Supabase session first.
+       */
       const {
         data: { session },
         error: sessionError,
@@ -436,6 +449,9 @@ export default function HomePage() {
 
       let currentUser = session?.user ?? null;
 
+      /*
+       * If getSession() did not return a user, try getUser().
+       */
       if (!currentUser) {
         const {
           data: { user: existingUser },
@@ -448,52 +464,116 @@ export default function HomePage() {
       }
 
       /*
-       * Guest mode:
-       * Create anonymous user only when absolutely no
-       * existing session/user exists.
+       * No existing session: create a new anonymous Guest account.
        */
-    if (!currentUser) {
-  const {
-    data: anonymousData,
-    error: anonymousError,
-  } = await supabase.auth.signInAnonymously();
+      if (!currentUser) {
+        const {
+          data: anonymousData,
+          error: anonymousError,
+        } = await supabase.auth.signInAnonymously();
 
-  if (anonymousError) {
-    console.error("Anonymous sign-in:", anonymousError);
+        if (anonymousError) {
+          console.error("Anonymous sign-in:", anonymousError);
 
-    setErrorMessage(
-      "Unable to authenticate with Supabase."
-    );
+          setErrorMessage(
+            "Unable to authenticate with Supabase."
+          );
 
-    return;
-  }
+          return;
+        }
 
-  if (!anonymousData.user) {
-    console.error("Anonymous sign-in returned no user.");
+        if (!anonymousData.user) {
+          console.error(
+            "Anonymous sign-in returned no user."
+          );
 
-    setErrorMessage(
-      "Unable to create a guest account."
-    );
+          setErrorMessage(
+            "Unable to create a guest account."
+          );
 
-    return;
-  }
+          return;
+        }
 
-  const guestUser = anonymousData.user;
+        /*
+         * Explicitly make sure the returned anonymous session is
+         * installed in the browser client before calling the RPC.
+         * This prevents the RPC from running without auth context.
+         */
+        if (anonymousData.session) {
+          const { error: setSessionError } =
+            await supabase.auth.setSession({
+              access_token: anonymousData.session.access_token,
+              refresh_token: anonymousData.session.refresh_token,
+            });
 
-  const { error: creditError } = await supabase.rpc(
-    "setup_guest_chat_credits"
-  );
+          if (setSessionError) {
+            console.error(
+              "Guest setSession:",
+              setSessionError
+            );
 
-  if (creditError) {
-    console.error(
-      "Guest credit setup error:",
-      creditError
-    );
-  }
+            setErrorMessage(
+              "Guest authentication could not be established."
+            );
 
-  currentUser = guestUser;
-}
+            return;
+          }
+        }
 
+        /*
+         * Verify the authenticated session after anonymous sign-in.
+         */
+        const {
+          data: { session: verifiedSession },
+          error: verifiedSessionError,
+        } = await supabase.auth.getSession();
+
+        if (
+          verifiedSessionError ||
+          !verifiedSession?.user
+        ) {
+          console.error(
+            "Guest session verification failed:",
+            verifiedSessionError
+          );
+
+          setErrorMessage(
+            "Guest authentication could not be verified."
+          );
+
+          return;
+        }
+
+        currentUser = verifiedSession.user;
+      }
+
+      /*
+       * Guest users receive/setup the Guest Chat credit wallet.
+       * Permanent signed-in users never call this RPC.
+       */
+      if (currentUser.is_anonymous) {
+        const { error: creditError } =
+          await supabase.rpc(
+            "setup_guest_chat_credits"
+          );
+
+        if (creditError) {
+          console.error(
+            "Guest credit setup error:",
+            creditError
+          );
+
+          setErrorMessage(
+            "Guest Mode started, but Chat credits could not be set up. Please refresh and try again."
+          );
+
+          return;
+        }
+      }
+
+      /*
+       * Convert the Supabase user into the User type used by ZUQEN.
+       */
       const normalizedUser: User = {
         id: currentUser.id,
         email: currentUser.email,
@@ -502,6 +582,9 @@ export default function HomePage() {
 
       setUser(normalizedUser);
 
+      /*
+       * Load conversations and Chat credits together.
+       */
       await Promise.all([
         loadChats(currentUser.id),
         loadChatCredits(currentUser.id),
@@ -2827,8 +2910,6 @@ export default function HomePage() {
             display: none;
           }
         }
-
-
         /* ZUQEN AI — MIDNIGHT AURORA DESIGN SYSTEM */
         .zuqen-app {
           --bg: #090a11;
@@ -2893,6 +2974,16 @@ export default function HomePage() {
           box-shadow: 0 0 0 1px rgba(255,255,255,.15) inset, 0 7px 28px rgba(117,86,255,.35) !important;
         }
         .zuqen-brand-name { letter-spacing: -.045em; }
+
+        .zuqen-utility-action {
+          margin-top: 8px;
+          background: rgba(255,255,255,.018);
+          border: 1px solid var(--border);
+        }
+        .zuqen-utility-action:hover {
+          background: rgba(139,92,246,.09);
+          border-color: rgba(167,139,250,.24);
+        }
 
         .zuqen-sidebar-action,
         .zuqen-chat-item,
@@ -3103,6 +3194,7 @@ export default function HomePage() {
           .zuqen-welcome-mark > span::after { animation: none !important; }
         }
 
+
       `}</style>
 
       {!sidebarOpen && (
@@ -3140,6 +3232,28 @@ export default function HomePage() {
           >
             <Icon name="plus" size={17} />
             <span>New conversation</span>
+          </button>
+
+          <button
+            className="zuqen-new-chat zuqen-utility-action"
+            onClick={() => {
+              window.location.href = "/automation";
+            }}
+            title="Open Automation Mode"
+          >
+            <Icon name="spark" size={17} />
+            <span>Automation Mode</span>
+          </button>
+
+          <button
+            className="zuqen-new-chat zuqen-utility-action"
+            onClick={() => {
+              window.location.href = "/templates";
+            }}
+            title="Open Buy/Sell Templates"
+          >
+            <Icon name="grid" size={17} />
+            <span>Buy/Sell Templates</span>
           </button>
 
           <div className="zuqen-sidebar-section">
