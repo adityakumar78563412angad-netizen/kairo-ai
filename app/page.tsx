@@ -3012,6 +3012,97 @@ export default function HomePage() {
           }
         }
 
+        /* ZUQEN animated fire + water orb: visual-only enhancement */
+        .zuqen-welcome-mark {
+          width: 96px !important;
+          height: 96px !important;
+          margin: 0 auto 28px !important;
+          position: relative !important;
+          display: grid !important;
+          place-items: center !important;
+          overflow: visible !important;
+          border-radius: 50% !important;
+          isolation: isolate;
+          background: transparent !important;
+          border: 0 !important;
+          box-shadow: none !important;
+          color: transparent !important;
+          animation: zuqen-orb-float 5s ease-in-out infinite;
+        }
+        .zuqen-welcome-mark::before {
+          content: "" !important;
+          position: absolute !important;
+          inset: -5px !important;
+          width: auto !important;
+          height: auto !important;
+          border: 0 !important;
+          border-radius: 50% !important;
+          background: conic-gradient(from 0deg, #22d3ee, #5267ff, #9b5cff, #ff8a32, #ffcf65, #ff4d36, #22d3ee) !important;
+          filter: blur(7px);
+          opacity: .82;
+          animation: zuqen-orb-spin 8s linear infinite;
+        }
+        .zuqen-welcome-mark::after {
+          content: "" !important;
+          position: absolute !important;
+          inset: 2px !important;
+          width: auto !important;
+          height: auto !important;
+          border: 1px solid rgba(255,255,255,.22) !important;
+          border-radius: 50% !important;
+          background:
+            radial-gradient(ellipse at 28% 24%, rgba(255,190,83,.96) 0%, rgba(255,91,42,.76) 19%, transparent 44%),
+            radial-gradient(ellipse at 73% 73%, rgba(36,224,255,.98) 0%, rgba(43,107,255,.72) 25%, transparent 49%),
+            radial-gradient(circle at 50% 48%, #17172a 0%, #090b15 72%);
+          box-shadow: inset 0 0 18px rgba(255,255,255,.12), 0 0 34px rgba(74,113,255,.18);
+          animation: zuqen-orb-breathe 4s ease-in-out infinite;
+        }
+        .zuqen-welcome-mark > span {
+          display: block !important;
+          position: absolute !important;
+          inset: 10px !important;
+          z-index: 2;
+          border-radius: 50%;
+          overflow: hidden;
+          background: transparent;
+          box-shadow: inset 0 0 0 1px rgba(255,255,255,.18);
+        }
+        .zuqen-welcome-mark > span::before,
+        .zuqen-welcome-mark > span::after {
+          content: "";
+          position: absolute;
+          width: 75%;
+          height: 115%;
+          top: -8%;
+          border-radius: 48% 52% 45% 55%;
+          filter: blur(.2px);
+          mix-blend-mode: screen;
+        }
+        .zuqen-welcome-mark > span::before {
+          left: -18%;
+          background: linear-gradient(160deg, #ffe68b 3%, #ff9d38 26%, #ff4e35 52%, rgba(255,53,91,.08) 86%);
+          clip-path: polygon(0 0, 100% 0, 76% 22%, 100% 39%, 64% 58%, 87% 75%, 48% 100%, 0 100%);
+          animation: zuqen-fire-flow 3.6s ease-in-out infinite alternate;
+        }
+        .zuqen-welcome-mark > span::after {
+          right: -18%;
+          background: linear-gradient(205deg, #b4ffff 0%, #38e7ff 27%, #3479ff 58%, rgba(88,65,255,.10) 91%);
+          clip-path: polygon(0 0, 100% 0, 100% 100%, 15% 100%, 36% 79%, 7% 61%, 34% 43%, 10% 25%);
+          animation: zuqen-water-flow 3.2s ease-in-out infinite alternate;
+        }
+        @keyframes zuqen-orb-spin { to { transform: rotate(360deg); } }
+        @keyframes zuqen-orb-float { 0%,100% { transform: translateY(0) scale(1); } 50% { transform: translateY(-5px) scale(1.025); } }
+        @keyframes zuqen-orb-breathe { 0%,100% { filter: saturate(1); } 50% { filter: saturate(1.28) brightness(1.08); } }
+        @keyframes zuqen-fire-flow { 0% { transform: rotate(-8deg) translateY(3px) scale(1); } 100% { transform: rotate(8deg) translateY(-4px) scale(1.12); } }
+        @keyframes zuqen-water-flow { 0% { transform: rotate(7deg) translateY(-3px) scale(1.04); } 100% { transform: rotate(-8deg) translateY(4px) scale(1.14); } }
+        @media (prefers-reduced-motion: reduce) {
+          .zuqen-welcome-mark,
+          .zuqen-welcome-mark::before,
+          .zuqen-welcome-mark::after,
+          .zuqen-welcome-mark > span::before,
+          .zuqen-welcome-mark > span::after { animation: none !important; }
+        }
+
       `}</style>
 
       {!sidebarOpen && (
