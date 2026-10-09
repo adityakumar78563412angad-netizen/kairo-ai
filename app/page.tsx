@@ -345,41 +345,13 @@ export default function HomePage() {
 
   const [lightMode, setLightMode] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
-
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const streamAbortRef = useRef<AbortController | null>(null);
-  const messagesContainerRef = useRef<HTMLDivElement | null>(null);
-  const shouldAutoScrollRef = useRef(true);
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
 
-  useEffect(() => {
-    const container = messagesContainerRef.current;
-    if (!container) return;
-    if (shouldAutoScrollRef.current) {
-      container.scrollTo({ top: container.scrollHeight, behavior: loading ? "auto" : "smooth" });
-      setShowJumpToLatest(false);
-    } else {
-      const distance = container.scrollHeight - container.scrollTop - container.clientHeight;
-      setShowJumpToLatest(distance > 180);
-    }
-  }, [messages, loading, activeChatId]);
-
-  const handleMessagesScroll = useCallback(() => {
-    const container = messagesContainerRef.current;
-    if (!container) return;
-    const distance = container.scrollHeight - container.scrollTop - container.clientHeight;
-    const nearBottom = distance < 120;
-    shouldAutoScrollRef.current = nearBottom;
-    setShowJumpToLatest(!nearBottom && distance > 180);
-  }, []);
-
-  const jumpToLatest = useCallback(() => {
-    const container = messagesContainerRef.current;
-    if (!container) return;
-    shouldAutoScrollRef.current = true;
-    container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
-    setShowJumpToLatest(false);
-  }, []);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const messagesContainerRef = useRef<HTMLDivElement | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const shouldAutoScrollRef = useRef(true);
+  const streamAbortRef = useRef<AbortController | null>(null);
 
   const activeChat = useMemo(
     () => chats.find((chat) => chat.id === activeChatId) ?? null,
@@ -1400,6 +1372,8 @@ export default function HomePage() {
   };
 
   const startNewChat = () => {
+    shouldAutoScrollRef.current = true;
+    setShowJumpToLatest(false);
     setActiveChatId(null);
     setMessages([]);
     setInput("");
@@ -1447,6 +1421,29 @@ export default function HomePage() {
     }
   }, []);
 
+  useEffect(() => {
+    if (!shouldAutoScrollRef.current) return;
+    const frame = window.requestAnimationFrame(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [messages, loading, activeChatId]);
+
+  const handleMessagesScroll = () => {
+    const element = messagesContainerRef.current;
+    if (!element) return;
+    const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
+    const atBottom = distanceFromBottom < 140;
+    shouldAutoScrollRef.current = atBottom;
+    setShowJumpToLatest(!atBottom && messages.length > 0);
+  };
+
+  const jumpToLatest = () => {
+    shouldAutoScrollRef.current = true;
+    setShowJumpToLatest(false);
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  };
+
   const homeSuggestions = [
     {
       title: "Write something",
@@ -1490,233 +1487,58 @@ export default function HomePage() {
     >
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap');
-        :root { color-scheme: dark; }
-        * { box-sizing: border-box; }
-        html, body { margin:0; padding:0; min-height:100%; }
-        body { background:#080a12; }
-        button,input,textarea { font:inherit; }
-        button { border:0; }
-        .zuqen-app {
-          --bg:#080a12; --panel:rgba(20,24,39,.60); --panel-2:rgba(35,40,62,.58);
-          --panel-3:rgba(58,64,94,.48); --border:rgba(222,230,255,.12);
-          --border-strong:rgba(222,230,255,.21); --text:#f7f8ff; --muted:#b2bad2;
-          --muted-2:#7e89a8; --accent:#a9a5ff; --accent-text:#111326;
-          --danger:#ff8caa; --shadow:0 24px 90px rgba(0,0,0,.32);
-          position:relative; isolation:isolate; display:flex; width:100%; height:100dvh; min-height:560px;
-          overflow:hidden; color:var(--text); font-family:'DM Sans',sans-serif;
-          background:radial-gradient(ellipse at 65% -8%,rgba(120,105,255,.24),transparent 37%),
-            radial-gradient(ellipse at 4% 100%,rgba(26,185,205,.13),transparent 34%),
-            linear-gradient(135deg,#080a12 0%,#0c1020 48%,#0b0d18 100%);
+        *{box-sizing:border-box}
+        html,body{margin:0;padding:0;min-height:100%;background:#101713}
+        button,input,textarea{font:inherit}button{border:0}
+        .zuqen-app{
+          --bg:#101713;--panel:rgba(25,35,29,.88);--panel-2:rgba(33,45,37,.92);--panel-3:rgba(44,58,47,.88);
+          --border:rgba(229,241,220,.105);--border-strong:rgba(229,241,220,.18);--text:#f1f4ec;--muted:#a1aea1;--muted-2:#748276;
+          --accent:#d4f36a;--accent-text:#182017;--danger:#ff8c82;--shadow:0 24px 80px rgba(0,0,0,.32);
+          min-height:100dvh;height:100dvh;display:flex;color:var(--text);overflow:hidden;font-family:'DM Sans',sans-serif;
+          background:radial-gradient(ellipse at 72% -12%,rgba(118,155,85,.18),transparent 38%),radial-gradient(ellipse at 10% 100%,rgba(54,111,83,.13),transparent 40%),#101713;
         }
-        .zuqen-app::before { content:""; position:absolute; inset:0; z-index:-1; pointer-events:none; opacity:.25;
-          background-image:linear-gradient(rgba(255,255,255,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.035) 1px,transparent 1px);
-          background-size:44px 44px; mask-image:linear-gradient(to bottom,black,transparent 85%); }
-        .zuqen-app::after { content:""; position:absolute; width:480px;height:480px;right:-180px;top:30%;z-index:-1;pointer-events:none;
-          background:rgba(105,95,255,.11);filter:blur(90px);border-radius:50%; }
-        .zuqen-app.light { --bg:#edf0ff;--panel:rgba(255,255,255,.63);--panel-2:rgba(246,247,255,.68);--panel-3:rgba(230,234,255,.66);
-          --border:rgba(54,62,110,.12);--border-strong:rgba(54,62,110,.2);--text:#171a2d;--muted:#646b87;--muted-2:#8b91aa;--accent:#5d55d9;--accent-text:#fff;--shadow:0 24px 80px rgba(53,60,110,.12);
-          background:radial-gradient(ellipse at 70% -10%,rgba(142,133,255,.26),transparent 40%),radial-gradient(ellipse at 0% 100%,rgba(63,209,213,.18),transparent 34%),linear-gradient(135deg,#f5f6ff,#e9edfa); color:var(--text); }
-        .zuqen-app.light::before { opacity:.3;background-image:linear-gradient(rgba(60,70,120,.055) 1px,transparent 1px),linear-gradient(90deg,rgba(60,70,120,.055) 1px,transparent 1px); }
-        .zuqen-sidebar { width:272px;flex:0 0 272px;height:100%;display:flex;flex-direction:column;position:relative;z-index:30;
-          background:rgba(15,18,32,.48);border-right:1px solid var(--border);backdrop-filter:blur(32px) saturate(155%);-webkit-backdrop-filter:blur(32px) saturate(155%);
-          transition:width .28s ease,flex-basis .28s ease,transform .28s ease; }
-        .light .zuqen-sidebar { background:rgba(255,255,255,.48); }
-        .zuqen-sidebar.closed { width:0;flex-basis:0;overflow:hidden;border-right:0; }
-        .zuqen-brand { min-height:82px;display:flex;align-items:center;padding:0 21px;gap:13px;border-bottom:1px solid var(--border); }
-        .zuqen-logo { width:39px;height:39px;flex:0 0 39px;position:relative;display:grid;place-items:center;border-radius:14px;
-          background:conic-gradient(from 210deg,#66e5f5,#8985ff,#ff9ccf,#66e5f5);box-shadow:0 0 28px rgba(132,126,255,.35); }
-        .zuqen-logo::before { content:"";position:absolute;inset:3px;border-radius:11px;background:#111528; }
-        .zuqen-logo::after { content:"✦";position:relative;color:#fff;font-size:22px;line-height:1;text-shadow:0 0 15px rgba(151,211,255,.8); }
-        .light .zuqen-logo::before { background:#25274b; }
-        .zuqen-brand-text { min-width:0; }
-        .zuqen-brand-name { font:800 15px 'Manrope',sans-serif;letter-spacing:1.8px;background:linear-gradient(90deg,#fff,#b7b5ff 60%,#8ce9f2);color:transparent;background-clip:text; }
-        .light .zuqen-brand-name { background-image:linear-gradient(90deg,#24254c,#665fdb 60%,#148b9a); }
-        .zuqen-brand-sub { margin-top:4px;color:var(--muted-2);font-size:10px;letter-spacing:.25px; }
-        .zuqen-sidebar-content { display:flex;flex-direction:column;gap:23px;min-height:0;flex:1;padding:19px 13px 12px; }
-        .zuqen-new-chat { min-height:46px;display:flex;align-items:center;justify-content:flex-start;gap:11px;padding:0 14px;border:1px solid rgba(174,168,255,.32);border-radius:14px;
-          background:linear-gradient(110deg,rgba(132,123,255,.23),rgba(71,200,220,.10));color:var(--text);cursor:pointer;font-size:12px;font-weight:700;box-shadow:inset 0 1px rgba(255,255,255,.09);transition:.2s; }
-        .zuqen-new-chat:hover { transform:translateY(-1px);border-color:rgba(178,174,255,.65);box-shadow:0 8px 28px rgba(99,94,220,.18); }
-        .zuqen-new-chat span:last-child { font-size:12px; }
-        .zuqen-sidebar-section { display:flex;flex-direction:column;gap:10px;min-height:0;flex:1; }
-        .zuqen-sidebar-heading { display:flex;align-items:center;justify-content:space-between;padding:0 9px;color:var(--muted-2);font-size:10px;font-weight:800;letter-spacing:1.15px;text-transform:uppercase; }
-        .zuqen-sidebar-heading button { width:28px;height:28px;display:grid;place-items:center;border-radius:9px;color:var(--muted);background:transparent;cursor:pointer; }
-        .zuqen-sidebar-heading button:hover { background:var(--panel-2);color:var(--text); }
-        .zuqen-chat-list { min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:4px;padding-right:2px; }
-        .zuqen-chat-list::-webkit-scrollbar,.zuqen-messages::-webkit-scrollbar { width:5px; }
-        .zuqen-chat-list::-webkit-scrollbar-thumb,.zuqen-messages::-webkit-scrollbar-thumb { background:rgba(150,160,200,.25);border-radius:10px; }
-        .zuqen-chat-item { position:relative;display:flex;align-items:center;gap:4px;padding:10px 8px 10px 12px;min-height:47px;border:1px solid transparent;border-radius:12px;cursor:pointer;transition:background .18s,border-color .18s; }
-        .zuqen-chat-item:hover,.zuqen-chat-item.active { background:var(--panel-2);border-color:var(--border); }
-        .zuqen-chat-item.active { box-shadow:inset 2px 0 #a7a2ff; }
-        .zuqen-chat-main { min-width:0;flex:1; }
-        .zuqen-chat-title { overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text);font-size:11px;font-weight:600; }
-        .zuqen-chat-date { margin-top:4px;color:var(--muted-2);font-size:9px; }
-        .zuqen-chat-menu-button { width:25px;height:25px;display:grid;place-items:center;flex:0 0 25px;border-radius:8px;color:var(--muted-2);background:transparent;opacity:0;cursor:pointer; }
-        .zuqen-chat-item:hover .zuqen-chat-menu-button,.zuqen-chat-menu-button.open { opacity:1; }
-        .zuqen-chat-menu-button:hover { background:var(--panel-3);color:var(--text); }
-        .zuqen-rename { width:100%;padding:6px;border:1px solid var(--border-strong);border-radius:7px;background:var(--panel-2);color:var(--text);outline:none; }
-        .zuqen-floating-menu,.zuqen-agent-dropdown,.zuqen-credit-dropdown { position:absolute;z-index:90;padding:7px;border:1px solid var(--border-strong);border-radius:15px;background:rgba(22,25,43,.88);backdrop-filter:blur(28px);box-shadow:var(--shadow); }
-        .light .zuqen-floating-menu,.light .zuqen-agent-dropdown,.light .zuqen-credit-dropdown { background:rgba(255,255,255,.88); }
-        .zuqen-floating-menu { right:4px;top:calc(100% - 2px);width:155px; }
-        .zuqen-menu-item { width:100%;display:flex;align-items:center;gap:9px;padding:10px;border-radius:9px;background:transparent;color:var(--muted);text-align:left;font-size:11px;cursor:pointer; }
-        .zuqen-menu-item:hover { background:var(--panel-2);color:var(--text); }
-        .zuqen-menu-item.danger:hover { color:var(--danger);background:rgba(255,90,125,.1); }
-        .zuqen-sidebar-bottom { padding:13px;border-top:1px solid var(--border); }
-        .zuqen-sidebar-user { display:flex;align-items:center;gap:10px;min-width:0;padding:10px;border-radius:13px;background:rgba(255,255,255,.035); }
-        .zuqen-user-dot { width:33px;height:33px;flex:0 0 33px;display:grid;place-items:center;border-radius:12px;background:linear-gradient(140deg,#8a83ff,#59cddd);color:#101325;font-size:12px;font-weight:800; }
-        .zuqen-user-info { min-width:0;flex:1; }
-        .zuqen-user-name { overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text);font-size:10px;font-weight:700; }
-        .zuqen-user-status { margin-top:4px;color:var(--muted-2);font-size:9px; }
-        .zuqen-auth-button { padding:7px 10px;border-radius:9px;background:var(--panel-2);color:var(--muted);font-size:10px;cursor:pointer; }
-        .zuqen-auth-button:hover { color:var(--text);background:var(--panel-3); }
-        .zuqen-auth-button.primary { background:linear-gradient(120deg,#a8a3ff,#82e2ee);color:#111326;font-weight:800; }
-        .zuqen-auth-button.primary:hover { filter:brightness(1.08); }
-        .zuqen-auth-button:disabled { opacity:.5;cursor:not-allowed; }
-        .zuqen-main { min-width:0;flex:1;display:flex;flex-direction:column;position:relative; }
-        .zuqen-topbar { min-height:76px;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:0 28px;border-bottom:1px solid var(--border);background:rgba(9,12,24,.24);backdrop-filter:blur(22px);position:relative;z-index:20; }
-        .light .zuqen-topbar { background:rgba(255,255,255,.25); }
-        .zuqen-top-left,.zuqen-top-right { display:flex;align-items:center;gap:11px;min-width:0; }
-        .zuqen-icon-button { width:39px;height:39px;display:grid;place-items:center;border:1px solid var(--border);border-radius:13px;color:var(--muted);background:var(--panel);backdrop-filter:blur(18px);cursor:pointer;transition:.2s; }
-        .zuqen-icon-button:hover { border-color:var(--border-strong);color:var(--text);background:var(--panel-2);transform:translateY(-1px); }
-        .zuqen-agent-selector,.zuqen-credit-wrap { position:relative; }
-        .zuqen-agent-button { min-height:43px;display:flex;align-items:center;gap:10px;padding:5px 12px 5px 7px;border:1px solid var(--border);border-radius:14px;background:var(--panel);color:var(--text);cursor:pointer;backdrop-filter:blur(18px); }
-        .zuqen-agent-button-icon { width:30px;height:30px;display:grid;place-items:center;border-radius:10px;background:linear-gradient(140deg,rgba(151,137,255,.32),rgba(75,207,225,.18));color:#c9c3ff;font-size:16px; }
-        .zuqen-agent-button-text { text-align:left; }
-        .zuqen-agent-button-name { font-size:11px;font-weight:800; }
-        .zuqen-agent-button-sub { margin-top:3px;color:var(--muted-2);font-size:9px; }
-        .zuqen-agent-dropdown { top:calc(100% + 10px);left:0;width:min(320px,calc(100vw - 32px)); }
-        .zuqen-agent-option { width:100%;display:flex;align-items:center;gap:10px;padding:11px;border-radius:11px;background:transparent;color:var(--text);text-align:left;cursor:pointer; }
-        .zuqen-agent-option:hover,.zuqen-agent-option.selected { background:var(--panel-2); }
-        .zuqen-agent-option-icon { width:33px;height:33px;display:grid;place-items:center;border-radius:11px;background:var(--panel-3);font-size:15px; }
-        .zuqen-agent-option-content { flex:1;min-width:0; }
-        .zuqen-agent-option-name { font-size:11px;font-weight:700; }
-        .zuqen-agent-option-description { margin-top:4px;color:var(--muted-2);font-size:9px;line-height:1.4; }
-        .zuqen-agent-check { color:#a8a2ff; }
-        .zuqen-credit-button { display:flex;align-items:center;gap:8px;min-height:39px;padding:0 12px;border:1px solid var(--border);border-radius:12px;background:var(--panel);color:var(--text);cursor:pointer; }
-        .zuqen-credit-icon { color:#b8b0ff;font-size:17px; }
-        .zuqen-credit-count { font-size:11px;font-weight:800; }
-        .zuqen-credit-label { color:var(--muted-2);font-size:10px; }
-        .zuqen-credit-dropdown { top:calc(100% + 10px);right:0;width:235px;padding:17px; }
-        .zuqen-credit-dropdown-title { color:var(--muted);font-size:10px;font-weight:800;letter-spacing:.5px; }
-        .zuqen-credit-big { margin-top:9px;font:800 28px 'Manrope',sans-serif;letter-spacing:-1px; }
-        .zuqen-credit-small { margin-top:4px;color:var(--muted-2);font-size:10px; }
-        .zuqen-credit-line { height:1px;margin:14px 0;background:var(--border); }
-        .zuqen-credit-row { display:flex;justify-content:space-between;margin-top:9px;color:var(--muted-2);font-size:10px; }
-        .zuqen-credit-row strong { color:var(--text);font-weight:700; }
-        .zuqen-content { flex:1;min-height:0;display:flex;flex-direction:column;position:relative; }
-        .zuqen-home { flex:1;overflow-y:auto;padding:clamp(28px,5vh,65px) 28px 42px; }
-        .zuqen-home-inner { width:min(1000px,100%);margin:0 auto; }
-        .zuqen-welcome { max-width:760px;margin:0 auto;text-align:center;position:relative; }
-        .zuqen-welcome-mark { width:76px;height:76px;display:grid;place-items:center;position:relative;margin:0 auto 24px;border-radius:26px;
-          background:radial-gradient(circle at 30% 22%,rgba(255,255,255,.95),rgba(175,166,255,.45) 23%,rgba(93,86,214,.15) 55%,rgba(49,197,216,.14));
-          border:1px solid rgba(197,190,255,.42);box-shadow:0 0 0 9px rgba(132,123,255,.045),0 0 70px rgba(120,110,255,.24),inset 0 1px rgba(255,255,255,.55);animation:orbFloat 5s ease-in-out infinite; }
-        .zuqen-welcome-mark::before { content:"";position:absolute;inset:7px;border:1px solid rgba(167,219,255,.4);border-radius:21px;transform:rotate(22deg); }
-        .zuqen-welcome-mark::after { content:"✦";position:relative;font-size:37px;color:#f6f3ff;text-shadow:0 0 22px #9d9aff,0 0 42px #61dbe9; }
-        .zuqen-welcome-mark span { position:absolute;inset:-9px;border:1px solid rgba(140,209,255,.2);border-radius:31px;transform:rotate(-18deg); }
-        .light .zuqen-welcome-mark::after { color:#5f56cc; }
-        .zuqen-welcome h1 { margin:0;font:800 clamp(34px,5.1vw,61px)/1.07 'Manrope',sans-serif;letter-spacing:-2.8px;background:linear-gradient(100deg,var(--text) 6%,#b8b3ff 51%,#87e5ee 94%);color:transparent;background-clip:text; }
-        .light .zuqen-welcome h1 { background-image:linear-gradient(100deg,#222440 6%,#625bd0 51%,#168e9e 94%); }
-        .zuqen-welcome p { max-width:570px;margin:18px auto 0;color:var(--muted);font-size:14px;line-height:1.8; }
-        .zuqen-search-card { width:min(760px,100%);min-height:76px;display:flex;align-items:center;gap:13px;margin:34px auto 0;padding:12px 15px;border:1px solid rgba(184,178,255,.32);border-radius:24px;
-          background:linear-gradient(120deg,rgba(255,255,255,.095),rgba(255,255,255,.035)),rgba(20,24,43,.42);backdrop-filter:blur(32px) saturate(165%);box-shadow:0 18px 70px rgba(0,0,0,.16),inset 0 1px rgba(255,255,255,.11);transition:.25s; }
-        .zuqen-search-card:focus-within { border-color:rgba(167,162,255,.72);box-shadow:0 0 0 4px rgba(133,124,255,.09),0 20px 80px rgba(0,0,0,.18); }
-        .light .zuqen-search-card { background:rgba(255,255,255,.58); }
-        .zuqen-search-card-icon { width:44px;height:44px;flex:0 0 44px;display:grid;place-items:center;border-radius:15px;background:linear-gradient(140deg,rgba(151,137,255,.24),rgba(75,207,225,.14));color:#c4c0ff; }
-        .zuqen-search-card input { flex:1;min-width:0;border:0;outline:0;background:transparent;color:var(--text);font-size:14px; }
-        .zuqen-search-card input::placeholder { color:var(--muted-2); }
-        .zuqen-search-shortcut { padding:6px 9px;border:1px solid var(--border);border-radius:9px;background:rgba(255,255,255,.04);color:var(--muted-2);font-size:10px; }
-        .zuqen-suggestion-grid { display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:17px; }
-        .zuqen-suggestion { min-height:126px;padding:17px 16px;text-align:left;border:1px solid var(--border);border-radius:19px;background:linear-gradient(145deg,rgba(255,255,255,.075),rgba(255,255,255,.018));backdrop-filter:blur(20px);color:var(--text);cursor:pointer;transition:transform .22s,border-color .22s,background .22s; }
-        .zuqen-suggestion:hover { transform:translateY(-4px);border-color:rgba(167,162,255,.48);background:linear-gradient(145deg,rgba(151,137,255,.16),rgba(75,207,225,.055)); }
-        .zuqen-suggestion-icon { color:#aaa5ff;font-size:19px; }
-        .zuqen-suggestion-title { margin-top:16px;font-size:12px;font-weight:800; }
-        .zuqen-suggestion-text { margin-top:6px;color:var(--muted-2);font-size:10px;line-height:1.55; }
-        .zuqen-agent-strip { margin-top:38px; }
-        .zuqen-strip-title { color:var(--muted-2);text-transform:uppercase;letter-spacing:1.6px;font-size:10px;font-weight:800;text-align:center; }
-        .zuqen-agent-cards { display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:14px; }
-        .zuqen-mini-agent { min-width:0;padding:16px;border:1px solid var(--border);border-radius:18px;background:rgba(255,255,255,.035);backdrop-filter:blur(18px);color:var(--text);text-align:left;cursor:pointer;transition:.22s; }
-        .zuqen-mini-agent:hover { transform:translateY(-3px);border-color:rgba(167,162,255,.45);background:rgba(135,126,255,.10); }
-        .zuqen-mini-agent-icon { width:36px;height:36px;display:grid;place-items:center;border-radius:13px;background:linear-gradient(140deg,rgba(151,137,255,.24),rgba(75,207,225,.14));color:#c5c0ff;font-size:14px; }
-        .zuqen-mini-agent-name { margin-top:13px;font-size:11px;font-weight:800; }
-        .zuqen-mini-agent-desc { margin-top:5px;color:var(--muted-2);font-size:9px;line-height:1.5; }
-        .zuqen-chat-view { flex:1;min-height:0;display:flex;flex-direction:column;position:relative; }
-        .zuqen-messages { flex:1;min-height:0;overflow-y:auto;padding:32px 28px 24px;scroll-behavior:smooth;overscroll-behavior:contain; }
-        .zuqen-message-list { width:min(830px,100%);margin:0 auto; }
-        .zuqen-message-row { display:flex;margin-bottom:30px;animation:messageRise .28s ease both; }
-        .zuqen-message-row.user { justify-content:flex-end; }
-        .zuqen-message-row.assistant { justify-content:flex-start; }
-        .zuqen-message-block { width:fit-content;max-width:min(760px,94%);min-width:0; }
-        .zuqen-message-label { display:flex;align-items:center;gap:8px;margin:0 0 9px;color:var(--muted-2);font-size:10px;font-weight:800;letter-spacing:.3px; }
-        .user .zuqen-message-label { justify-content:flex-end; }
-        .assistant .zuqen-message-label { justify-content:flex-start; }
-        .zuqen-message-label-mark { width:24px;height:24px;display:grid;place-items:center;border-radius:9px;background:linear-gradient(140deg,rgba(151,137,255,.3),rgba(75,207,225,.2));color:#d0ccff;font-size:10px; }
-        .zuqen-message-bubble { padding:15px 18px;border:1px solid var(--border);border-radius:21px;font-size:14px;line-height:1.8;white-space:pre-wrap;overflow-wrap:anywhere;word-break:normal; }
-        .user .zuqen-message-bubble { background:linear-gradient(130deg,rgba(119,108,255,.25),rgba(65,183,205,.13)),rgba(25,29,51,.48);border-color:rgba(168,160,255,.25);border-bottom-right-radius:7px;backdrop-filter:blur(28px); }
-        .assistant .zuqen-message-bubble { padding:2px 0;border:0;border-radius:0;background:transparent;box-shadow:none; }
-        .light .user .zuqen-message-bubble { background:rgba(108,99,226,.11); }
-        .zuqen-message-actions { display:flex;align-items:center;gap:4px;margin-top:9px;opacity:.72;transition:opacity .2s; }
-        .zuqen-message-row:hover .zuqen-message-actions { opacity:1; }
-        .user .zuqen-message-actions { justify-content:flex-end; }
-        .assistant .zuqen-message-actions { justify-content:flex-start; }
-        .zuqen-action { width:30px;height:30px;display:grid;place-items:center;color:var(--muted-2);background:transparent;border-radius:9px;cursor:pointer; }
-        .zuqen-action:hover { color:var(--text);background:var(--panel-2); }
-        .zuqen-edit-box { width:100%;padding:13px;border:1px solid var(--border-strong);border-radius:17px;background:var(--panel);backdrop-filter:blur(24px); }
-        .zuqen-edit-box textarea { width:100%;min-height:100px;resize:vertical;border:0;outline:0;background:transparent;color:var(--text);line-height:1.7;font-size:14px; }
-        .zuqen-edit-actions { display:flex;justify-content:flex-end;gap:8px;margin-top:9px; }
-        .zuqen-small-button { min-height:34px;padding:0 12px;border-radius:10px;background:var(--panel-3);color:var(--muted);cursor:pointer;font-size:10px;font-weight:700; }
-        .zuqen-small-button.primary { color:var(--accent-text);background:linear-gradient(120deg,#b5afff,#8ce5ee); }
-        .zuqen-typing { display:inline-flex;gap:5px;align-items:center;min-height:27px;padding:0 2px; }
-        .zuqen-typing span { width:6px;height:6px;border-radius:50%;background:#aaa5ff;animation:zuqenTyping 1.1s infinite ease-in-out; }
-        .zuqen-typing span:nth-child(2) { animation-delay:.15s; }.zuqen-typing span:nth-child(3) { animation-delay:.3s; }
-        @keyframes zuqenTyping { 0%,60%,100%{transform:translateY(0);opacity:.4}30%{transform:translateY(-5px);opacity:1} }
-        @keyframes orbFloat { 0%,100%{transform:translateY(0) rotate(-2deg)}50%{transform:translateY(-6px) rotate(2deg)} }
-        @keyframes messageRise { from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:translateY(0)} }
-        .zuqen-attachment-list { display:flex;flex-wrap:wrap;gap:8px;margin-top:10px; }
-        .zuqen-attachment-chip { display:flex;align-items:center;gap:8px;max-width:250px;padding:8px 10px;border:1px solid var(--border);background:var(--panel);backdrop-filter:blur(20px);border-radius:12px;font-size:10px;color:var(--muted); }
-        .zuqen-attachment-chip-name { overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
-        .zuqen-attachment-remove { display:grid;place-items:center;color:var(--muted-2);background:transparent;cursor:pointer; }
-        .zuqen-composer-area { position:relative;z-index:10;padding:16px 25px 18px;background:linear-gradient(to top,rgba(8,10,18,.62),rgba(8,10,18,.22) 70%,transparent);backdrop-filter:blur(5px); }
-        .light .zuqen-composer-area { background:linear-gradient(to top,rgba(237,240,255,.76),rgba(237,240,255,.28) 70%,transparent); }
-        .zuqen-composer { width:min(850px,100%);margin:0 auto;padding:10px 11px 8px;border:1px solid rgba(185,179,255,.32);border-radius:25px;background:rgba(22,26,45,.67);backdrop-filter:blur(35px) saturate(165%);-webkit-backdrop-filter:blur(35px) saturate(165%);box-shadow:0 18px 60px rgba(0,0,0,.22),inset 0 1px rgba(255,255,255,.10);transition:border-color .2s,box-shadow .2s; }
-        .zuqen-composer:focus-within { border-color:rgba(168,162,255,.68);box-shadow:0 0 0 4px rgba(132,123,255,.075),0 20px 70px rgba(0,0,0,.25),inset 0 1px rgba(255,255,255,.12); }
-        .light .zuqen-composer { background:rgba(255,255,255,.72); }
-        .zuqen-composer-row { display:flex;align-items:flex-end;gap:9px; }
-        .zuqen-attach-label { width:41px;height:41px;display:grid;place-items:center;flex:0 0 41px;color:var(--muted);background:rgba(255,255,255,.055);border:1px solid var(--border);border-radius:14px;cursor:pointer;transition:.2s; }
-        .zuqen-attach-label:hover { color:var(--text);background:var(--panel-3); }
-        .zuqen-attach-label input { display:none; }
-        .zuqen-composer textarea { flex:1;min-width:0;max-height:220px;min-height:41px;resize:none;outline:none;border:0;background:transparent;color:var(--text);padding:10px 5px;line-height:1.6;font-size:14px; }
-        .zuqen-composer textarea::placeholder { color:var(--muted-2); }
-        .zuqen-send { width:42px;height:42px;display:grid;place-items:center;flex:0 0 42px;border-radius:15px;background:linear-gradient(135deg,#b6adff,#84e4ee);color:#17172e;cursor:pointer;box-shadow:0 5px 20px rgba(126,119,255,.22);transition:transform .18s,filter .18s; }
-        .zuqen-send:hover:not(:disabled) { transform:translateY(-2px) scale(1.02);filter:brightness(1.08); }
-        .zuqen-send:disabled { opacity:.36;cursor:not-allowed;box-shadow:none; }
-        .zuqen-composer-footer { display:flex;justify-content:space-between;align-items:center;gap:12px;padding:9px 5px 1px 52px;color:var(--muted-2);font-size:9px; }
-        .zuqen-error { width:min(850px,calc(100% - 40px));margin:12px auto 0;padding:11px 14px;display:flex;align-items:flex-start;gap:9px;border-radius:13px;color:#ffb4c1;background:rgba(255,75,110,.09);border:1px solid rgba(255,100,135,.22);font-size:11px;line-height:1.5; }
-        .light .zuqen-error { color:#a91e42;background:rgba(255,75,110,.07); }
-        .zuqen-empty-chat { flex:1;min-height:260px;display:grid;place-items:center;text-align:center;color:var(--muted); }
-        .zuqen-empty-chat-inner { max-width:440px;padding:30px; }
-        .zuqen-empty-chat-icon { width:57px;height:57px;display:grid;place-items:center;margin:0 auto 18px;border-radius:19px;background:linear-gradient(140deg,rgba(151,137,255,.22),rgba(75,207,225,.13));border:1px solid var(--border);color:#c4c0ff; }
-        .zuqen-empty-chat h2 { color:var(--text);font:800 23px 'Manrope',sans-serif;margin:0;letter-spacing:-.7px; }
-        .zuqen-empty-chat p { margin:10px 0 0;font-size:12px;line-height:1.7; }
-        .zuqen-search-overlay { position:absolute;left:26px;top:68px;width:min(430px,calc(100% - 52px));padding:10px;border:1px solid var(--border-strong);background:rgba(19,23,42,.86);backdrop-filter:blur(30px);border-radius:17px;box-shadow:var(--shadow);z-index:70; }
-        .light .zuqen-search-overlay { background:rgba(255,255,255,.88); }
-        .zuqen-search-input-wrap { display:flex;align-items:center;gap:9px;padding:10px 11px;border-radius:11px;background:var(--panel-2);color:var(--muted); }
-        .zuqen-search-input-wrap input { flex:1;min-width:0;border:0;outline:0;background:transparent;color:var(--text);font-size:12px; }
-        .zuqen-mobile-overlay { display:none; }
-        .zuqen-jump-latest { position:absolute;z-index:15;left:50%;bottom:136px;transform:translateX(-50%);display:flex;align-items:center;gap:8px;padding:10px 15px;border:1px solid rgba(183,177,255,.38);border-radius:999px;background:rgba(24,28,49,.8);backdrop-filter:blur(25px);box-shadow:0 8px 30px rgba(0,0,0,.22);color:var(--text);font-size:11px;font-weight:700;cursor:pointer;animation:messageRise .2s ease; }
-        .light .zuqen-jump-latest { background:rgba(255,255,255,.85); }
-        .zuqen-jump-latest:hover { border-color:rgba(183,177,255,.8);background:var(--panel-2); }
-        @media (max-width:1100px) { .zuqen-sidebar{width:250px;flex-basis:250px}.zuqen-topbar{padding:0 20px}.zuqen-suggestion-grid,.zuqen-agent-cards{grid-template-columns:repeat(2,minmax(0,1fr))}.zuqen-home{padding-top:35px} }
-        @media (max-width:760px) {
-          .zuqen-app{min-height:100dvh;height:100dvh}.zuqen-sidebar{position:fixed;left:0;top:0;bottom:0;width:min(300px,86vw);flex-basis:min(300px,86vw);box-shadow:25px 0 90px rgba(0,0,0,.3)}
-          .zuqen-sidebar.closed{width:min(300px,86vw);flex-basis:min(300px,86vw);transform:translateX(-105%);overflow:visible}.zuqen-mobile-overlay{display:block;position:fixed;inset:0;z-index:25;background:rgba(3,5,14,.5);backdrop-filter:blur(4px)}
-          .zuqen-topbar{min-height:66px;padding:0 13px;gap:8px}.zuqen-top-left,.zuqen-top-right{gap:7px}.zuqen-icon-button{width:36px;height:36px;border-radius:12px}.zuqen-agent-button{min-height:38px;padding:4px 8px;gap:7px}.zuqen-agent-button-icon{width:28px;height:28px}.zuqen-agent-button-sub{display:none}.zuqen-agent-button-name{font-size:10px}.zuqen-credit-button{width:37px;min-height:37px;justify-content:center;padding:0}.zuqen-credit-label{display:none}.zuqen-credit-count{font-size:10px}.zuqen-credit-icon{font-size:14px}
-          .zuqen-home{padding:32px 15px 30px}.zuqen-home-inner{max-width:560px}.zuqen-welcome-mark{width:64px;height:64px;border-radius:22px;margin-bottom:20px}.zuqen-welcome h1{font-size:clamp(32px,9vw,48px);letter-spacing:-1.8px}.zuqen-welcome p{font-size:12px;line-height:1.7;margin-top:13px}.zuqen-search-card{min-height:64px;margin-top:25px;padding:8px 10px;border-radius:20px}.zuqen-search-card-icon{width:38px;height:38px;flex-basis:38px}.zuqen-search-card input{font-size:12px}.zuqen-search-shortcut{display:none}.zuqen-suggestion-grid{gap:8px;margin-top:11px}.zuqen-suggestion{min-height:105px;padding:12px;border-radius:15px}.zuqen-suggestion-title{margin-top:11px;font-size:11px}.zuqen-suggestion-text{font-size:9px}.zuqen-agent-strip{margin-top:28px}.zuqen-agent-cards{gap:8px}.zuqen-mini-agent{padding:12px;border-radius:15px}.zuqen-mini-agent-icon{width:31px;height:31px}.zuqen-mini-agent-name{font-size:10px}.zuqen-mini-agent-desc{font-size:8px}
-          .zuqen-messages{padding:22px 14px 18px}.zuqen-message-list{width:100%}.zuqen-message-row{margin-bottom:25px}.zuqen-message-block{max-width:96%}.zuqen-message-bubble{font-size:13px;line-height:1.75;padding:12px 14px}.assistant .zuqen-message-bubble{padding:2px 0}.zuqen-composer-area{padding:10px 10px max(12px,env(safe-area-inset-bottom))}.zuqen-composer{padding:8px;border-radius:21px}.zuqen-composer-row{gap:6px}.zuqen-attach-label,.zuqen-send{width:37px;height:37px;flex-basis:37px;border-radius:12px}.zuqen-composer textarea{font-size:13px;min-height:37px;padding:8px 3px}.zuqen-composer-footer{padding:7px 2px 1px;gap:6px;font-size:8px}.zuqen-composer-footer span:first-child{max-width:55%}.zuqen-jump-latest{bottom:126px;padding:9px 13px}.zuqen-error{width:calc(100% - 24px)}
-        }
-        @media (max-width:390px) { .zuqen-agent-button-text{max-width:82px;overflow:hidden}.zuqen-topbar{padding:0 9px}.zuqen-suggestion-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.zuqen-credit-button{width:33px}.zuqen-composer-footer span:first-child{display:none} }
-        @media (prefers-reduced-motion:reduce) { *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important;transition-duration:.01ms!important} }
+        .zuqen-app.light{--bg:#edf0e8;--panel:rgba(255,255,251,.88);--panel-2:rgba(247,249,241,.96);--panel-3:#e8ede0;--border:rgba(27,48,31,.11);--border-strong:rgba(27,48,31,.18);--text:#17231a;--muted:#657568;--muted-2:#849187;--accent:#315e3b;--accent-text:#f8fff3;--shadow:0 24px 80px rgba(33,49,34,.12);background:radial-gradient(ellipse at 80% 0%,rgba(194,220,158,.3),transparent 38%),#edf0e8}
+        .zuqen-sidebar{width:278px;flex:0 0 278px;height:100dvh;display:flex;flex-direction:column;background:rgba(14,21,17,.84);border-right:1px solid var(--border);backdrop-filter:blur(26px);transition:width .25s ease,flex-basis .25s ease;z-index:30;overflow:hidden}
+        .light .zuqen-sidebar{background:rgba(248,250,244,.88)}.zuqen-sidebar.closed{width:0;flex-basis:0;border:0}
+        .zuqen-brand{height:88px;min-height:88px;display:flex;align-items:center;padding:0 22px;gap:13px;border-bottom:1px solid var(--border)}
+        .zuqen-logo{width:42px;height:42px;border-radius:15px;display:grid;place-items:center;background:linear-gradient(145deg,#e3ff91,#a9d747 58%,#6c9b3f);box-shadow:0 8px 30px rgba(176,220,87,.17);position:relative;overflow:hidden}
+        .zuqen-logo:before{content:"";width:19px;height:19px;border:2px solid #1d2b17;border-radius:50%;position:absolute}.zuqen-logo:after{content:"";width:7px;height:7px;border-radius:50%;background:#1d2b17;position:absolute}
+        .zuqen-brand-name{font-family:Manrope,sans-serif;font-size:15px;font-weight:800;letter-spacing:1.6px}.zuqen-brand-sub{margin-top:4px;color:var(--muted-2);font-size:10px;letter-spacing:.35px}
+        .zuqen-sidebar-content{flex:1;min-height:0;overflow-y:auto;padding:18px 13px 14px;display:flex;flex-direction:column;gap:22px}
+        .zuqen-new-chat{width:100%;height:47px;padding:0 15px;display:flex;align-items:center;gap:11px;border-radius:13px;background:var(--accent);color:var(--accent-text);font-size:12px;font-weight:800;cursor:pointer;box-shadow:0 8px 24px rgba(151,197,77,.1);transition:transform .18s,filter .18s}
+        .zuqen-new-chat:hover{transform:translateY(-1px);filter:brightness(1.05)}
+        .zuqen-sidebar-section{min-height:0}.zuqen-sidebar-heading{height:32px;display:flex;align-items:center;justify-content:space-between;padding:0 9px;color:var(--muted-2);font-size:9px;font-weight:800;letter-spacing:1.6px;text-transform:uppercase}
+        .zuqen-sidebar-heading button{width:27px;height:27px;border-radius:8px;display:grid;place-items:center;color:var(--muted);background:transparent;cursor:pointer}.zuqen-sidebar-heading button:hover{background:var(--panel-3);color:var(--text)}
+        .zuqen-chat-list{display:flex;flex-direction:column;gap:4px;margin-top:5px}.zuqen-chat-item{position:relative;display:flex;align-items:center;min-height:43px;padding:0 9px 0 12px;border:1px solid transparent;border-radius:11px;cursor:pointer;color:var(--muted);transition:.18s}
+        .zuqen-chat-item:hover{background:rgba(255,255,255,.035);color:var(--text)}.zuqen-chat-item.active{background:rgba(196,235,121,.095);border-color:rgba(196,235,121,.16);color:var(--text)}.zuqen-chat-item.active:before{content:"";position:absolute;left:0;top:11px;bottom:11px;width:3px;border-radius:0 4px 4px 0;background:var(--accent)}
+        .zuqen-chat-main{min-width:0;flex:1}.zuqen-chat-title{font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.zuqen-chat-date{font-size:9px;color:var(--muted-2);margin-top:4px}.zuqen-chat-menu-button{opacity:0;color:var(--muted);background:transparent;cursor:pointer}.zuqen-chat-item:hover .zuqen-chat-menu-button,.zuqen-chat-item.active .zuqen-chat-menu-button{opacity:1}
+        .zuqen-chat-menu,.zuqen-agent-dropdown,.zuqen-credit-dropdown{background:#1b261e;border:1px solid var(--border-strong);border-radius:14px;box-shadow:var(--shadow);backdrop-filter:blur(24px);z-index:80}.light .zuqen-chat-menu,.light .zuqen-agent-dropdown,.light .zuqen-credit-dropdown{background:#fff}
+        .zuqen-chat-menu{position:absolute;right:8px;top:34px;width:155px;padding:5px}.zuqen-chat-menu button{width:100%;display:flex;align-items:center;gap:8px;padding:9px;border-radius:8px;text-align:left;background:transparent;color:var(--text);font-size:11px;cursor:pointer}.zuqen-chat-menu button:hover{background:var(--panel-3)}
+        .zuqen-rename{width:100%;min-width:0;padding:5px;border:1px solid var(--accent);border-radius:6px;background:var(--panel-2);color:var(--text);outline:0;font-size:11px}
+        .zuqen-sidebar-bottom{padding:14px;border-top:1px solid var(--border)}.zuqen-sidebar-user{display:flex;align-items:center;gap:10px;padding:10px;border:1px solid var(--border);background:rgba(255,255,255,.025);border-radius:13px}
+        .zuqen-user-avatar{width:34px;height:34px;display:grid;place-items:center;flex:0 0 34px;border-radius:11px;background:var(--panel-3);color:var(--accent);font-weight:800;font-size:12px}.zuqen-user-info{flex:1;min-width:0}.zuqen-user-name{font-size:11px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.zuqen-user-status{margin-top:3px;color:var(--muted-2);font-size:9px}.zuqen-signout{background:transparent;color:var(--muted);cursor:pointer}
+        .zuqen-sidebar-link{width:100%;min-height:40px;display:flex;align-items:center;gap:10px;padding:0 11px;border-radius:10px;color:var(--muted);background:transparent;text-align:left;font-size:11px;cursor:pointer}.zuqen-sidebar-link:hover{background:var(--panel-3);color:var(--text)}
+        .zuqen-main{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;position:relative}.zuqen-topbar{height:74px;min-height:74px;padding:0 27px;display:flex;align-items:center;justify-content:space-between;gap:14px;border-bottom:1px solid var(--border);background:rgba(17,25,19,.28);backdrop-filter:blur(18px);z-index:20}.light .zuqen-topbar{background:rgba(255,255,255,.32)}
+        .zuqen-top-left,.zuqen-top-right{display:flex;align-items:center;gap:11px;min-width:0}.zuqen-icon-button{width:38px;height:38px;display:grid;place-items:center;border:1px solid var(--border);border-radius:12px;background:rgba(255,255,255,.035);color:var(--muted);cursor:pointer;transition:.18s}.zuqen-icon-button:hover{color:var(--text);border-color:var(--border-strong);background:var(--panel-3)}
+        .zuqen-agent-selector,.zuqen-credit-wrap{position:relative}.zuqen-agent-button{display:flex;align-items:center;gap:10px;padding:7px 12px;border:1px solid var(--border);border-radius:13px;background:rgba(255,255,255,.025);color:var(--text);cursor:pointer;text-align:left}.zuqen-agent-button-icon{width:31px;height:31px;display:grid;place-items:center;border-radius:10px;background:rgba(204,240,117,.12);color:var(--accent);font-size:17px}.zuqen-agent-button-text{min-width:0}.zuqen-agent-button-name{font-size:11px;font-weight:800}.zuqen-agent-button-sub{margin-top:3px;color:var(--muted-2);font-size:9px}.zuqen-agent-dropdown{position:absolute;top:48px;left:0;width:275px;padding:7px}.zuqen-agent-option{width:100%;display:flex;align-items:center;gap:10px;padding:11px;border-radius:10px;background:transparent;color:var(--text);text-align:left;cursor:pointer}.zuqen-agent-option:hover,.zuqen-agent-option.selected{background:var(--panel-3)}.zuqen-agent-option-icon{width:34px;height:34px;display:grid;place-items:center;border-radius:10px;background:rgba(196,235,121,.1);color:var(--accent)}.zuqen-agent-option-content{flex:1}.zuqen-agent-option-name{font-size:11px;font-weight:700}.zuqen-agent-option-description{font-size:10px;color:var(--muted);margin-top:4px}.zuqen-agent-check{color:var(--accent)}
+        .zuqen-credit-button{display:flex;align-items:center;gap:8px;padding:10px 12px;border:1px solid var(--border);border-radius:12px;background:rgba(255,255,255,.025);color:var(--text);cursor:pointer}.zuqen-credit-icon{color:var(--accent)}.zuqen-credit-count{font-weight:800;font-size:12px}.zuqen-credit-label{font-size:10px;color:var(--muted)}.zuqen-credit-dropdown{position:absolute;right:0;top:48px;width:255px;padding:16px}.zuqen-credit-dropdown-title{font-size:11px;font-weight:800}.zuqen-credit-big{margin-top:8px;font:800 30px Manrope,sans-serif;letter-spacing:-1px}.zuqen-credit-small{margin-top:4px;color:var(--muted);font-size:10px}.zuqen-credit-line{height:1px;background:var(--border);margin:14px 0}.zuqen-credit-row{display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:8px}.zuqen-credit-row strong{color:var(--text)}
+        .zuqen-search-overlay{position:absolute;top:64px;left:24px;right:24px;max-width:560px;margin-left:0;padding:10px;border:1px solid var(--border-strong);border-radius:14px;background:var(--panel);backdrop-filter:blur(24px);box-shadow:var(--shadow);z-index:50}.zuqen-search-input-wrap{display:flex;align-items:center;gap:10px;padding:5px 8px;color:var(--muted)}.zuqen-search-input-wrap input{flex:1;min-width:0;border:0;outline:0;background:transparent;color:var(--text);font-size:12px}
+        .zuqen-content{flex:1;min-height:0;display:flex;flex-direction:column;position:relative}.zuqen-home{flex:1;overflow-y:auto;padding:clamp(34px,7vh,82px) 30px 45px}.zuqen-home-inner{width:min(1040px,100%);margin:0 auto}.zuqen-welcome{text-align:left;max-width:850px;margin:0 auto;position:relative;padding:0 0 20px 4px}.zuqen-welcome:before{content:'YOUR CREATIVE INTELLIGENCE WORKSPACE';display:block;margin-bottom:22px;color:var(--accent);font-size:9px;font-weight:800;letter-spacing:2.7px}.zuqen-welcome-mark{width:48px;height:48px;margin:0 0 22px;display:none;place-items:center;border-radius:16px;color:var(--accent-text);background:var(--accent);box-shadow:0 12px 32px rgba(174,218,92,.15);position:relative}.zuqen-welcome h1{max-width:800px;margin:0;font:500 clamp(38px,5.7vw,70px)/1.02 Manrope,sans-serif;letter-spacing:-3.8px;color:var(--text)}.zuqen-welcome h1 em{color:var(--accent);font-style:normal}.zuqen-welcome p{margin:18px 0 0;max-width:560px;color:var(--muted);font-size:13px;line-height:1.85}
+        .zuqen-search-card{margin:34px auto 0;width:min(850px,100%);min-height:84px;padding:15px 16px;display:flex;align-items:center;gap:13px;border:1px solid rgba(214,237,187,.18);border-radius:18px;background:linear-gradient(115deg,rgba(34,48,37,.92),rgba(23,33,27,.85));box-shadow:0 20px 60px rgba(0,0,0,.16),inset 0 1px rgba(255,255,255,.04);backdrop-filter:blur(22px)}.light .zuqen-search-card{background:rgba(255,255,255,.78)}.zuqen-search-card-icon{width:43px;height:43px;flex:0 0 43px;display:grid;place-items:center;border-radius:13px;background:rgba(202,238,121,.12);color:var(--accent)}.zuqen-search-card input{flex:1;min-width:0;border:0;outline:0;background:transparent;color:var(--text);font-size:14px}.zuqen-search-card input::placeholder{color:var(--muted-2)}.zuqen-search-shortcut{padding:6px 9px;border:1px solid var(--border);border-radius:8px;color:var(--muted-2);font-size:9px}
+        .zuqen-suggestion-grid{margin:16px auto 0;width:min(850px,100%);display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.zuqen-suggestion{position:relative;min-height:130px;padding:18px;text-align:left;border:1px solid var(--border);border-radius:15px;background:linear-gradient(145deg,rgba(37,50,40,.68),rgba(22,32,26,.55));color:var(--text);cursor:pointer;overflow:hidden;transition:transform .2s,border-color .2s,background .2s}.light .zuqen-suggestion{background:rgba(255,255,255,.65)}.zuqen-suggestion:before{content:"";position:absolute;left:18px;right:18px;top:0;height:2px;background:var(--card-accent,var(--accent));opacity:.8}.zuqen-suggestion:nth-child(2){--card-accent:#8bc9df}.zuqen-suggestion:nth-child(3){--card-accent:#d7b4ff}.zuqen-suggestion:nth-child(4){--card-accent:#f2b58e}.zuqen-suggestion:hover{transform:translateY(-3px);border-color:var(--border-strong);background:var(--panel-2)}.zuqen-suggestion-icon{color:var(--card-accent,var(--accent));font-size:17px}.zuqen-suggestion-title{margin-top:18px;font-size:12px;font-weight:800}.zuqen-suggestion-text{margin-top:7px;color:var(--muted);font-size:10px;line-height:1.6}
+        .zuqen-agent-strip{width:min(850px,100%);margin:34px auto 0}.zuqen-strip-title{color:var(--muted-2);text-transform:uppercase;letter-spacing:1.8px;font-size:9px;font-weight:800}.zuqen-agent-cards{margin-top:13px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.zuqen-mini-agent{display:flex;align-items:center;gap:11px;min-width:0;padding:13px;border:1px solid var(--border);background:rgba(255,255,255,.025);border-radius:13px;cursor:pointer;color:var(--text);text-align:left;transition:.2s}.zuqen-mini-agent:hover{background:var(--panel-2);border-color:var(--border-strong);transform:translateY(-2px)}.zuqen-mini-agent-icon{width:34px;height:34px;flex:0 0 34px;display:grid;place-items:center;border-radius:11px;background:var(--panel-3);color:var(--accent);font-size:14px}.zuqen-mini-agent-name{font-size:10px;font-weight:800;line-height:1.4}.zuqen-mini-agent-desc{color:var(--muted-2);font-size:9px;margin-top:4px;line-height:1.4}
+        .zuqen-chat-view{flex:1;min-height:0;display:flex;flex-direction:column;position:relative}.zuqen-messages{flex:1;overflow-y:auto;overscroll-behavior:contain;padding:34px 28px 28px;scroll-behavior:smooth}.zuqen-message-list{width:min(880px,100%);margin:0 auto}.zuqen-message-row{display:flex;margin-bottom:30px;animation:message-in .24s ease both}.zuqen-message-row.user{justify-content:flex-end}.zuqen-message-row.assistant{justify-content:flex-start}.zuqen-message-block{width:fit-content;max-width:min(790px,92%);min-width:0}.zuqen-message-row.assistant .zuqen-message-block{width:min(790px,100%);max-width:100%}.zuqen-message-label{display:flex;align-items:center;gap:8px;margin:0 0 9px 2px;color:var(--muted-2);font-size:9px;font-weight:800;letter-spacing:1.3px;text-transform:uppercase}.zuqen-message-label-mark{width:20px;height:20px;display:grid;place-items:center;border-radius:7px;background:rgba(202,238,121,.14);color:var(--accent)}.zuqen-message-row.user .zuqen-message-label{justify-content:flex-end;margin-right:3px}.zuqen-message-bubble{max-width:100%;padding:16px 19px;border-radius:17px;font-size:13px;line-height:1.8;white-space:pre-wrap;overflow-wrap:anywhere;word-break:normal}.zuqen-message-row.user .zuqen-message-bubble{background:linear-gradient(140deg,#d6f184,#b7dc66);color:#1a2816;border:1px solid rgba(234,255,185,.35);border-bottom-right-radius:5px;box-shadow:0 10px 28px rgba(151,194,80,.08)}.zuqen-message-row.assistant .zuqen-message-bubble{background:rgba(255,255,255,.035);border:1px solid var(--border);border-bottom-left-radius:5px;color:var(--text)}.light .zuqen-message-row.assistant .zuqen-message-bubble{background:rgba(255,255,255,.7)}.zuqen-message-actions{display:flex;gap:5px;margin-top:8px;opacity:.68}.zuqen-message-row.user .zuqen-message-actions{justify-content:flex-end}.zuqen-action{width:29px;height:29px;display:grid;place-items:center;border:1px solid transparent;border-radius:8px;background:transparent;color:var(--muted);cursor:pointer}.zuqen-action:hover{border-color:var(--border);background:var(--panel-3);color:var(--text)}.zuqen-typing{display:flex;align-items:center;gap:5px;padding:5px 0}.zuqen-typing span{width:6px;height:6px;border-radius:50%;background:var(--accent);animation:typing 1s infinite ease-in-out}.zuqen-typing span:nth-child(2){animation-delay:.15s}.zuqen-typing span:nth-child(3){animation-delay:.3s}.zuqen-attachment-list{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}.zuqen-attachment-chip{display:flex;align-items:center;gap:8px;max-width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:10px;background:var(--panel-2);color:var(--muted);font-size:10px}.zuqen-attachment-chip-name{max-width:210px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)}.zuqen-attachment-remove{display:grid;place-items:center;background:transparent;color:var(--muted);cursor:pointer}.zuqen-edit-area{padding:12px;border:1px solid var(--border-strong);border-radius:14px;background:var(--panel)}.zuqen-edit-area textarea{width:100%;resize:vertical;min-height:110px;border:0;outline:0;background:transparent;color:var(--text);font-size:13px;line-height:1.7}.zuqen-edit-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:9px}.zuqen-small-button{padding:8px 11px;border-radius:8px;background:var(--panel-3);color:var(--text);font-size:10px;cursor:pointer}.zuqen-small-button.primary{background:var(--accent);color:var(--accent-text);font-weight:800}
+        .zuqen-composer-area{position:relative;padding:12px 25px 19px;background:linear-gradient(0deg,var(--bg) 65%,transparent)}.zuqen-composer{width:min(880px,100%);margin:0 auto;padding:10px 11px 9px;border:1px solid rgba(212,243,106,.23);border-radius:19px;background:rgba(27,39,30,.93);box-shadow:0 18px 60px rgba(0,0,0,.18),inset 0 1px rgba(255,255,255,.04);backdrop-filter:blur(25px)}.light .zuqen-composer{background:rgba(255,255,255,.92)}.zuqen-composer-row{display:flex;align-items:flex-end;gap:10px}.zuqen-attach-label{width:39px;height:39px;flex:0 0 39px;display:grid;place-items:center;border-radius:12px;background:var(--panel-3);color:var(--muted);cursor:pointer}.zuqen-attach-label:hover{color:var(--accent)}.zuqen-attach-label input{display:none}.zuqen-composer textarea{flex:1;min-width:0;max-height:220px;min-height:39px;padding:10px 2px 7px;resize:none;border:0;outline:0;background:transparent;color:var(--text);font-size:13px;line-height:1.6}.zuqen-composer textarea::placeholder{color:var(--muted-2)}.zuqen-send{width:39px;height:39px;flex:0 0 39px;display:grid;place-items:center;border-radius:12px;background:var(--accent);color:var(--accent-text);cursor:pointer;transition:.18s}.zuqen-send:hover:not(:disabled){transform:translateY(-1px);filter:brightness(1.06)}.zuqen-send:disabled{opacity:.35;cursor:not-allowed}.zuqen-composer-footer{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 4px 0;color:var(--muted-2);font-size:9px}.zuqen-jump-latest{position:absolute;z-index:12;left:50%;bottom:112px;transform:translateX(-50%);display:flex;align-items:center;gap:8px;padding:10px 14px;border:1px solid var(--border-strong);border-radius:999px;background:rgba(35,49,38,.96);color:var(--text);box-shadow:0 10px 30px rgba(0,0,0,.2);backdrop-filter:blur(18px);font-size:10px;font-weight:700;cursor:pointer;animation:message-in .18s ease}.light .zuqen-jump-latest{background:rgba(255,255,255,.95)}
+        .zuqen-error{display:flex;align-items:center;gap:10px;margin:12px 22px;padding:12px 14px;border:1px solid rgba(255,140,130,.28);border-radius:12px;background:rgba(255,100,90,.08);color:var(--danger);font-size:11px}.zuqen-empty-chat{flex:1;min-height:260px;display:flex;align-items:center;justify-content:center;padding:30px}.zuqen-empty-chat-inner{text-align:center;max-width:360px}.zuqen-empty-chat-icon{width:52px;height:52px;margin:0 auto 17px;display:grid;place-items:center;border:1px solid var(--border);border-radius:17px;background:var(--panel-2);color:var(--accent)}.zuqen-empty-chat h2{margin:0;font:700 19px Manrope,sans-serif;letter-spacing:-.5px}.zuqen-empty-chat p{margin:10px 0 0;color:var(--muted);font-size:12px;line-height:1.7}
+        .zuqen-mobile-overlay{display:none}.zuqen-app ::-webkit-scrollbar{width:7px;height:7px}.zuqen-app ::-webkit-scrollbar-thumb{border:2px solid transparent;border-radius:10px;background:rgba(151,175,146,.25);background-clip:padding-box}.zuqen-app ::-webkit-scrollbar-thumb:hover{background:rgba(151,175,146,.42);background-clip:padding-box}
+        @keyframes typing{0%,60%,100%{transform:translateY(0);opacity:.45}30%{transform:translateY(-4px);opacity:1}}@keyframes message-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+        @media(max-width:1100px){.zuqen-suggestion-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.zuqen-agent-cards{grid-template-columns:repeat(2,minmax(0,1fr))}.zuqen-welcome h1{letter-spacing:-2.7px}.zuqen-topbar{padding:0 18px}}
+        @media(max-width:760px){.zuqen-mobile-overlay{display:block}.zuqen-sidebar{position:fixed;left:0;top:0;bottom:0;height:100dvh;width:min(300px,86vw);flex-basis:min(300px,86vw);box-shadow:var(--shadow)}.zuqen-sidebar.closed{width:0;flex-basis:0;box-shadow:none}.zuqen-mobile-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);backdrop-filter:blur(3px);z-index:25}.zuqen-topbar{height:64px;min-height:64px;padding:0 12px}.zuqen-top-left,.zuqen-top-right{gap:7px}.zuqen-agent-button{padding:6px 8px;gap:7px}.zuqen-agent-button-icon{width:28px;height:28px}.zuqen-agent-button-sub,.zuqen-credit-label{display:none}.zuqen-credit-button{padding:9px}.zuqen-home{padding:44px 17px 30px}.zuqen-welcome h1{font-size:clamp(38px,10vw,58px);letter-spacing:-2.5px}.zuqen-welcome p{font-size:12px}.zuqen-search-card{margin-top:26px;min-height:72px;padding:10px;gap:9px}.zuqen-search-card input{font-size:12px}.zuqen-suggestion-grid{gap:8px}.zuqen-suggestion{min-height:118px;padding:14px}.zuqen-suggestion-title{font-size:11px}.zuqen-suggestion-text{font-size:9px}.zuqen-agent-cards{gap:8px}.zuqen-mini-agent{padding:10px;gap:8px}.zuqen-mini-agent-desc{font-size:8px}.zuqen-messages{padding:22px 13px 22px}.zuqen-message-block{max-width:96%}.zuqen-message-row.assistant .zuqen-message-block{width:100%}.zuqen-message-bubble{padding:13px 14px;font-size:12px}.zuqen-composer-area{padding:8px 10px 12px}.zuqen-composer{border-radius:16px}.zuqen-composer-footer{font-size:8px}.zuqen-jump-latest{bottom:105px}.zuqen-search-overlay{left:10px;right:10px;top:58px}}
+        @media(max-width:420px){.zuqen-agent-button-name{max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.zuqen-topbar .zuqen-top-left>.zuqen-icon-button:nth-child(2){display:none}.zuqen-suggestion-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.zuqen-agent-cards{grid-template-columns:1fr}.zuqen-mini-agent{min-height:58px}.zuqen-welcome:before{font-size:8px;letter-spacing:1.8px}.zuqen-credit-count{font-size:11px}}
+        @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
       `}</style>
 
-      {!sidebarOpen && (
+      {sidebarOpen && (
         <div
           className="zuqen-mobile-overlay"
           onClick={() =>
@@ -2516,12 +2338,13 @@ export default function HomePage() {
                     )
                   )}
                 </div>
+                <div ref={messagesEndRef} aria-hidden="true" />
               </div>
 
               {showJumpToLatest && (
-                <button className="zuqen-jump-latest" onClick={jumpToLatest} aria-label="Jump to latest message">
-                  <Icon name="chevron" size={14} />
-                  <span>Jump to latest</span>
+                <button className="zuqen-jump-latest" onClick={jumpToLatest} type="button">
+                  <span aria-hidden="true" style={{ fontSize: 15, lineHeight: 1 }}>↓</span>
+                  Jump to latest
                 </button>
               )}
 
@@ -2609,7 +2432,7 @@ export default function HomePage() {
                       onKeyDown={
                         handleKeyDown
                       }
-                      placeholder="Message ZUQEN AI..."
+                      placeholder="Write a thought, ask a question, start something…"
                       rows={1}
                       disabled={loading}
                     />
@@ -2657,19 +2480,12 @@ export default function HomePage() {
                   </div>
 
                   <h1>
-                    What can I help
-                    you
-                    <br />
-                    with today?
+                    Make room for<br />
+                    <em>better ideas.</em>
                   </h1>
 
                   <p>
-                    Meet ZUQEN AI —
-                    your intelligent
-                    workspace for
-                    thinking, creating,
-                    building and
-                    getting things done.
+                    One calm, capable workspace to think clearly, create boldly, and turn ambitious ideas into real work.
                   </p>
                 </div>
 
@@ -2705,7 +2521,7 @@ export default function HomePage() {
                         handleSubmit();
                       }
                     }}
-                    placeholder="Ask anything..."
+                    placeholder="What would you like to make happen?"
                   />
 
                   <span className="zuqen-search-shortcut">
