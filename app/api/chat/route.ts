@@ -1,56 +1,48 @@
+
 import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabaseClient } from "@/lib/supabase-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 120;
 
 const GEMINI_URL =
   "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
 
-const DEFAULT_MODEL = "qwen/qwen3.8-27b";
-const ALLOWED_MODELS = new Set([
-  "qwen/qwen3.8-27b",
-  "openai/gpt-oss-120b",
-]);
+const DEFAULT_MODEL =
+  process.env.GEMINI_CHAT_MODEL || "gemini-3.8-flash";
+const PRO_MODEL =
+  process.env.GEMINI_PRO_MODEL || "gemini-3.1-pro-preview";
 
 const MAX_MESSAGES = 60;
 const MAX_TEXT_LENGTH = 100_000;
 const MAX_IMAGES_PER_MESSAGE = 3;
 const MAX_IMAGE_DATA_URL_LENGTH = 18 * 1024 * 1024;
 
-type TextPart = {
-  type: "text";
-  text: string;
-};
-
-type ImagePart = {
-  type: "image_url";
-  image_url: {
-    url: string;
-    detail?: "auto" | "low" | "high";
-  };
-};
-
-type MessageContent = string | Array<TextPart | ImagePart>;
+type ChatPart =
+  | { type: "text"; text: string }
+  | {
+      type: "image_url";
+      image_url: {
+        url: string;
+        detail?: "auto" | "low" | "high";
+      };
+    };
 
 type ChatMessage = {
-  role: "system" | "user" | "assistant";
-  content: MessageContent;
+  role: "user" | "assistant" | "system";
+  content: string | ChatPart[];
 };
 
-type CreditRow = {
-  user_id: string;
-  feature_key: string;
-  balance: number;
-  total_granted: number;
-  total_used: number;
-};
+type RecordValue = Record<string, unknown>;
 
-type CreditResult = {
-  success: true;
-  balance: number;
-  total_used: number;
-};
+function isRecord(value: unknown): value is RecordValue {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value)
+  );
+}
 
 function jsonError(
   message: string,
@@ -58,11 +50,7 @@ function jsonError(
   extra: Record<string, unknown> = {}
 ) {
   return NextResponse.json(
-    {
-      success: false,
-      error: message,
-      ...extra,
-    },
+    { success: false, error: message, ...extra },
     { status }
   );
 }
@@ -71,30 +59,17 @@ function sse(data: unknown) {
   return `data: ${JSON.stringify(data)}\n\n`;
 }
 
-function isRecord(
-  value: unknown
-): value is Record<string, unknown> {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    !Array.isArray(value)
-  );
-}
-
-function isImageDataUrl(value: string) {
-  return /^data:image\/(?:jpeg|png|webp|gif);base64,[A-Za-z0-9+/=\r\n]+$/i.test(
-    value
-  );
-}
-
-function isValidImageUrl(value: string) {
-  if (isImageDataUrl(value)) {
+function validImageUrl(value: string) {
+  if (
+    /^data:image\/(?:jpeg|png|webp|gif);base64,[A-Za-z0-9+/=\r\n]+$/i.test(
+      value
+    )
+  ) {
     return value.length <= MAX_IMAGE_DATA_URL_LENGTH;
   }
 
   try {
     const url = new URL(value);
-
     return (
       url.protocol === "https:" &&
       !url.username &&
@@ -105,15 +80,10 @@ function isValidImageUrl(value: string) {
   }
 }
 
-function normalizeMessage(
-  value: unknown
-): ChatMessage | null {
-  if (!isRecord(value)) {
-    return null;
-  }
+function normalizeMessage(value: unknown): ChatMessage | null {
+  if (!isRecord(value)) return null;
 
   const role = value.role;
-
   if (
     role !== "user" &&
     role !== "assistant" &&
@@ -124,108 +94,81 @@ function normalizeMessage(
 
   const content = value.content;
 
-  // Backward compatibility with the existing text chat.
   if (typeof content === "string") {
-    if (
-      content.length > MAX_TEXT_LENGTH ||
-      !content.trim()
-    ) {
+    if (!content.trim() || content.length > MAX_TEXT_LENGTH) {
       return null;
     }
-
-    return {
-      role,
-      content,
-    };
+    return { role, content };
   }
 
-  // Multimodal content: text and image_url parts.
-  if (!Array.isArray(content) || content.length === 0) {
+  if (!Array.isArray(content) || !content.length) {
     return null;
   }
 
-  const parts: Array<TextPart | ImagePart> = [];
-  let imageCount = 0;
+  const parts: ChatPart[] = [];
   let textLength = 0;
+  let imageCount = 0;
 
-  for (const item of content) {
-    if (!isRecord(item) || typeof item.type !== "string") {
-      return null;
-    }
+  for (const part of content) {
+    if (!isRecord(part)) return null;
 
-    if (item.type === "text") {
-      if (typeof item.text !== "string") {
-        return null;
-      }
+    if (part.type === "text") {
+      if (typeof part.text !== "string") return null;
 
-      textLength += item.text.length;
+      textLength += part.text.length;
+      if (textLength > MAX_TEXT_LENGTH) return null;
 
-      if (textLength > MAX_TEXT_LENGTH) {
-        return null;
-      }
-
-      parts.push({
-        type: "text",
-        text: item.text,
-      });
-
+      parts.push({ type: "text", text: part.text });
       continue;
     }
 
-    if (item.type === "image_url") {
+    if (part.type === "image_url") {
       if (
         role !== "user" ||
-        !isRecord(item.image_url) ||
-        typeof item.image_url.url !== "string"
+        !isRecord(part.image_url) ||
+        typeof part.image_url.url !== "string"
       ) {
         return null;
       }
 
-      const url = item.image_url.url.trim();
+      const url = part.image_url.url.trim();
 
-      if (!isValidImageUrl(url)) {
+      if (
+        !validImageUrl(url) ||
+        ++imageCount > MAX_IMAGES_PER_MESSAGE
+      ) {
         return null;
       }
 
-      imageCount += 1;
-
-      if (imageCount > MAX_IMAGES_PER_MESSAGE) {
-        return null;
-      }
-
-      const detail = item.image_url.detail;
+      const detail = part.image_url.detail;
 
       parts.push({
         type: "image_url",
         image_url: {
           url,
-          ...(detail === "low" || detail === "high"
-            ? { detail }
-            : { detail: "auto" }),
+          detail:
+            detail === "low" || detail === "high"
+              ? detail
+              : "auto",
         },
       });
-
       continue;
     }
 
-    // Reject unknown multimodal parts.
     return null;
   }
 
-  const hasUsefulContent = parts.some((part) =>
-    part.type === "text"
-      ? part.text.trim().length > 0
-      : true
-  );
-
-  if (!hasUsefulContent) {
+  if (
+    !parts.some(
+      (part) =>
+        part.type === "image_url" ||
+        (part.type === "text" && part.text.trim())
+    )
+  ) {
     return null;
   }
 
-  return {
-    role,
-    content: parts,
-  };
+  return { role, content: parts };
 }
 
 async function getAuthenticatedUser(
@@ -234,86 +177,63 @@ async function getAuthenticatedUser(
     ReturnType<typeof createServerSupabaseClient>
   >
 ) {
-  const authorization =
-    request.headers.get("authorization");
+  const authorization = request.headers.get("authorization");
 
   if (authorization?.startsWith("Bearer ")) {
     const token = authorization.slice(7).trim();
 
     if (token) {
-      const {
-        data: { user },
-        error,
-      } = await supabase.auth.getUser(token);
+      const { data, error } =
+        await supabase.auth.getUser(token);
 
-      if (user) {
-        return user;
-      }
+      if (data.user) return data.user;
 
       if (error) {
         console.error(
-          "Chat bearer authentication error:",
-          error
+          "Chat bearer auth error:",
+          error.message
         );
       }
     }
   }
 
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser();
+  const { data, error } = await supabase.auth.getUser();
 
   if (error) {
-    console.error(
-      "Chat cookie authentication error:",
-      error
-    );
+    console.error("Chat cookie auth error:", error.message);
   }
 
-  return user ?? null;
+  return data.user ?? null;
 }
 
 async function ensureGuestCredits(
   supabase: Awaited<
     ReturnType<typeof createServerSupabaseClient>
   >,
-  isAnonymous: boolean
+  anonymous: boolean
 ) {
-  if (!isAnonymous) {
-    return;
-  }
+  if (!anonymous) return;
 
   const { data, error } = await supabase.rpc(
     "setup_guest_chat_credits"
   );
 
-  if (error) {
+  if (error || (isRecord(data) && data.success === false)) {
     console.error(
-      "Guest chat credit setup error:",
-      error
+      "Guest credit initialization failed:",
+      error?.message ?? data
     );
-
-    throw new Error(
-      "Chat credits could not be initialized."
-    );
-  }
-
-  if (
-    isRecord(data) &&
-    data.success === false
-  ) {
     throw new Error(
       "Chat credits could not be initialized."
     );
   }
 }
 
-async function consumeOneChatCredit(
+async function consumeChatCredit(
   supabase: Awaited<
     ReturnType<typeof createServerSupabaseClient>
   >
-): Promise<CreditResult> {
+) {
   const { data, error } = await supabase.rpc(
     "consume_feature_credit",
     {
@@ -324,19 +244,15 @@ async function consumeOneChatCredit(
 
   if (error) {
     console.error(
-      "Chat credit consumption error:",
-      error
+      "Chat credit consumption failed:",
+      error.message
     );
-
     throw new Error(
       "Unable to use Chat Credit right now."
     );
   }
 
-  if (
-    !isRecord(data) ||
-    data.success !== true
-  ) {
+  if (!isRecord(data) || data.success !== true) {
     if (
       isRecord(data) &&
       data.error === "INSUFFICIENT_CREDITS"
@@ -351,28 +267,25 @@ async function consumeOneChatCredit(
     );
   }
 
-  return data as unknown as CreditResult;
+  return data as {
+    success: true;
+    balance: number;
+    total_used: number;
+  };
 }
 
-export async function POST(
-  request: NextRequest
-) {
-  let geminiResponse: Response | null = null;
+export async function POST(request: NextRequest) {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
 
   try {
-    const supabase =
-      await createServerSupabaseClient();
-
+    const supabase = await createServerSupabaseClient();
     const user = await getAuthenticatedUser(
       request,
       supabase
     );
 
     if (!user) {
-      return jsonError(
-        "Authentication required.",
-        401
-      );
+      return jsonError("Authentication required.", 401);
     }
 
     await ensureGuestCredits(
@@ -385,17 +298,11 @@ export async function POST(
     try {
       body = await request.json();
     } catch {
-      return jsonError(
-        "Invalid request body.",
-        400
-      );
+      return jsonError("Invalid request body.", 400);
     }
 
     if (!isRecord(body)) {
-      return jsonError(
-        "Invalid request body.",
-        400
-      );
+      return jsonError("Invalid request body.", 400);
     }
 
     let rawMessages: unknown[] = [];
@@ -415,7 +322,7 @@ export async function POST(
     }
 
     if (
-      rawMessages.length === 0 ||
+      !rawMessages.length ||
       rawMessages.length > MAX_MESSAGES
     ) {
       return jsonError(
@@ -424,14 +331,13 @@ export async function POST(
       );
     }
 
-    const messages = rawMessages
-      .map(normalizeMessage)
-      .filter(
-        (message): message is ChatMessage =>
-          message !== null
-      );
+    const messages = rawMessages.map(normalizeMessage);
+    const validMessages = messages.filter(
+      (message): message is ChatMessage =>
+        message !== null
+    );
 
-    if (messages.length !== rawMessages.length) {
+    if (validMessages.length !== rawMessages.length) {
       return jsonError(
         "One or more messages are invalid. Check text and image inputs.",
         400
@@ -439,7 +345,7 @@ export async function POST(
     }
 
     if (
-      !messages.some(
+      !validMessages.some(
         (message) => message.role === "user"
       )
     ) {
@@ -449,69 +355,58 @@ export async function POST(
       );
     }
 
-    const geminiApiKey =
-      process.env.GEMINI_API_KEY;
+    const apiKey = process.env.GEMINI_API_KEY;
 
-    if (!geminiApiKey) {
-      console.error(
-        "GEMINI_API_KEY is missing."
-      );
-
+    if (!apiKey) {
+      console.error("GEMINI_API_KEY is missing.");
       return jsonError(
         "ZUQEN AI is not configured correctly.",
         500
       );
     }
 
-    // Accept only models explicitly exposed by the home-screen selector.
-    // The server remains authoritative; arbitrary client model names are rejected.
     const requestedModel = body.model;
+
     if (
       requestedModel !== undefined &&
-      (typeof requestedModel !== "string" || !ALLOWED_MODELS.has(requestedModel))
+      typeof requestedModel !== "string"
     ) {
-      return jsonError("Selected AI model is not supported.", 400);
+      return jsonError(
+        "Invalid model selection.",
+        400
+      );
     }
 
-    const configuredModel = process.env.GROQ_CHAT_MODEL;
-    const model =
-      typeof requestedModel === "string"
-        ? requestedModel
-        : configuredModel && ALLOWED_MODELS.has(configuredModel)
-          ? configuredModel
-          : DEFAULT_MODEL;
+    // Map the existing Pro selection to the internal Pro model.
+    const isPro =
+      requestedModel === "openai/gpt-oss-120b" ||
+      requestedModel === "zuqen-pro" ||
+      requestedModel === "gemini-3.1-pro-preview";
 
+    const providerModel = isPro
+      ? PRO_MODEL
+      : DEFAULT_MODEL;
 
-    const providerModel =
-      model === "openai/gpt-oss-120b"
-        ? "gemini-2.5-pro"
-        : "gemini-2.5-flash";
-    const {
-      data: creditRow,
-      error: creditReadError,
-    } = await supabase
-      .from("feature_credit_balances")
-      .select(
-        "user_id,feature_key,balance,total_granted,total_used"
-      )
-      .eq("user_id", user.id)
-      .eq("feature_key", "chat")
-      .maybeSingle();
+    const { data: wallet, error: walletError } =
+      await supabase
+        .from("feature_credit_balances")
+        .select(
+          "user_id,feature_key,balance,total_granted,total_used"
+        )
+        .eq("user_id", user.id)
+        .eq("feature_key", "chat")
+        .maybeSingle();
 
-    if (creditReadError) {
+    if (walletError) {
       console.error(
-        "Chat credit lookup error:",
-        creditReadError
+        "Chat credit lookup failed:",
+        walletError.message
       );
-
       return jsonError(
         "Unable to check your Chat Credits.",
         500
       );
     }
-
-    const wallet =
-      creditRow as CreditRow | null;
 
     if (!wallet) {
       return jsonError(
@@ -531,132 +426,115 @@ export async function POST(
       );
     }
 
-    const controller =
-      new AbortController();
+    const abortController = new AbortController();
 
-    const timeout = setTimeout(
-      () => controller.abort(),
-      120_000
+    timeout = setTimeout(
+      () => abortController.abort(),
+      110_000
     );
 
+    let upstream: Response;
+
     try {
-      geminiResponse = await fetch(
-        GEMINI_URL,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${geminiApiKey}`,
-          },
-          body: JSON.stringify({
-            model: providerModel,
-            messages: [
-              {
-                role: "system",
-                content: "You are ZUQEN AI. If asked who you are, say you are ZUQEN AI. Do not claim to be ChatGPT, Google Gemini, Qwen, or another underlying model. Respond in the user's language. Be honest about your capabilities."
-              },
-              ...messages.filter((message) => message.role !== "system"),
-            ],
-            stream: true,
-            temperature: 0.7,
-          }),
-          signal: controller.signal,
-        }
-      );
+      upstream = await fetch(GEMINI_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: providerModel,
+          messages: [
+            {
+              role: "system",
+              content:
+                "You are ZUQEN AI, an integrated AI assistant. " +
+                "Identify yourself as ZUQEN AI, not as an underlying provider. " +
+                "Respond in the user's language. Be helpful, accurate, and honest. " +
+                "When a user supplies an image, inspect it and answer their question about it. " +
+                "Never claim an image or video was generated unless it actually succeeded.",
+            },
+            ...validMessages.filter(
+              (message) => message.role !== "system"
+            ),
+          ],
+          stream: true,
+          temperature: 0.7,
+        }),
+        signal: abortController.signal,
+      });
     } catch (error) {
       clearTimeout(timeout);
-
-      console.error(
-        "Gemini request error:",
-        error
-      );
+      console.error("Gemini connection error:", error);
 
       return jsonError(
-        "ZUQEN AI could not generate a response right now.",
+        "ZUQEN AI could not connect to its AI provider.",
         502
       );
     }
 
-    if (!geminiResponse.ok) {
-      clearTimeout(timeout);
-
-      let providerMessage =
-        "ZUQEN AI could not generate a response right now.";
+    if (!upstream.ok) {
+      const status = upstream.status;
+      let detail = "";
 
       try {
-        const errorBody =
-          await geminiResponse.json();
+        const data: unknown = await upstream.json();
 
-        const message =
-          errorBody?.error?.message;
-
-        if (typeof message === "string") {
-          // Log provider details for debugging.
-          console.error(
-            "Gemini API error:",
-            message
-          );
-
-          // Avoid exposing internal provider details
-          // or account information to the browser.
-          if (geminiResponse.status === 429) {
-            providerMessage =
-              "ZUQEN AI is busy right now. Please wait and try again.";
-          } else if (
-            geminiResponse.status === 401 ||
-            geminiResponse.status === 403
-          ) {
-            providerMessage =
-              "ZUQEN AI is not configured correctly. Please contact support.";
-          } else if (
-            geminiResponse.status === 400
-          ) {
-            providerMessage =
-              "ZUQEN AI could not process this request. Please check the image and try again.";
-          }
+        if (
+          isRecord(data) &&
+          isRecord(data.error) &&
+          typeof data.error.message === "string"
+        ) {
+          detail = data.error.message;
         }
       } catch {
-        console.error(
-          "Gemini API error status:",
-          geminiResponse.status
-        );
+        // Provider did not return JSON.
       }
 
+      console.error("Gemini upstream failure:", {
+        status,
+        model: providerModel,
+        detail,
+      });
+
+      clearTimeout(timeout);
+
       return jsonError(
-        providerMessage,
-        geminiResponse.status === 429
-          ? 429
-          : geminiResponse.status >= 500
-          ? 502
-          : geminiResponse.status
+        status === 404
+          ? `Gemini model '${providerModel}' was not found or is unavailable to this API key. Set GEMINI_CHAT_MODEL / GEMINI_PRO_MODEL to model IDs enabled for your key.`
+          : status === 429
+            ? "ZUQEN AI is busy right now. Please try again shortly."
+            : status === 401 || status === 403
+              ? "ZUQEN AI could not authenticate with its AI provider. Check the API configuration."
+              : "ZUQEN AI could not generate a response. Check Vercel Runtime Logs for the provider error.",
+        502,
+        { errorCode: "GEMINI_UPSTREAM_ERROR" }
       );
     }
 
-    if (!geminiResponse.body) {
+    if (!upstream.body) {
       clearTimeout(timeout);
-
       return jsonError(
         "ZUQEN AI response stream is unavailable.",
         502
       );
     }
 
-    /*
-     * Preserve the existing rule:
-     * one accepted AI response consumes one Chat Credit.
-     */
-    let creditResult: CreditResult;
+    let creditResult: {
+      success: true;
+      balance: number;
+      total_used: number;
+    };
 
     try {
-      creditResult =
-        await consumeOneChatCredit(supabase);
+      creditResult = await consumeChatCredit(supabase);
     } catch (error) {
       clearTimeout(timeout);
 
       try {
-        await geminiResponse.body.cancel();
+        await upstream.body.cancel();
       } catch {
-        // Nothing else to do if the upstream stream is closed.
+        // Stream may already be closed.
       }
 
       return jsonError(
@@ -667,48 +545,43 @@ export async function POST(
       );
     }
 
+    const reader = upstream.body.getReader();
     const encoder = new TextEncoder();
     const decoder = new TextDecoder();
-    const reader = geminiResponse.body.getReader();
 
     const stream = new ReadableStream<Uint8Array>({
-      async start(streamController) {
+      async start(controller) {
         let buffer = "";
         let closed = false;
 
         const send = (data: unknown) => {
-          if (closed) return;
-
-          streamController.enqueue(
-            encoder.encode(sse(data))
-          );
+          if (!closed) {
+            controller.enqueue(
+              encoder.encode(sse(data))
+            );
+          }
         };
 
         const close = () => {
           if (closed) return;
-
           closed = true;
-          clearTimeout(timeout);
-          streamController.close();
+
+          if (timeout) clearTimeout(timeout);
+          controller.close();
         };
 
         const processLine = (rawLine: string) => {
           const line = rawLine.trim();
-
-          if (!line || !line.startsWith("data:")) {
-            return;
-          }
+          if (!line.startsWith("data:")) return;
 
           const data = line.slice(5).trim();
-
-          if (!data || data === "[DONE]") {
-            return;
-          }
+          if (!data || data === "[DONE]") return;
 
           try {
-            const parsed = JSON.parse(data);
+            const parsed: unknown = JSON.parse(data);
+            if (!isRecord(parsed)) return;
 
-            if (parsed?.error) {
+            if (parsed.error) {
               send({
                 error:
                   "ZUQEN AI could not finish the response.",
@@ -716,39 +589,37 @@ export async function POST(
               return;
             }
 
-            const delta =
-              parsed?.choices?.[0]?.delta;
+            if (
+              !Array.isArray(parsed.choices) ||
+              !parsed.choices.length ||
+              !isRecord(parsed.choices[0]) ||
+              !isRecord(parsed.choices[0].delta)
+            ) {
+              return;
+            }
 
-            const content = delta?.content;
+            const content =
+              parsed.choices[0].delta.content;
 
             if (
               typeof content === "string" &&
-              content.length > 0
+              content.length
             ) {
               send({ content });
             }
-
-            /*
-             * Some model/provider chunks may include
-             * non-text reasoning metadata. We intentionally
-             * forward only user-visible text content.
-             */
           } catch {
-            // Ignore incomplete or malformed provider chunks.
+            // Ignore malformed partial SSE frames.
           }
         };
 
         try {
           while (true) {
-            const { value, done } =
-              await reader.read();
-
+            const { value, done } = await reader.read();
             if (done) break;
 
-            buffer += decoder.decode(
-              value,
-              { stream: true }
-            );
+            buffer += decoder.decode(value, {
+              stream: true,
+            });
 
             const lines = buffer.split("\n");
             buffer = lines.pop() || "";
@@ -760,41 +631,34 @@ export async function POST(
 
           buffer += decoder.decode();
 
-          if (buffer.trim()) {
-            processLine(buffer);
-          }
-
+          if (buffer.trim()) processLine(buffer);
           close();
         } catch (error) {
-          console.error(
-            "Chat stream error:",
-            error
-          );
+          console.error("Chat stream error:", error);
 
           send({
-            error:
-              "ZUQEN AI response stream failed.",
+            error: "ZUQEN AI response stream failed.",
           });
 
           close();
         } finally {
-          clearTimeout(timeout);
+          if (timeout) clearTimeout(timeout);
 
           try {
             reader.releaseLock();
           } catch {
-            // The stream may already have released its reader.
+            // Stream already closed.
           }
         }
       },
 
       async cancel() {
-        clearTimeout(timeout);
+        if (timeout) clearTimeout(timeout);
 
         try {
           await reader.cancel();
         } catch {
-          // The client may already have disconnected.
+          // Browser may have disconnected.
         }
       },
     });
@@ -802,20 +666,17 @@ export async function POST(
     return new Response(stream, {
       status: 200,
       headers: {
-        "Content-Type":
-          "text/event-stream; charset=utf-8",
-        "Cache-Control":
-          "no-cache, no-transform",
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
         Connection: "keep-alive",
         "X-ZUQEN-Chat-Credit-Balance":
           String(creditResult.balance),
       },
     });
   } catch (error) {
-    console.error(
-      "POST /api/chat error:",
-      error
-    );
+    if (timeout) clearTimeout(timeout);
+
+    console.error("POST /api/chat failed:", error);
 
     return jsonError(
       error instanceof Error
