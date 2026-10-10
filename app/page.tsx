@@ -35,6 +35,8 @@ type Attachment = {
   name: string;
   type: string;
   size: number;
+  dataUrl?: string;
+  extractedText?: string;
 };
 
 type Message = {
@@ -404,6 +406,7 @@ export default function HomePage() {
   const [agentOpen, setAgentOpen] = useState(false);
   const [selectedAgent, setSelectedAgent] = useState("ZUQEN AI");
   const [selectedMode, setSelectedMode] = useState("Create");
+  const [selectedModel, setSelectedModel] = useState("qwen/qwen3.8-27b");
   const [voiceListening, setVoiceListening] = useState(false);
 
   const [creditsOpen, setCreditsOpen] = useState(false);
@@ -944,7 +947,7 @@ export default function HomePage() {
     const rawText = (textOverride ?? input).trim();
 
     if (loading) return;
-    if (!rawText) return;
+    if (!rawText && attachments.length === 0) return;
 
     if (!user?.id) {
       setErrorMessage("Your session is not ready yet. Please try again.");
@@ -967,12 +970,15 @@ export default function HomePage() {
       workingMessages = [];
     }
 
+    const currentAttachments = [...attachments];
+    const storedAttachments = currentAttachments.map(({ id, name, type, size }) => ({ id, name, type, size }));
+
     const userMessage: Message = {
       id: makeId(),
       role: "user",
       content: text,
       created_at: new Date().toISOString(),
-      attachments: attachments.length ? [...attachments] : undefined,
+      attachments: storedAttachments.length ? storedAttachments : undefined,
     };
 
     workingMessages = [...workingMessages, userMessage];
@@ -1011,10 +1017,26 @@ export default function HomePage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          messages: workingMessages.map((message) => ({
-            role: message.role,
-            content: message.content,
-          })),
+          model: selectedModel,
+          messages: workingMessages.map((message, index) => {
+            if (index !== workingMessages.length - 1 || message.role !== "user" || currentAttachments.length === 0) {
+              return { role: message.role, content: message.content };
+            }
+
+            const parts: Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string; detail: "auto" } }> = [
+              { type: "text", text: message.content },
+            ];
+
+            for (const file of currentAttachments) {
+              if (file.dataUrl && file.type.startsWith("image/")) {
+                parts.push({ type: "image_url", image_url: { url: file.dataUrl, detail: "auto" } });
+              } else if (file.extractedText) {
+                parts.push({ type: "text", text: `\n\n--- Attached text file: ${file.name} ---\n${file.extractedText}\n--- End of ${file.name} ---` });
+              }
+            }
+
+            return { role: message.role, content: parts };
+          }),
         }),
         signal: controller.signal,
       });
@@ -1131,18 +1153,65 @@ export default function HomePage() {
     }
   };
 
-  const handleAttachment = (event: ChangeEvent<HTMLInputElement>) => {
+  const handleAttachment = async (event: ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files ?? []);
-
-    const mapped: Attachment[] = files.map((file) => ({
-      id: makeId(),
-      name: file.name,
-      type: file.type,
-      size: file.size,
-    }));
-
-    setAttachments((previous) => [...previous, ...mapped]);
     event.target.value = "";
+    if (!files.length) return;
+
+    const accepted: Attachment[] = [];
+    const rejected: string[] = [];
+    const textExtensions = /\.(txt|md|markdown|json|csv|tsv|html|htm|xml|yaml|yml|js|jsx|ts|tsx|css|scss|py|java|c|cpp|h|sql|log|svg)$/i;
+
+    for (const file of files) {
+      if (file.size > 12 * 1024 * 1024) {
+        rejected.push(`${file.name}: maximum supported size is 12 MB`);
+        continue;
+      }
+
+      const attachment: Attachment = {
+        id: makeId(), name: file.name, type: file.type || "application/octet-stream", size: file.size,
+      };
+
+      if (["image/jpeg", "image/png", "image/webp", "image/gif"].includes(file.type)) {
+        const existingImageCount = accepted.filter((item) => item.type.startsWith("image/")).length + attachments.filter((item) => item.type.startsWith("image/")).length;
+        if (existingImageCount >= 3) {
+          rejected.push(`${file.name}: a maximum of 3 images can be sent at once`);
+          continue;
+        }
+        try {
+          attachment.dataUrl = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => typeof reader.result === "string" ? resolve(reader.result) : reject(new Error("Could not read image"));
+            reader.onerror = () => reject(new Error("Could not read image"));
+            reader.readAsDataURL(file);
+          });
+          accepted.push(attachment);
+        } catch {
+          rejected.push(`${file.name}: unable to read image`);
+        }
+        continue;
+      }
+
+      if (file.type.startsWith("text/") || /application\/(json|xml|javascript)/i.test(file.type) || textExtensions.test(file.name)) {
+        try {
+          const content = await file.text();
+          if (content.length > 100_000) {
+            rejected.push(`${file.name}: text content exceeds 100,000 characters`);
+            continue;
+          }
+          attachment.extractedText = content;
+          accepted.push(attachment);
+        } catch {
+          rejected.push(`${file.name}: unable to read text content`);
+        }
+        continue;
+      }
+
+      rejected.push(`${file.name}: this format is not yet supported for AI content analysis. Use JPG, PNG, WEBP, GIF, or a text/code file.`);
+    }
+
+    if (accepted.length) setAttachments((previous) => [...previous, ...accepted]);
+    if (rejected.length) setErrorMessage(rejected.join("\n"));
   };
 
   const removeAttachment = (id: string) => {
@@ -1154,6 +1223,37 @@ export default function HomePage() {
       await navigator.clipboard.writeText(content);
     } catch {
       setErrorMessage("Unable to copy message. Check clipboard permissions.");
+    }
+  };
+
+  const readMessage = (content: string) => {
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+      setErrorMessage("Message reading is not supported in this browser.");
+      return;
+    }
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(content);
+    utterance.lang = "en-IN";
+    utterance.rate = 1;
+    window.speechSynthesis.speak(utterance);
+  };
+
+  const shareMessage = async (content: string) => {
+    try {
+      if (typeof navigator.share === "function") {
+        await navigator.share({ title: "ZUQEN AI message", text: content });
+      } else {
+        await navigator.clipboard.writeText(content);
+        setErrorMessage("Share is not available here, so the message was copied instead.");
+      }
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      try {
+        await navigator.clipboard.writeText(content);
+        setErrorMessage("The share sheet was unavailable; message copied instead.");
+      } catch {
+        setErrorMessage("Unable to share or copy this message in this browser.");
+      }
     }
   };
 
@@ -1366,8 +1466,8 @@ export default function HomePage() {
         .zuqen-logo{width:43px;height:43px;flex:0 0 43px;border-radius:15px;background:#292c26;display:grid;place-items:center;position:relative;overflow:hidden}
         .zuqen-logo svg{width:30px;height:30px}
         .zuqen-logo-mark{width:23px;height:23px;position:relative;display:block}
-        .zuqen-logo-mark:before{content:"";position:absolute;inset:1px;border:2px solid #f4a16f;border-radius:8px 8px 8px 2px;transform:rotate(45deg)}
-        .zuqen-logo-mark:after{content:"";position:absolute;width:6px;height:6px;top:8px;left:8px;background:#f4a16f;border-radius:50%}
+        .zuqen-logo-mark:before{content:"";position:absolute;inset:2px 0;border:2px solid #f4a16f;border-radius:50%;transform:rotate(-35deg) scaleX(.72)}
+        .zuqen-logo-mark:after{content:"";position:absolute;width:7px;height:7px;top:8px;left:8px;background:#f4a16f;border-radius:50%;box-shadow:0 0 12px rgba(244,161,111,.8)}
         .zuqen-brand-name{font:800 15px Manrope,sans-serif;letter-spacing:1.7px}
         .zuqen-brand-sub{margin-top:4px;font-size:10px;color:var(--muted);letter-spacing:.25px}
         .zuqen-sidebar-content{flex:1;min-height:0;overflow-y:auto;padding:15px 12px;display:flex;flex-direction:column;gap:18px}
@@ -1470,6 +1570,12 @@ export default function HomePage() {
         .zuqen-mode-chip.active{background:#d8794b;color:#fff}
         .zuqen-home-attachments{margin:0 0 10px}
         .zuqen-home-composer-toolbar{display:flex;align-items:center;gap:9px;padding-top:11px}
+        .zuqen-model-select-wrap{display:flex;align-items:center;gap:6px;color:#aaa99e;font-size:8px;font-weight:800;letter-spacing:.7px;white-space:nowrap}
+        .zuqen-model-select{max-width:126px;background:#30342d;color:#f4f0e9;border:1px solid #55594e;border-radius:9px;padding:8px 7px;font:600 10px Manrope,sans-serif;outline:none}
+        .zuqen-model-select:focus{border-color:#f1a477}
+        .zuqen-home-voice{display:grid;place-items:center;min-width:34px;height:34px;border-radius:11px;background:#373a32;color:#f4a16f;cursor:pointer;font-size:12px}
+        .zuqen-home-voice.listening{background:#713f32;color:#fff}
+        .zuqen-home-voice:disabled{opacity:.4;cursor:not-allowed}
         .zuqen-attach-label{width:37px;height:37px;flex:0 0 37px;display:grid;place-items:center;border-radius:11px;background:#34372f;color:#e5dfd3;cursor:pointer;position:relative;overflow:hidden}
         .zuqen-attach-label:hover{color:#f1a477}
         .zuqen-attach-label input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}
@@ -2189,6 +2295,24 @@ export default function HomePage() {
                                   >
                                     <Icon name="copy" size={14} />
                                   </button>
+                                  <button
+                                    className="zuqen-action"
+                                    title="Read message aloud"
+                                    aria-label="Read message aloud"
+                                    onClick={() => readMessage(message.content)}
+                                    disabled={!message.content}
+                                  >
+                                    <span aria-hidden="true">🔊</span>
+                                  </button>
+                                  <button
+                                    className="zuqen-action"
+                                    title="Share message"
+                                    aria-label="Share message"
+                                    onClick={() => void shareMessage(message.content)}
+                                    disabled={!message.content}
+                                  >
+                                    <span aria-hidden="true">↗</span>
+                                  </button>
 
                                   {message.role === "user" && (
                                     <button
@@ -2295,6 +2419,15 @@ export default function HomePage() {
                       aria-label="Message ZUQEN AI"
                     />
 
+                    <button
+                      type="button"
+                      className={`zuqen-home-voice ${voiceListening ? "listening" : ""}`}
+                      onClick={startVoiceInput}
+                      title={voiceListening ? "Listening" : "Voice input"}
+                      aria-label={voiceListening ? "Stop voice input" : "Start voice input"}
+                    >
+                      {voiceListening ? "●" : "◖))"}
+                    </button>
                     <button
                       className="zuqen-send"
                       disabled={loading || !input.trim()}
@@ -2405,6 +2538,18 @@ export default function HomePage() {
                       <input type="file" multiple onChange={handleAttachment} />
                     </label>
 
+                    <label className="zuqen-model-select-wrap" title="Choose the AI model">
+                      <span>MODEL</span>
+                      <select
+                        className="zuqen-model-select"
+                        value={selectedModel}
+                        onChange={(event) => setSelectedModel(event.target.value)}
+                        aria-label="Choose AI model"
+                      >
+                        <option value="qwen/qwen3.8-27b">Qwen Vision</option>
+                        <option value="openai/gpt-oss-120b">GPT OSS 120B</option>
+                      </select>
+                    </label>
                     <button
                       type="button"
                       className="zuqen-home-selected-agent"

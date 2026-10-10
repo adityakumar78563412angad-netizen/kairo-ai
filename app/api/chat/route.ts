@@ -8,6 +8,10 @@ const GROQ_URL =
   "https://api.groq.com/openai/v1/chat/completions";
 
 const DEFAULT_MODEL = "qwen/qwen3.8-27b";
+const ALLOWED_MODELS = new Set([
+  "qwen/qwen3.8-27b",
+  "openai/gpt-oss-120b",
+]);
 
 const MAX_MESSAGES = 60;
 const MAX_TEXT_LENGTH = 100_000;
@@ -459,11 +463,35 @@ export async function POST(
       );
     }
 
-    // The Qwen vision model is the default.
-    // GROQ_CHAT_MODEL can override it in server environment settings.
+    // Accept only models explicitly exposed by the home-screen selector.
+    // The server remains authoritative; arbitrary client model names are rejected.
+    const requestedModel = body.model;
+    if (
+      requestedModel !== undefined &&
+      (typeof requestedModel !== "string" || !ALLOWED_MODELS.has(requestedModel))
+    ) {
+      return jsonError("Selected AI model is not supported.", 400);
+    }
+
+    const configuredModel = process.env.GROQ_CHAT_MODEL;
     const model =
-      process.env.GROQ_CHAT_MODEL ||
-      DEFAULT_MODEL;
+      typeof requestedModel === "string"
+        ? requestedModel
+        : configuredModel && ALLOWED_MODELS.has(configuredModel)
+          ? configuredModel
+          : DEFAULT_MODEL;
+
+    const containsImages = messages.some(
+      (message) => Array.isArray(message.content) &&
+        message.content.some((part) => part.type === "image_url")
+    );
+
+    if (containsImages && model !== "qwen/qwen3.8-27b") {
+      return jsonError(
+        "Image analysis requires the Qwen Vision model. Select Qwen Vision on the home screen and try again.",
+        400
+      );
+    }
 
     const {
       data: creditRow,
