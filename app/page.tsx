@@ -254,6 +254,21 @@ function Icon({
         <path d="m19 16-.7 2.3L16 19l2.3.7L19 22l.7-2.3L22 19l-2.3-.7Z" />
       </>
     ),
+    volume: (
+      <>
+        <path d="M11 5 6 9H3v6h3l5 4Z" />
+        <path d="M15 9a5 5 0 0 1 0 6" />
+        <path d="M18 5.5a9 9 0 0 1 0 13" />
+      </>
+    ),
+    stop: <rect x="6" y="6" width="12" height="12" rx="2" />,
+    share: (
+      <>
+        <path d="M12 16V4" />
+        <path d="m7 9 5-5 5 5" />
+        <path d="M5 12v7h14v-7" />
+      </>
+    ),
     arrow: <path d="M5 12h14m-6-6 6 6-6 6" />,
   };
 
@@ -431,6 +446,8 @@ export default function HomePage() {
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const shouldAutoScrollRef = useRef(true);
   const streamAbortRef = useRef<AbortController | null>(null);
+  const speechRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
 
   const activeChat = useMemo(
     () => chats.find((chat) => chat.id === activeChatId) ?? null,
@@ -1173,26 +1190,87 @@ export default function HomePage() {
       };
 
       if (["image/jpeg", "image/png", "image/webp", "image/gif"].includes(file.type)) {
-        const existingImageCount = accepted.filter((item) => item.type.startsWith("image/")).length + attachments.filter((item) => item.type.startsWith("image/")).length;
+        const existingImageCount =
+          accepted.filter((item) => item.type.startsWith("image/")).length +
+          attachments.filter((item) => item.type.startsWith("image/")).length;
+
         if (existingImageCount >= 3) {
-          rejected.push(`${file.name}: a maximum of 3 images can be sent at once`);
+          rejected.push(file.name + ": a maximum of 3 images can be sent at once");
           continue;
         }
+
+        let bitmap: ImageBitmap | null = null;
+
         try {
-          attachment.dataUrl = await new Promise<string>((resolve, reject) => {
+          bitmap = await createImageBitmap(file);
+
+          const dimensions = [1280, 1120, 960, 800, 700];
+          const qualities = [0.78, 0.70, 0.62, 0.54, 0.46];
+          let compressedBlob: Blob | null = null;
+
+          for (let attempt = 0; attempt < dimensions.length; attempt++) {
+            const scale = Math.min(
+              1,
+              dimensions[attempt] / Math.max(bitmap.width, bitmap.height)
+            );
+
+            const canvas = document.createElement("canvas");
+            canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+            canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+
+            const context = canvas.getContext("2d");
+            if (!context) throw new Error("Image canvas is unavailable");
+
+            context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+
+            compressedBlob = await new Promise<Blob>((resolve, reject) => {
+              canvas.toBlob(
+                (blob) => {
+                  if (blob) resolve(blob);
+                  else reject(new Error("Image compression failed"));
+                },
+                "image/webp",
+                qualities[attempt]
+              );
+            });
+
+            if (compressedBlob.size <= 450 * 1024) break;
+          }
+
+          if (!compressedBlob) {
+            throw new Error("Image compression failed");
+          }
+
+          const dataUrl = await new Promise<string>((resolve, reject) => {
             const reader = new FileReader();
-            reader.onload = () => typeof reader.result === "string" ? resolve(reader.result) : reject(new Error("Could not read image"));
-            reader.onerror = () => reject(new Error("Could not read image"));
-            reader.readAsDataURL(file);
+
+            reader.onload = () => {
+              if (typeof reader.result === "string") resolve(reader.result);
+              else reject(new Error("Unable to read compressed image"));
+            };
+
+            reader.onerror = () => reject(new Error("Unable to read image"));
+            reader.readAsDataURL(compressedBlob);
           });
+
+          const attachment: Attachment = {
+            id: makeId(),
+            name: file.name,
+            type: "image/webp",
+            size: compressedBlob.size,
+            dataUrl,
+          };
+
           accepted.push(attachment);
         } catch {
-          rejected.push(`${file.name}: unable to read image`);
+          rejected.push(file.name + ": unable to compress or read image");
+        } finally {
+          bitmap?.close();
         }
+
         continue;
       }
-
-      if (file.type.startsWith("text/") || /application\/(json|xml|javascript)/i.test(file.type) || textExtensions.test(file.name)) {
+            if (file.type.startsWith("text/") || /application\/(json|xml|javascript)/i.test(file.type) || textExtensions.test(file.name)) {
         try {
           const content = await file.text();
           if (content.length > 100_000) {
@@ -1226,18 +1304,44 @@ export default function HomePage() {
     }
   };
 
-  const readMessage = (content: string) => {
-    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+  const readMessage = (content: string, messageId: string) => {
+    if (
+      !("speechSynthesis" in window) ||
+      !("SpeechSynthesisUtterance" in window)
+    ) {
       setErrorMessage("Message reading is not supported in this browser.");
       return;
     }
+
+    if (speakingMessageId === messageId) {
+      speechRef.current = null;
+      window.speechSynthesis.cancel();
+      setSpeakingMessageId(null);
+      return;
+    }
+
     window.speechSynthesis.cancel();
+    speechRef.current = null;
+
     const utterance = new SpeechSynthesisUtterance(content);
     utterance.lang = "en-IN";
     utterance.rate = 1;
+
+    speechRef.current = utterance;
+    setSpeakingMessageId(messageId);
+
+    const clearPlayback = () => {
+      if (speechRef.current === utterance) {
+        speechRef.current = null;
+        setSpeakingMessageId(null);
+      }
+    };
+
+    utterance.onend = clearPlayback;
+    utterance.onerror = clearPlayback;
+
     window.speechSynthesis.speak(utterance);
   };
-
   const shareMessage = async (content: string) => {
     try {
       if (typeof navigator.share === "function") {
@@ -2288,55 +2392,65 @@ export default function HomePage() {
 
                                 <div className="zuqen-message-actions">
                                   <button
+                                    type="button"
                                     className="zuqen-action"
                                     title="Copy message"
                                     aria-label="Copy message"
                                     onClick={() => void copyMessage(message.content)}
-                                  >
-                                    <Icon name="copy" size={14} />
-                                  </button>
-                                  <button
-                                    className="zuqen-action"
-                                    title="Read message aloud"
-                                    aria-label="Read message aloud"
-                                    onClick={() => readMessage(message.content)}
                                     disabled={!message.content}
                                   >
-                                    <span aria-hidden="true">🔊</span>
-                                  </button>
-                                  <button
-                                    className="zuqen-action"
-                                    title="Share message"
-                                    aria-label="Share message"
-                                    onClick={() => void shareMessage(message.content)}
-                                    disabled={!message.content}
-                                  >
-                                    <span aria-hidden="true">↗</span>
+                                    <Icon name="copy" size={15} />
                                   </button>
 
-                                  {message.role === "user" && (
-                                    <button
-                                      className="zuqen-action"
-                                      title="Edit message"
-                                      aria-label="Edit message"
-                                      onClick={() => startEditMessage(message)}
-                                    >
-                                      <Icon name="edit" size={14} />
-                                    </button>
-                                  )}
-
-                                  {message.role === "assistant" &&
-                                    message.content && (
+                                  {message.role === "assistant" && message.content && (
+                                    <>
                                       <button
+                                        type="button"
+                                        className="zuqen-action"
+                                        title={speakingMessageId === message.id ? "Stop reading" : "Read message aloud"}
+                                        aria-label={speakingMessageId === message.id ? "Stop reading" : "Read message aloud"}
+                                        onClick={() => readMessage(message.content, message.id)}
+                                      >
+                                        <Icon
+                                          name={speakingMessageId === message.id ? "stop" : "volume"}
+                                          size={15}
+                                        />
+                                      </button>
+
+                                      <button
+                                        type="button"
+                                        className="zuqen-action"
+                                        title="Share message"
+                                        aria-label="Share message"
+                                        onClick={() => void shareMessage(message.content)}
+                                      >
+                                        <Icon name="share" size={15} />
+                                      </button>
+
+                                      <button
+                                        type="button"
                                         className="zuqen-action"
                                         title="Regenerate response"
                                         aria-label="Regenerate response"
                                         onClick={() => void regenerate()}
                                         disabled={loading}
                                       >
-                                        <Icon name="refresh" size={14} />
+                                        <Icon name="refresh" size={15} />
                                       </button>
-                                    )}
+                                    </>
+                                  )}
+
+                                  {message.role === "user" && (
+                                    <button
+                                      type="button"
+                                      className="zuqen-action"
+                                      title="Edit message"
+                                      aria-label="Edit message"
+                                      onClick={() => startEditMessage(message)}
+                                    >
+                                      <Icon name="edit" size={15} />
+                                    </button>
+                                  )}
                                 </div>
                               </>
                             )}
@@ -2430,7 +2544,7 @@ export default function HomePage() {
                     </button>
                     <button
                       className="zuqen-send"
-                      disabled={loading || !input.trim()}
+                      disabled={loading || (!input.trim() && attachments.length === 0)}
                       onClick={handleSubmit}
                       title="Send message"
                       aria-label="Send message"
@@ -2576,7 +2690,7 @@ export default function HomePage() {
                     <button
                       type="button"
                       className="zuqen-send"
-                      disabled={loading || !input.trim()}
+                      disabled={loading || (!input.trim() && attachments.length === 0)}
                       onClick={handleSubmit}
                       title="Send message"
                       aria-label="Send message"
