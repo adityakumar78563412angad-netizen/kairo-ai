@@ -2660,8 +2660,8 @@ export default function HomePage() {
                         onChange={(event) => setSelectedModel(event.target.value)}
                         aria-label="Choose AI model"
                       >
-                        <option value="qwen/qwen3.8-27b">Qwen Vision</option>
-                        <option value="openai/gpt-oss-120b">GPT OSS 120B</option>
+                        <option value="qwen/qwen3.8-27b">ZUQEN AI</option>
+                        <option value="openai/gpt-oss-120b">ZUQEN AI Pro</option>
                       </select>
                     </label>
                     <button

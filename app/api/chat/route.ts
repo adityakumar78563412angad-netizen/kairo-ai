@@ -4,8 +4,8 @@ import { createServerSupabaseClient } from "@/lib/supabase-server";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const GROQ_URL =
-  "https://api.groq.com/openai/v1/chat/completions";
+const GEMINI_URL =
+  "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
 
 const DEFAULT_MODEL = "qwen/qwen3.8-27b";
 const ALLOWED_MODELS = new Set([
@@ -357,7 +357,7 @@ async function consumeOneChatCredit(
 export async function POST(
   request: NextRequest
 ) {
-  let groqResponse: Response | null = null;
+  let geminiResponse: Response | null = null;
 
   try {
     const supabase =
@@ -449,12 +449,12 @@ export async function POST(
       );
     }
 
-    const groqApiKey =
-      process.env.GROQ_API_KEY;
+    const geminiApiKey =
+      process.env.GEMINI_API_KEY;
 
-    if (!groqApiKey) {
+    if (!geminiApiKey) {
       console.error(
-        "GROQ_API_KEY is missing."
+        "GEMINI_API_KEY is missing."
       );
 
       return jsonError(
@@ -481,18 +481,11 @@ export async function POST(
           ? configuredModel
           : DEFAULT_MODEL;
 
-    const containsImages = messages.some(
-      (message) => Array.isArray(message.content) &&
-        message.content.some((part) => part.type === "image_url")
-    );
 
-    if (containsImages && model !== "qwen/qwen3.8-27b") {
-      return jsonError(
-        "Image analysis requires the Qwen Vision model. Select Qwen Vision on the home screen and try again.",
-        400
-      );
-    }
-
+    const providerModel =
+      model === "openai/gpt-oss-120b"
+        ? "gemini-2.5-pro"
+        : "gemini-2.5-flash";
     const {
       data: creditRow,
       error: creditReadError,
@@ -547,17 +540,23 @@ export async function POST(
     );
 
     try {
-      groqResponse = await fetch(
-        GROQ_URL,
+      geminiResponse = await fetch(
+        GEMINI_URL,
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${groqApiKey}`,
+            Authorization: `Bearer ${geminiApiKey}`,
           },
           body: JSON.stringify({
-            model,
-            messages,
+            model: providerModel,
+            messages: [
+              {
+                role: "system",
+                content: "You are ZUQEN AI. If asked who you are, say you are ZUQEN AI. Do not claim to be ChatGPT, Google Gemini, Qwen, or another underlying model. Respond in the user's language. Be honest about your capabilities."
+              },
+              ...messages.filter((message) => message.role !== "system"),
+            ],
             stream: true,
             temperature: 0.7,
           }),
@@ -568,7 +567,7 @@ export async function POST(
       clearTimeout(timeout);
 
       console.error(
-        "Groq request error:",
+        "Gemini request error:",
         error
       );
 
@@ -578,7 +577,7 @@ export async function POST(
       );
     }
 
-    if (!groqResponse.ok) {
+    if (!geminiResponse.ok) {
       clearTimeout(timeout);
 
       let providerMessage =
@@ -586,7 +585,7 @@ export async function POST(
 
       try {
         const errorBody =
-          await groqResponse.json();
+          await geminiResponse.json();
 
         const message =
           errorBody?.error?.message;
@@ -594,46 +593,46 @@ export async function POST(
         if (typeof message === "string") {
           // Log provider details for debugging.
           console.error(
-            "Groq API error:",
+            "Gemini API error:",
             message
           );
 
           // Avoid exposing internal provider details
           // or account information to the browser.
-          if (groqResponse.status === 429) {
+          if (geminiResponse.status === 429) {
             providerMessage =
-              "Groq rate limit reached. Please wait and try again.";
+              "ZUQEN AI is busy right now. Please wait and try again.";
           } else if (
-            groqResponse.status === 401 ||
-            groqResponse.status === 403
+            geminiResponse.status === 401 ||
+            geminiResponse.status === 403
           ) {
             providerMessage =
-              "Groq rejected the API credentials or model access.";
+              "ZUQEN AI is not configured correctly. Please contact support.";
           } else if (
-            groqResponse.status === 400
+            geminiResponse.status === 400
           ) {
             providerMessage =
-              "Groq rejected this request. Check the model and image format.";
+              "ZUQEN AI could not process this request. Please check the image and try again.";
           }
         }
       } catch {
         console.error(
-          "Groq API error status:",
-          groqResponse.status
+          "Gemini API error status:",
+          geminiResponse.status
         );
       }
 
       return jsonError(
         providerMessage,
-        groqResponse.status === 429
+        geminiResponse.status === 429
           ? 429
-          : groqResponse.status >= 500
+          : geminiResponse.status >= 500
           ? 502
-          : groqResponse.status
+          : geminiResponse.status
       );
     }
 
-    if (!groqResponse.body) {
+    if (!geminiResponse.body) {
       clearTimeout(timeout);
 
       return jsonError(
@@ -655,7 +654,7 @@ export async function POST(
       clearTimeout(timeout);
 
       try {
-        await groqResponse.body.cancel();
+        await geminiResponse.body.cancel();
       } catch {
         // Nothing else to do if the upstream stream is closed.
       }
@@ -670,7 +669,7 @@ export async function POST(
 
     const encoder = new TextEncoder();
     const decoder = new TextDecoder();
-    const reader = groqResponse.body.getReader();
+    const reader = geminiResponse.body.getReader();
 
     const stream = new ReadableStream<Uint8Array>({
       async start(streamController) {
