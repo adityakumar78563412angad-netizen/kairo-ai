@@ -1,4 +1,3 @@
-
 import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabaseClient } from "@/lib/supabase-server";
 
@@ -6,13 +5,14 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 
-const GEMINI_URL =
-  "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
+const GROQ_URL =
+  "https://api.groq.com/openai/v1/chat/completions";
 
 const DEFAULT_MODEL =
-  process.env.GEMINI_CHAT_MODEL || "gemini-3.8-flash";
+  process.env.GROQ_CHAT_MODEL || "qwen/qwen3.8-27b";
+
 const PRO_MODEL =
-  process.env.GEMINI_PRO_MODEL || "gemini-3.1-pro-preview";
+  process.env.GROQ_PRO_MODEL || "openai/gpt-oss-120b";
 
 const MAX_MESSAGES = 60;
 const MAX_TEXT_LENGTH = 100_000;
@@ -70,6 +70,7 @@ function validImageUrl(value: string) {
 
   try {
     const url = new URL(value);
+
     return (
       url.protocol === "https:" &&
       !url.username &&
@@ -84,6 +85,7 @@ function normalizeMessage(value: unknown): ChatMessage | null {
   if (!isRecord(value)) return null;
 
   const role = value.role;
+
   if (
     role !== "user" &&
     role !== "assistant" &&
@@ -95,9 +97,13 @@ function normalizeMessage(value: unknown): ChatMessage | null {
   const content = value.content;
 
   if (typeof content === "string") {
-    if (!content.trim() || content.length > MAX_TEXT_LENGTH) {
+    if (
+      !content.trim() ||
+      content.length > MAX_TEXT_LENGTH
+    ) {
       return null;
     }
+
     return { role, content };
   }
 
@@ -113,12 +119,21 @@ function normalizeMessage(value: unknown): ChatMessage | null {
     if (!isRecord(part)) return null;
 
     if (part.type === "text") {
-      if (typeof part.text !== "string") return null;
+      if (typeof part.text !== "string") {
+        return null;
+      }
 
       textLength += part.text.length;
-      if (textLength > MAX_TEXT_LENGTH) return null;
 
-      parts.push({ type: "text", text: part.text });
+      if (textLength > MAX_TEXT_LENGTH) {
+        return null;
+      }
+
+      parts.push({
+        type: "text",
+        text: part.text,
+      });
+
       continue;
     }
 
@@ -147,11 +162,13 @@ function normalizeMessage(value: unknown): ChatMessage | null {
         image_url: {
           url,
           detail:
-            detail === "low" || detail === "high"
+            detail === "low" ||
+            detail === "high"
               ? detail
               : "auto",
         },
       });
+
       continue;
     }
 
@@ -168,7 +185,10 @@ function normalizeMessage(value: unknown): ChatMessage | null {
     return null;
   }
 
-  return { role, content: parts };
+  return {
+    role,
+    content: parts,
+  };
 }
 
 async function getAuthenticatedUser(
@@ -177,7 +197,8 @@ async function getAuthenticatedUser(
     ReturnType<typeof createServerSupabaseClient>
   >
 ) {
-  const authorization = request.headers.get("authorization");
+  const authorization =
+    request.headers.get("authorization");
 
   if (authorization?.startsWith("Bearer ")) {
     const token = authorization.slice(7).trim();
@@ -186,7 +207,9 @@ async function getAuthenticatedUser(
       const { data, error } =
         await supabase.auth.getUser(token);
 
-      if (data.user) return data.user;
+      if (data.user) {
+        return data.user;
+      }
 
       if (error) {
         console.error(
@@ -197,10 +220,14 @@ async function getAuthenticatedUser(
     }
   }
 
-  const { data, error } = await supabase.auth.getUser();
+  const { data, error } =
+    await supabase.auth.getUser();
 
   if (error) {
-    console.error("Chat cookie auth error:", error.message);
+    console.error(
+      "Chat cookie auth error:",
+      error.message
+    );
   }
 
   return data.user ?? null;
@@ -214,15 +241,20 @@ async function ensureGuestCredits(
 ) {
   if (!anonymous) return;
 
-  const { data, error } = await supabase.rpc(
-    "setup_guest_chat_credits"
-  );
+  const { data, error } =
+    await supabase.rpc(
+      "setup_guest_chat_credits"
+    );
 
-  if (error || (isRecord(data) && data.success === false)) {
+  if (
+    error ||
+    (isRecord(data) && data.success === false)
+  ) {
     console.error(
       "Guest credit initialization failed:",
       error?.message ?? data
     );
+
     throw new Error(
       "Chat credits could not be initialized."
     );
@@ -234,25 +266,30 @@ async function consumeChatCredit(
     ReturnType<typeof createServerSupabaseClient>
   >
 ) {
-  const { data, error } = await supabase.rpc(
-    "consume_feature_credit",
-    {
-      p_feature_key: "chat",
-      p_amount: 1,
-    }
-  );
+  const { data, error } =
+    await supabase.rpc(
+      "consume_feature_credit",
+      {
+        p_feature_key: "chat",
+        p_amount: 1,
+      }
+    );
 
   if (error) {
     console.error(
       "Chat credit consumption failed:",
       error.message
     );
+
     throw new Error(
       "Unable to use Chat Credit right now."
     );
   }
 
-  if (!isRecord(data) || data.success !== true) {
+  if (
+    !isRecord(data) ||
+    data.success !== true
+  ) {
     if (
       isRecord(data) &&
       data.error === "INSUFFICIENT_CREDITS"
@@ -274,18 +311,323 @@ async function consumeChatCredit(
   };
 }
 
-export async function POST(request: NextRequest) {
-  let timeout: ReturnType<typeof setTimeout> | undefined;
+/* =========================================================
+   IMAGE INTENT HELPERS
+   ========================================================= */
 
-  try {
-    const supabase = await createServerSupabaseClient();
-    const user = await getAuthenticatedUser(
-      request,
-      supabase
+function getLastUserText(
+  messages: ChatMessage[]
+) {
+  const lastUserMessage = [...messages]
+    .reverse()
+    .find(
+      (message) =>
+        message.role === "user"
     );
 
+  if (!lastUserMessage) {
+    return "";
+  }
+
+  if (
+    typeof lastUserMessage.content ===
+    "string"
+  ) {
+    return lastUserMessage.content;
+  }
+
+  return lastUserMessage.content
+    .filter(
+      (
+        part
+      ): part is {
+        type: "text";
+        text: string;
+      } => part.type === "text"
+    )
+    .map(
+      (part) => part.text
+    )
+    .join(" ");
+}
+
+function hasAttachedImage(
+  messages: ChatMessage[]
+) {
+  const lastUserMessage = [...messages]
+    .reverse()
+    .find(
+      (message) =>
+        message.role === "user"
+    );
+
+  if (!lastUserMessage) {
+    return false;
+  }
+
+  if (
+    typeof lastUserMessage.content ===
+    "string"
+  ) {
+    return false;
+  }
+
+  return lastUserMessage.content.some(
+    (part) =>
+      part.type === "image_url"
+  );
+}
+
+/* =========================================================
+   GROQ IMAGE INTENT DETECTION
+   ========================================================= */
+
+async function detectImageGenerationIntent(
+  text: string,
+  apiKey: string
+): Promise<boolean> {
+  if (!text.trim()) {
+    return false;
+  }
+
+  try {
+    const response = await fetch(
+      GROQ_URL,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type":
+            "application/json",
+          Authorization:
+            `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model:
+            process.env.GROQ_CHAT_MODEL ||
+            "qwen/qwen3.8-27b",
+          messages: [
+            {
+              role: "system",
+              content:
+                "You are ZUQEN AI's image-generation intent detector. " +
+                "Return ONLY YES or NO. " +
+                "Return YES when the user wants you to CREATE, GENERATE, DRAW, MAKE, PAINT, DESIGN or PRODUCE an actual new image, picture, photo, illustration, wallpaper, poster, logo or other visual. " +
+                "Return NO when the user is only asking about an existing image, analyzing an image, describing an image, asking what an image looks like, or asking a normal text question. " +
+                "If the user asks to make something visual in any language, return YES.",
+            },
+            {
+              role: "user",
+              content: text.slice(0, 4000),
+            },
+          ],
+          temperature: 0,
+          max_tokens: 3,
+          stream: false,
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      console.error(
+        "Groq image intent detection failed:",
+        response.status
+      );
+
+      return false;
+    }
+
+    const data: unknown =
+      await response.json().catch(
+        () => null
+      );
+
+    if (
+      !isRecord(data) ||
+      !Array.isArray(data.choices) ||
+      !data.choices.length
+    ) {
+      return false;
+    }
+
+    const firstChoice =
+      data.choices[0];
+
+    if (!isRecord(firstChoice)) {
+      return false;
+    }
+
+    const message =
+      firstChoice.message;
+
+    if (!isRecord(message)) {
+      return false;
+    }
+
+    const content =
+      typeof message.content ===
+      "string"
+        ? message.content
+            .trim()
+            .toUpperCase()
+        : "";
+
+    return content === "YES";
+  } catch (error) {
+    console.error(
+      "Groq image intent detection error:",
+      error
+    );
+
+    return false;
+  }
+}
+
+/* =========================================================
+   CLOUDFLARE IMAGE GENERATION
+   ========================================================= */
+
+async function generateImageThroughCloudflare(
+  request: NextRequest,
+  prompt: string
+) {
+  const cookie =
+    request.headers.get("cookie");
+
+  let imageResponse: Response;
+
+  try {
+    imageResponse =
+      await fetch(
+        new URL(
+          "/api/image-generator",
+          request.url
+        ),
+        {
+          method: "POST",
+          headers: {
+            "Content-Type":
+              "application/json",
+            ...(cookie
+              ? { cookie }
+              : {}),
+          },
+          body: JSON.stringify({
+            prompt:
+              prompt.slice(0, 1000),
+          }),
+          cache: "no-store",
+        }
+      );
+  } catch (error) {
+    console.error(
+      "Cloudflare image route connection failed:",
+      error
+    );
+
+    return jsonError(
+      "Could not connect to the image-generation service.",
+      502
+    );
+  }
+
+  const imageData: unknown =
+    await imageResponse
+      .json()
+      .catch(() => null);
+
+  if (
+    !imageResponse.ok ||
+    !isRecord(imageData) ||
+    imageData.success !== true ||
+    typeof imageData.image !==
+      "string"
+  ) {
+    const errorMessage =
+      isRecord(imageData) &&
+      typeof imageData.error ===
+        "string"
+        ? imageData.error
+        : `Image generation failed (${imageResponse.status}).`;
+
+    return jsonError(
+      errorMessage,
+      imageResponse.ok
+        ? 502
+        : imageResponse.status
+    );
+  }
+
+  const encoder =
+    new TextEncoder();
+
+  const stream =
+    new ReadableStream<
+      Uint8Array
+    >({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode(
+            sse({
+              content:
+                "![Image generated by ZUQEN AI](" +
+                imageData.image +
+                ")",
+            })
+          )
+        );
+
+        controller.enqueue(
+          encoder.encode(
+            "data: [DONE]\n\n"
+          )
+        );
+
+        controller.close();
+      },
+    });
+
+  return new Response(
+    stream,
+    {
+      status: 200,
+      headers: {
+        "Content-Type":
+          "text/event-stream; charset=utf-8",
+        "Cache-Control":
+          "no-cache, no-transform",
+        Connection:
+          "keep-alive",
+      },
+    }
+  );
+}
+
+/* =========================================================
+   MAIN CHAT ROUTE
+   ========================================================= */
+
+export async function POST(
+  request: NextRequest
+) {
+  let timeout:
+    | ReturnType<typeof setTimeout>
+    | undefined;
+
+  try {
+    const supabase =
+      await createServerSupabaseClient();
+
+    const user =
+      await getAuthenticatedUser(
+        request,
+        supabase
+      );
+
     if (!user) {
-      return jsonError("Authentication required.", 401);
+      return jsonError(
+        "Authentication required.",
+        401
+      );
     }
 
     await ensureGuestCredits(
@@ -296,34 +638,48 @@ export async function POST(request: NextRequest) {
     let body: unknown;
 
     try {
-      body = await request.json();
+      body =
+        await request.json();
     } catch {
-      return jsonError("Invalid request body.", 400);
+      return jsonError(
+        "Invalid request body.",
+        400
+      );
     }
 
     if (!isRecord(body)) {
-      return jsonError("Invalid request body.", 400);
+      return jsonError(
+        "Invalid request body.",
+        400
+      );
     }
 
-    let rawMessages: unknown[] = [];
+    let rawMessages: unknown[] =
+      [];
 
-    if (Array.isArray(body.messages)) {
-      rawMessages = body.messages;
+    if (
+      Array.isArray(body.messages)
+    ) {
+      rawMessages =
+        body.messages;
     } else if (
-      typeof body.message === "string" &&
+      typeof body.message ===
+        "string" &&
       body.message.trim()
     ) {
       rawMessages = [
         {
           role: "user",
-          content: body.message.trim(),
+          content:
+            body.message.trim(),
         },
       ];
     }
 
     if (
       !rawMessages.length ||
-      rawMessages.length > MAX_MESSAGES
+      rawMessages.length >
+        MAX_MESSAGES
     ) {
       return jsonError(
         `Send between 1 and ${MAX_MESSAGES} messages.`,
@@ -331,13 +687,23 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const messages = rawMessages.map(normalizeMessage);
-    const validMessages = messages.filter(
-      (message): message is ChatMessage =>
-        message !== null
-    );
+    const messages =
+      rawMessages.map(
+        normalizeMessage
+      );
 
-    if (validMessages.length !== rawMessages.length) {
+    const validMessages =
+      messages.filter(
+        (
+          message
+        ): message is ChatMessage =>
+          message !== null
+      );
+
+    if (
+      validMessages.length !==
+      rawMessages.length
+    ) {
       return jsonError(
         "One or more messages are invalid. Check text and image inputs.",
         400
@@ -346,7 +712,8 @@ export async function POST(request: NextRequest) {
 
     if (
       !validMessages.some(
-        (message) => message.role === "user"
+        (message) =>
+          message.role === "user"
       )
     ) {
       return jsonError(
@@ -355,141 +722,73 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Route explicit image-generation requests to Cloudflare FLUX.
-    // Normal chat and image-understanding requests remain on Gemini.
-    const lastUserMessage = [...validMessages]
-      .reverse()
-      .find((message) => message.role === "user");
+    /* =====================================================
+       GROQ API KEY
+       ===================================================== */
 
-    const lastUserText =
-      typeof lastUserMessage?.content === "string"
-        ? lastUserMessage.content
-        : Array.isArray(lastUserMessage?.content)
-          ? lastUserMessage.content
-              .filter((part) => part.type === "text")
-              .map((part) =>
-                part.type === "text" ? part.text : ""
-              )
-              .join(" ")
-          : "";
-
-    const hasAttachedImage =
-      Array.isArray(lastUserMessage?.content) &&
-      lastUserMessage.content.some(
-        (part) => part.type === "image_url"
-      );
-
-    const wantsImage =
-      !hasAttachedImage &&
-      /(?:generate|create|make|draw|paint|banao|bana do|bana ke|tasveer banao|image bana|photo bana)/i.test(
-        lastUserText
-      ) &&
-      /(?:image|picture|photo|tasveer|wallpaper|poster|logo|illustration|cat|kitten|billi|dog|puppy|car|landscape)/i.test(
-        lastUserText
-      );
-
-    if (wantsImage) {
-      const cookie = request.headers.get("cookie");
-
-      let imageResponse: Response;
-
-      try {
-        imageResponse = await fetch(
-          new URL("/api/image-generator", request.url),
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              ...(cookie ? { cookie } : {}),
-            },
-            body: JSON.stringify({
-              prompt: lastUserText.slice(0, 1000),
-            }),
-            cache: "no-store",
-          }
-        );
-      } catch (error) {
-        console.error(
-          "Cloudflare image route connection failed:",
-          error
-        );
-
-        return jsonError(
-          "Could not connect to the image-generation service.",
-          502
-        );
-      }
-
-      const imageData: unknown =
-        await imageResponse.json().catch(() => null);
-
-      if (
-        !imageResponse.ok ||
-        !isRecord(imageData) ||
-        imageData.success !== true ||
-        typeof imageData.image !== "string"
-      ) {
-        const errorMessage =
-          isRecord(imageData) &&
-          typeof imageData.error === "string"
-            ? imageData.error
-            : `Image generation failed (${imageResponse.status}).`;
-
-        return jsonError(
-          errorMessage,
-          imageResponse.ok ? 502 : imageResponse.status
-        );
-      }
-
-      // Preserve the existing chat API's SSE response format.
-      const encoder = new TextEncoder();
-
-      const stream = new ReadableStream<Uint8Array>({
-        start(controller) {
-          controller.enqueue(
-            encoder.encode(
-              sse({
-                content:
-                  "![Image generated by ZUQEN AI](" +
-                  imageData.image +
-                  ")",
-              })
-            )
-          );
-
-          controller.enqueue(
-            encoder.encode("data: [DONE]\n\n")
-          );
-
-          controller.close();
-        },
-      });
-
-      return new Response(stream, {
-        status: 200,
-        headers: {
-          "Content-Type": "text/event-stream; charset=utf-8",
-          "Cache-Control": "no-cache, no-transform",
-          Connection: "keep-alive",
-        },
-      });
-    }
-
-    const apiKey = process.env.GEMINI_API_KEY;
+    const apiKey =
+      process.env.GROQ_API_KEY;
 
     if (!apiKey) {
-      console.error("GEMINI_API_KEY is missing.");
+      console.error(
+        "GROQ_API_KEY is missing."
+      );
+
       return jsonError(
         "ZUQEN AI is not configured correctly.",
         500
       );
     }
 
-    const requestedModel = body.model;
+    /* =====================================================
+       IMAGE REQUEST DETECTION
+       ===================================================== */
+
+    const lastUserText =
+      getLastUserText(
+        validMessages
+      );
+
+    const attachedImage =
+      hasAttachedImage(
+        validMessages
+      );
+
+    /*
+     * If the user attached an image,
+     * this is an image-understanding
+     * request and must stay on Groq chat.
+     */
+    const wantsImage =
+      !attachedImage &&
+      (await detectImageGenerationIntent(
+        lastUserText,
+        apiKey
+      ));
+
+    /*
+     * User wants an actual NEW image.
+     * Groq detected the intent.
+     * Cloudflare FLUX performs the generation.
+     */
+    if (wantsImage) {
+      return generateImageThroughCloudflare(
+        request,
+        lastUserText
+      );
+    }
+
+    /* =====================================================
+       MODEL SELECTION
+       ===================================================== */
+
+    const requestedModel =
+      body.model;
 
     if (
       requestedModel !== undefined &&
-      typeof requestedModel !== "string"
+      typeof requestedModel !==
+        "string"
     ) {
       return jsonError(
         "Invalid model selection.",
@@ -497,31 +796,58 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Map the existing Pro selection to the internal Pro model.
+    /*
+     * Existing ZUQEN model selector is preserved.
+     *
+     * qwen/qwen3.8-27b
+     *      ↓
+     * GROQ_CHAT_MODEL
+     *
+     * openai/gpt-oss-120b
+     *      ↓
+     * GROQ_PRO_MODEL
+     */
     const isPro =
-      requestedModel === "openai/gpt-oss-120b" ||
-      requestedModel === "zuqen-pro" ||
-      requestedModel === "gemini-3.1-pro-preview";
+      requestedModel ===
+        "openai/gpt-oss-120b" ||
+      requestedModel ===
+        "zuqen-pro";
 
-    const providerModel = isPro
-      ? PRO_MODEL
-      : DEFAULT_MODEL;
+    const providerModel =
+      isPro
+        ? PRO_MODEL
+        : DEFAULT_MODEL;
 
-    const { data: wallet, error: walletError } =
-      await supabase
-        .from("feature_credit_balances")
-        .select(
-          "user_id,feature_key,balance,total_granted,total_used"
-        )
-        .eq("user_id", user.id)
-        .eq("feature_key", "chat")
-        .maybeSingle();
+    /* =====================================================
+       CHAT CREDIT CHECK
+       ===================================================== */
+
+    const {
+      data: wallet,
+      error: walletError,
+    } = await supabase
+      .from(
+        "feature_credit_balances"
+      )
+      .select(
+        "user_id,feature_key,balance,total_granted,total_used"
+      )
+      .eq(
+        "user_id",
+        user.id
+      )
+      .eq(
+        "feature_key",
+        "chat"
+      )
+      .maybeSingle();
 
     if (walletError) {
       console.error(
         "Chat credit lookup failed:",
         walletError.message
       );
+
       return jsonError(
         "Unable to check your Chat Credits.",
         500
@@ -535,57 +861,84 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (Number(wallet.balance) < 1) {
+    if (
+      Number(wallet.balance) <
+      1
+    ) {
       return jsonError(
         "You don't have enough Chat Credits.",
         402,
         {
-          errorCode: "INSUFFICIENT_CREDITS",
-          balance: Number(wallet.balance),
+          errorCode:
+            "INSUFFICIENT_CREDITS",
+          balance:
+            Number(wallet.balance),
         }
       );
     }
 
-    const abortController = new AbortController();
+    /* =====================================================
+       GROQ REQUEST
+       ===================================================== */
 
-    timeout = setTimeout(
-      () => abortController.abort(),
-      110_000
-    );
+    const abortController =
+      new AbortController();
+
+    timeout =
+      setTimeout(
+        () =>
+          abortController.abort(),
+        110_000
+      );
 
     let upstream: Response;
 
     try {
-      upstream = await fetch(GEMINI_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model: providerModel,
-          messages: [
-            {
-              role: "system",
-              content:
-                "You are ZUQEN AI, an integrated AI assistant. " +
-                "Identify yourself as ZUQEN AI, not as an underlying provider. " +
-                "Respond in the user's language. Be helpful, accurate, and honest. " +
-                "When a user supplies an image, inspect it and answer their question about it. " +
-                "Never claim an image or video was generated unless it actually succeeded.",
+      upstream =
+        await fetch(
+          GROQ_URL,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type":
+                "application/json",
+              Authorization:
+                `Bearer ${apiKey}`,
             },
-            ...validMessages.filter(
-              (message) => message.role !== "system"
-            ),
-          ],
-          stream: true,
-          temperature: 0.7,
-        }),
-        signal: abortController.signal,
-      });
+            body: JSON.stringify({
+              model:
+                providerModel,
+              messages: [
+                {
+                  role: "system",
+                  content:
+                    "You are ZUQEN AI, an integrated AI assistant. " +
+                    "Identify yourself as ZUQEN AI, not as an underlying provider. " +
+                    "Respond in the user's language. " +
+                    "Be helpful, accurate, and honest. " +
+                    "When a user supplies an image, inspect it and answer their question about it. " +
+                    "Never claim an image or video was generated unless it actually succeeded.",
+                },
+                ...validMessages.filter(
+                  (message) =>
+                    message.role !==
+                    "system"
+                ),
+              ],
+              stream: true,
+              temperature: 0.7,
+            }),
+            signal:
+              abortController.signal,
+          }
+        );
     } catch (error) {
       clearTimeout(timeout);
-      console.error("Gemini connection error:", error);
+
+      console.error(
+        "Groq connection error:",
+        error
+      );
 
       return jsonError(
         "ZUQEN AI could not connect to its AI provider.",
@@ -593,52 +946,74 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    /* =====================================================
+       GROQ ERROR HANDLING
+       ===================================================== */
+
     if (!upstream.ok) {
-      const status = upstream.status;
+      const status =
+        upstream.status;
+
       let detail = "";
 
       try {
-        const data: unknown = await upstream.json();
+        const data: unknown =
+          await upstream.json();
 
         if (
           isRecord(data) &&
           isRecord(data.error) &&
-          typeof data.error.message === "string"
+          typeof data.error.message ===
+            "string"
         ) {
-          detail = data.error.message;
+          detail =
+            data.error.message;
         }
       } catch {
         // Provider did not return JSON.
       }
 
-      console.error("Gemini upstream failure:", {
-        status,
-        model: providerModel,
-        detail,
-      });
+      console.error(
+        "Groq upstream failure:",
+        {
+          status,
+          model:
+            providerModel,
+          detail,
+        }
+      );
 
       clearTimeout(timeout);
 
       return jsonError(
         status === 404
-          ? `Gemini model '${providerModel}' was not found or is unavailable to this API key. Set GEMINI_CHAT_MODEL / GEMINI_PRO_MODEL to model IDs enabled for your key.`
+          ? `Groq model '${providerModel}' was not found or is unavailable.`
           : status === 429
             ? "ZUQEN AI is busy right now. Please try again shortly."
-            : status === 401 || status === 403
-              ? "ZUQEN AI could not authenticate with its AI provider. Check the API configuration."
-              : "ZUQEN AI could not generate a response. Check Vercel Runtime Logs for the provider error.",
+            : status === 401 ||
+                status === 403
+              ? "ZUQEN AI could not authenticate with its AI provider. Check GROQ_API_KEY."
+              : "ZUQEN AI could not generate a response. Check Vercel Runtime Logs for the Groq provider error.",
         502,
-        { errorCode: "GEMINI_UPSTREAM_ERROR" }
+        {
+          errorCode:
+            "GROQ_UPSTREAM_ERROR",
+        }
       );
     }
 
     if (!upstream.body) {
       clearTimeout(timeout);
+
       return jsonError(
         "ZUQEN AI response stream is unavailable.",
         502
       );
     }
+
+    /* =====================================================
+       CONSUME CHAT CREDIT
+       ===================================================== */
 
     let creditResult: {
       success: true;
@@ -647,7 +1022,10 @@ export async function POST(request: NextRequest) {
     };
 
     try {
-      creditResult = await consumeChatCredit(supabase);
+      creditResult =
+        await consumeChatCredit(
+          supabase
+        );
     } catch (error) {
       clearTimeout(timeout);
 
@@ -665,138 +1043,263 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const reader = upstream.body.getReader();
-    const encoder = new TextEncoder();
-    const decoder = new TextDecoder();
+    /* =====================================================
+       GROQ STREAM
+       ===================================================== */
 
-    const stream = new ReadableStream<Uint8Array>({
-      async start(controller) {
-        let buffer = "";
-        let closed = false;
+    const reader =
+      upstream.body.getReader();
 
-        const send = (data: unknown) => {
-          if (!closed) {
-            controller.enqueue(
-              encoder.encode(sse(data))
-            );
-          }
-        };
+    const encoder =
+      new TextEncoder();
 
-        const close = () => {
-          if (closed) return;
-          closed = true;
+    const decoder =
+      new TextDecoder();
 
-          if (timeout) clearTimeout(timeout);
-          controller.close();
-        };
+    const stream =
+      new ReadableStream<
+        Uint8Array
+      >({
+        async start(
+          controller
+        ) {
+          let buffer = "";
+          let closed = false;
 
-        const processLine = (rawLine: string) => {
-          const line = rawLine.trim();
-          if (!line.startsWith("data:")) return;
+          const send = (
+            data: unknown
+          ) => {
+            if (!closed) {
+              controller.enqueue(
+                encoder.encode(
+                  sse(data)
+                )
+              );
+            }
+          };
 
-          const data = line.slice(5).trim();
-          if (!data || data === "[DONE]") return;
+          const close = () => {
+            if (closed) {
+              return;
+            }
+
+            closed = true;
+
+            if (timeout) {
+              clearTimeout(
+                timeout
+              );
+            }
+
+            controller.close();
+          };
+
+          const processLine = (
+            rawLine: string
+          ) => {
+            const line =
+              rawLine.trim();
+
+            if (
+              !line.startsWith(
+                "data:"
+              )
+            ) {
+              return;
+            }
+
+            const data =
+              line
+                .slice(5)
+                .trim();
+
+            if (
+              !data ||
+              data === "[DONE]"
+            ) {
+              return;
+            }
+
+            try {
+              const parsed: unknown =
+                JSON.parse(data);
+
+              if (
+                !isRecord(
+                  parsed
+                )
+              ) {
+                return;
+              }
+
+              if (
+                parsed.error
+              ) {
+                send({
+                  error:
+                    "ZUQEN AI could not finish the response.",
+                });
+
+                return;
+              }
+
+              if (
+                !Array.isArray(
+                  parsed.choices
+                ) ||
+                !parsed.choices.length ||
+                !isRecord(
+                  parsed.choices[0]
+                ) ||
+                !isRecord(
+                  parsed
+                    .choices[0]
+                    .delta
+                )
+              ) {
+                return;
+              }
+
+              const content =
+                parsed
+                  .choices[0]
+                  .delta
+                  .content;
+
+              if (
+                typeof content ===
+                  "string" &&
+                content.length
+              ) {
+                send({
+                  content,
+                });
+              }
+            } catch {
+              /*
+               * Ignore malformed partial
+               * SSE frames.
+               */
+            }
+          };
 
           try {
-            const parsed: unknown = JSON.parse(data);
-            if (!isRecord(parsed)) return;
+            while (true) {
+              const {
+                value,
+                done,
+              } =
+                await reader.read();
 
-            if (parsed.error) {
-              send({
-                error:
-                  "ZUQEN AI could not finish the response.",
-              });
-              return;
+              if (done) {
+                break;
+              }
+
+              buffer +=
+                decoder.decode(
+                  value,
+                  {
+                    stream: true,
+                  }
+                );
+
+              const lines =
+                buffer.split(
+                  "\n"
+                );
+
+              buffer =
+                lines.pop() ||
+                "";
+
+              for (
+                const line of lines
+              ) {
+                processLine(line);
+              }
             }
+
+            buffer +=
+              decoder.decode();
 
             if (
-              !Array.isArray(parsed.choices) ||
-              !parsed.choices.length ||
-              !isRecord(parsed.choices[0]) ||
-              !isRecord(parsed.choices[0].delta)
+              buffer.trim()
             ) {
-              return;
+              processLine(
+                buffer
+              );
             }
 
-            const content =
-              parsed.choices[0].delta.content;
+            close();
+          } catch (error) {
+            console.error(
+              "Groq chat stream error:",
+              error
+            );
 
-            if (
-              typeof content === "string" &&
-              content.length
-            ) {
-              send({ content });
-            }
-          } catch {
-            // Ignore malformed partial SSE frames.
-          }
-        };
-
-        try {
-          while (true) {
-            const { value, done } = await reader.read();
-            if (done) break;
-
-            buffer += decoder.decode(value, {
-              stream: true,
+            send({
+              error:
+                "ZUQEN AI response stream failed.",
             });
 
-            const lines = buffer.split("\n");
-            buffer = lines.pop() || "";
+            close();
+          } finally {
+            if (timeout) {
+              clearTimeout(
+                timeout
+              );
+            }
 
-            for (const line of lines) {
-              processLine(line);
+            try {
+              reader.releaseLock();
+            } catch {
+              // Stream already closed.
             }
           }
+        },
 
-          buffer += decoder.decode();
-
-          if (buffer.trim()) processLine(buffer);
-          close();
-        } catch (error) {
-          console.error("Chat stream error:", error);
-
-          send({
-            error: "ZUQEN AI response stream failed.",
-          });
-
-          close();
-        } finally {
-          if (timeout) clearTimeout(timeout);
+        async cancel() {
+          if (timeout) {
+            clearTimeout(
+              timeout
+            );
+          }
 
           try {
-            reader.releaseLock();
+            await reader.cancel();
           } catch {
-            // Stream already closed.
+            // Browser may have disconnected.
           }
-        }
-      },
+        },
+      });
 
-      async cancel() {
-        if (timeout) clearTimeout(timeout);
-
-        try {
-          await reader.cancel();
-        } catch {
-          // Browser may have disconnected.
-        }
-      },
-    });
-
-    return new Response(stream, {
-      status: 200,
-      headers: {
-        "Content-Type": "text/event-stream; charset=utf-8",
-        "Cache-Control": "no-cache, no-transform",
-        Connection: "keep-alive",
-        "X-ZUQEN-Chat-Credit-Balance":
-          String(creditResult.balance),
-      },
-    });
+    return new Response(
+      stream,
+      {
+        status: 200,
+        headers: {
+          "Content-Type":
+            "text/event-stream; charset=utf-8",
+          "Cache-Control":
+            "no-cache, no-transform",
+          Connection:
+            "keep-alive",
+          "X-ZUQEN-Chat-Credit-Balance":
+            String(
+              creditResult.balance
+            ),
+        },
+      }
+    );
   } catch (error) {
-    if (timeout) clearTimeout(timeout);
+    if (timeout) {
+      clearTimeout(timeout);
+    }
 
-    console.error("POST /api/chat failed:", error);
+    console.error(
+      "POST /api/chat failed:",
+      error
+    );
 
     return jsonError(
       error instanceof Error
@@ -811,7 +1314,8 @@ export async function GET() {
   return NextResponse.json(
     {
       success: false,
-      error: "Method not allowed. Use POST.",
+      error:
+        "Method not allowed. Use POST.",
     },
     { status: 405 }
   );
