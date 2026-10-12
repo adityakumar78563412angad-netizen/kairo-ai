@@ -363,44 +363,128 @@ function CodePanel({
 /* Displays fenced code blocks without requiring a markdown package. */
 
 function MessageContent({ content }: { content: string }) {
-  const chunks = content.split(/```([^\n`]*)\n([\s\S]*?)```/g);
+  const imageRegex =
+    /!\[([^\]]*)\]\(((?:https?:\/\/[^\s)]+)|(?:data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=\s]+))\)/g;
 
-  if (!content.includes("```")) {
-    return <div className="z-message-text">{content}</div>;
-  }
+  const parts: React.ReactNode[] = [];
+  let lastIndex = 0;
+  let imageIndex = 0;
+  let match: RegExpExecArray | null;
 
-  const rendered: React.ReactNode[] = [];
+  const renderTextWithCode = (
+    text: string,
+    keyPrefix: string
+  ) => {
+    if (!text) return;
 
-  for (let index = 0; index < chunks.length; ) {
-    if (index % 3 === 0) {
-      const text = chunks[index];
-      if (text) {
-        rendered.push(
-          <div className="z-message-text" key={`text-${index}`}>
-            {text}
-          </div>
-        );
+    const chunks = text.split(
+      /```([^\n`]*)\n([\s\S]*?)```/g
+    );
+
+    for (let index = 0; index < chunks.length; ) {
+      if (index % 3 === 0) {
+        const plainText = chunks[index];
+
+        if (plainText) {
+          parts.push(
+            <div
+              className="z-message-text"
+              key={`${keyPrefix}-text-${index}`}
+            >
+              {plainText}
+            </div>
+          );
+        }
+
         index += 1;
       } else {
-        index += 1;
-      }
-    } else {
-      const language = chunks[index] || "code";
-      const code = chunks[index + 1] || "";
+        const language = chunks[index] || "code";
+        const code = chunks[index + 1] || "";
 
-      rendered.push(
-        <CodePanel
-          key={`code-${index}`}
-          code={code.replace(/\n$/, "")}
-          language={language.trim()}
-        />
-      );
-      index += 2;
+        parts.push(
+          <CodePanel
+            key={`${keyPrefix}-code-${index}`}
+            code={code.replace(/\n$/, "")}
+            language={language.trim()}
+          />
+        );
+
+        index += 2;
+      }
     }
+  };
+
+  while ((match = imageRegex.exec(content)) !== null) {
+    const textBeforeImage = content.slice(
+      lastIndex,
+      match.index
+    );
+
+    renderTextWithCode(
+      textBeforeImage,
+      `before-image-${imageIndex}`
+    );
+
+    const alt = match[1] || "Generated image";
+    const src = match[2];
+
+    parts.push(
+      <div
+        key={`generated-image-${imageIndex}`}
+        style={{
+          marginTop: 12,
+          marginBottom: 12,
+          width: "100%",
+          maxWidth: 720,
+          overflow: "hidden",
+          borderRadius: 16,
+          border: "1px solid rgba(120, 120, 140, 0.18)",
+          background: "rgba(0, 0, 0, 0.03)",
+        }}
+      >
+        <img
+          src={src}
+          alt={alt}
+          loading="lazy"
+          style={{
+            display: "block",
+            width: "100%",
+            height: "auto",
+            maxHeight: 720,
+            objectFit: "contain",
+          }}
+        />
+      </div>
+    );
+
+    lastIndex = imageRegex.lastIndex;
+    imageIndex += 1;
   }
 
-  return <div className="z-message-content">{rendered}</div>;
+  const remainingText = content.slice(lastIndex);
+
+  renderTextWithCode(
+    remainingText,
+    `after-image-${imageIndex}`
+  );
+
+  if (parts.length === 0) {
+    return (
+      <div className="z-message-text">
+        {content}
+      </div>
+    );
+  }
+
+  return (
+    <div className="z-message-content">
+      {parts}
+    </div>
+  );
 }
+
+   
+
 
 export default function HomePage() {
   const [user, setUser] = useState<User | null>(null);
