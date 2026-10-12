@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import {
   useCallback,
@@ -14,7 +14,7 @@ import type {
 import { createClient } from "@/lib/supabase";
 
 /* =========================================================
-   ZUQEN AI — MAIN WORKSPACE
+   ZUQEN AI â€” MAIN WORKSPACE
    Existing Supabase tables:
    - chats
    - feature_credit_balances
@@ -77,31 +77,31 @@ const AGENTS: Agent[] = [
   {
     name: "ZUQEN AI",
     description: "Think, explore and solve problems",
-    icon: "✳",
+    icon: "âœ³",
     route: null,
   },
   {
     name: "Website Builder",
     description: "Build complete websites",
-    icon: "⌘",
+    icon: "âŒ˜",
     route: "/website-builder",
   },
   {
     name: "Text to Image",
     description: "Create visuals from prompts",
-    icon: "◈",
+    icon: "â—ˆ",
     route: "/image-generator",
   },
   {
     name: "Text to Video",
     description: "Bring ideas into motion",
-    icon: "▶",
+    icon: "â–¶",
     route: "/video-generator",
   },
   {
     name: "Voice Generator",
     description: "Turn words into natural voice",
-    icon: "◖",
+    icon: "â—–",
     route: "/generate-voice",
   },
 ];
@@ -360,48 +360,121 @@ function CodePanel({
   );
 }
 
-/* Displays fenced code blocks without requiring a markdown package. */
-
+/* Displays fenced code blocks and generated images without requiring a markdown package. */
 function MessageContent({ content }: { content: string }) {
-  const chunks = content.split(/```([^\n`]*)\n([\s\S]*?)```/g);
+  const imageRegex =
+    /!\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)/g;
 
-  if (!content.includes("```")) {
+  const rendered: React.ReactNode[] = [];
+  let lastIndex = 0;
+  let imageIndex = 0;
+  let match: RegExpExecArray | null;
+
+  const renderText = (text: string, keyPrefix: string) => {
+    if (!text) return;
+
+    const chunks = text.split(/```([^\n`]*)\n([\s\S]*?)```/g);
+
+    for (let index = 0; index < chunks.length; ) {
+      if (index % 3 === 0) {
+        const plainText = chunks[index];
+
+        if (plainText) {
+          rendered.push(
+            <div
+              className="z-message-text"
+              key={`${keyPrefix}-text-${index}`}
+            >
+              {plainText}
+            </div>
+          );
+        }
+
+        index += 1;
+      } else {
+        const language = chunks[index] || "code";
+        const code = chunks[index + 1] || "";
+
+        rendered.push(
+          <CodePanel
+            key={`${keyPrefix}-code-${index}`}
+            code={code.replace(/\n$/, "")}
+            language={language.trim()}
+          />
+        );
+
+        index += 2;
+      }
+    }
+  };
+
+  while ((match = imageRegex.exec(content)) !== null) {
+    const textBefore = content.slice(lastIndex, match.index);
+
+    renderText(
+      textBefore,
+      `generated-image-${imageIndex}-before`
+    );
+
+    const alt = match[1] || "Generated image";
+    const src = match[2];
+
+    rendered.push(
+      <div
+        key={`generated-image-${imageIndex}`}
+        className="z-generated-image"
+      >
+        <img
+          src={src}
+          alt={alt}
+          loading="lazy"
+          className="z-generated-image-img"
+        />
+      </div>
+    );
+
+    lastIndex = imageRegex.lastIndex;
+    imageIndex += 1;
+  }
+
+  const remaining = content.slice(lastIndex);
+
+  renderText(
+    remaining,
+    `generated-image-${imageIndex}-after`
+  );
+
+  if (rendered.length === 0) {
     return <div className="z-message-text">{content}</div>;
   }
 
-  const rendered: React.ReactNode[] = [];
+  return (
+    <>
+      {rendered}
 
-  for (let index = 0; index < chunks.length; ) {
-    if (index % 3 === 0) {
-      const text = chunks[index];
-      if (text) {
-        rendered.push(
-          <div className="z-message-text" key={`text-${index}`}>
-            {text}
-          </div>
-        );
-        index += 1;
-      } else {
-        index += 1;
-      }
-    } else {
-      const language = chunks[index] || "code";
-      const code = chunks[index + 1] || "";
+      <style jsx>{`
+        .z-generated-image {
+          margin-top: 12px;
+          margin-bottom: 12px;
+          width: 100%;
+          max-width: 720px;
+          overflow: hidden;
+          border-radius: 16px;
+          border: 1px solid rgba(120, 120, 140, 0.18);
+          background: rgba(0, 0, 0, 0.03);
+        }
 
-      rendered.push(
-        <CodePanel
-          key={`code-${index}`}
-          code={code.replace(/\n$/, "")}
-          language={language.trim()}
-        />
-      );
-      index += 2;
-    }
-  }
-
-  return <div className="z-message-content">{rendered}</div>;
+        .z-generated-image-img {
+          display: block;
+          width: 100%;
+          height: auto;
+          max-height: 720px;
+          object-fit: contain;
+        }
+      `}</style>
+    </>
+  );
 }
-
 export default function HomePage() {
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
@@ -1515,22 +1588,22 @@ export default function HomePage() {
 
   const suggestions = [
     {
-      icon: "✎",
+      icon: "âœŽ",
       title: "Write something",
       prompt: "Help me write a professional email",
     },
     {
-      icon: "◎",
+      icon: "â—Ž",
       title: "Learn anything",
       prompt: "Explain a difficult topic simply",
     },
     {
-      icon: "✳",
+      icon: "âœ³",
       title: "Brainstorm ideas",
       prompt: "Give me creative ideas for my project",
     },
     {
-      icon: "⌁",
+      icon: "âŒ",
       title: "Solve a problem",
       prompt: "Help me solve a technical problem",
     },
@@ -2142,7 +2215,7 @@ export default function HomePage() {
                 onClick={() => setAgentOpen((previous) => !previous)}
               >
                 <span className="zuqen-agent-button-icon">
-                  {AGENTS.find((agent) => agent.name === selectedAgent)?.icon || "✳"}
+                  {AGENTS.find((agent) => agent.name === selectedAgent)?.icon || "âœ³"}
                 </span>
                 <span className="zuqen-agent-button-text">
                   <div className="zuqen-agent-button-name">{selectedAgent}</div>
@@ -2188,7 +2261,7 @@ export default function HomePage() {
                 className="zuqen-credit-button"
                 onClick={() => setCreditsOpen((previous) => !previous)}
               >
-                <span className="zuqen-credit-icon">◈</span>
+                <span className="zuqen-credit-icon">â—ˆ</span>
                 <span className="zuqen-credit-count">
                   {chatCredits === null ? "..." : chatCredits.toLocaleString()}
                 </span>
@@ -2322,7 +2395,7 @@ export default function HomePage() {
                           <div className="zuqen-message-block">
                             <div className="zuqen-message-label">
                               <span className="zuqen-message-label-mark">
-                                {message.role === "assistant" ? "✳" : "Y"}
+                                {message.role === "assistant" ? "âœ³" : "Y"}
                               </span>
                               <span>
                                 {message.role === "assistant" ? "ZUQEN AI" : "You"}
@@ -2379,7 +2452,7 @@ export default function HomePage() {
                                           className="zuqen-attachment-chip"
                                           key={file.id}
                                         >
-                                          <span>◇</span>
+                                          <span>â—‡</span>
                                           <span className="zuqen-attachment-chip-name">
                                             {file.name}
                                           </span>
@@ -2470,7 +2543,7 @@ export default function HomePage() {
                   onClick={jumpToLatest}
                   type="button"
                 >
-                  ↓ Jump to latest
+                  â†“ Jump to latest
                 </button>
               )}
 
@@ -2485,7 +2558,7 @@ export default function HomePage() {
                     <div className="zuqen-attachment-list">
                       {attachments.map((file) => (
                         <div className="zuqen-attachment-chip" key={file.id}>
-                          <span>◇</span>
+                          <span>â—‡</span>
                           <span className="zuqen-attachment-chip-name">
                             {file.name}
                           </span>
@@ -2540,7 +2613,7 @@ export default function HomePage() {
                       title={voiceListening ? "Listening" : "Voice input"}
                       aria-label={voiceListening ? "Stop voice input" : "Start voice input"}
                     >
-                      {voiceListening ? "●" : "◖))"}
+                      {voiceListening ? "â—" : "â—–))"}
                     </button>
                     <button
                       className="zuqen-send"
@@ -2555,7 +2628,7 @@ export default function HomePage() {
 
                   <div className="zuqen-composer-footer">
                     <span>Check important information; AI can make mistakes.</span>
-                    <span>Enter to send · Shift + Enter for newline</span>
+                    <span>Enter to send Â· Shift + Enter for newline</span>
                   </div>
                 </div>
               </div>
@@ -2634,10 +2707,10 @@ export default function HomePage() {
                         onClick={() => setSelectedMode(mode)}
                       >
                         {mode === "Create"
-                          ? "✳  Create"
+                          ? "âœ³  Create"
                           : mode === "Research"
-                            ? "⌕  Research"
-                            : "⌘  Build"}
+                            ? "âŒ•  Research"
+                            : "âŒ˜  Build"}
                       </button>
                     ))}
                   </div>
@@ -2670,10 +2743,10 @@ export default function HomePage() {
                       onClick={() => setAgentOpen((previous) => !previous)}
                       title="Choose an agent"
                     >
-                      ✳ &nbsp; {selectedAgent}⌄
+                      âœ³ &nbsp; {selectedAgent}âŒ„
                     </button>
 
-                    <span className="zuqen-search-shortcut">Enter ↵</span>
+                    <span className="zuqen-search-shortcut">Enter â†µ</span>
 
                     <button
                       type="button"
@@ -2684,7 +2757,7 @@ export default function HomePage() {
                       title={voiceListening ? "Listening" : "Voice input"}
                       aria-label="Voice input"
                     >
-                      {voiceListening ? "●" : "◖))"}
+                      {voiceListening ? "â—" : "â—–))"}
                     </button>
 
                     <button
@@ -2702,7 +2775,7 @@ export default function HomePage() {
 
                 <div className="zuqen-agent-strip">
                   <div className="zuqen-strip-title">
-                    EXPLORE YOUR WORKSPACE · 5 AI AGENTS
+                    EXPLORE YOUR WORKSPACE Â· 5 AI AGENTS
                   </div>
 
                   <div className="zuqen-agent-cards">
@@ -2851,7 +2924,7 @@ export default function HomePage() {
                       onClick={() => navigateAgent(AGENTS[0])}
                     >
                       <span className="zuqen-chat-card-art">
-                        <span>✳</span>
+                        <span>âœ³</span>
                         <span className="zuqen-chat-orbit" />
                         <span className="zuqen-chat-orbit orbit-two" />
                       </span>
@@ -2878,7 +2951,7 @@ export default function HomePage() {
                       }}
                     >
                       <span className="zuqen-home-tool-icon" aria-hidden="true">
-                        ⤨
+                        â¤¨
                       </span>
                       <span className="zuqen-home-tool-copy">
                         <span className="zuqen-home-tool-title">
@@ -2888,10 +2961,10 @@ export default function HomePage() {
                           Plan tasks, use dedicated tools and automate workflows.
                         </span>
                         <span className="zuqen-home-tool-link">
-                          OPEN AUTOMATION ↗
+                          OPEN AUTOMATION â†—
                         </span>
                       </span>
-                      <span aria-hidden="true">↗</span>
+                      <span aria-hidden="true">â†—</span>
                     </button>
 
                     <button
@@ -2902,7 +2975,7 @@ export default function HomePage() {
                       }}
                     >
                       <span className="zuqen-home-tool-icon" aria-hidden="true">
-                        ▣
+                        â–£
                       </span>
                       <span className="zuqen-home-tool-copy">
                         <span className="zuqen-home-tool-title">
@@ -2912,10 +2985,10 @@ export default function HomePage() {
                           Discover digital templates or list your own for sale.
                         </span>
                         <span className="zuqen-home-tool-link">
-                          EXPLORE MARKETPLACE ↗
+                          EXPLORE MARKETPLACE â†—
                         </span>
                       </span>
-                      <span aria-hidden="true">↗</span>
+                      <span aria-hidden="true">â†—</span>
                     </button>
                   </div>
                 </div>
