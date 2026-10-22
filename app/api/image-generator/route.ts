@@ -176,7 +176,7 @@ const creditRow = Array.isArray(preparedCredits)
   ? preparedCredits[0]
   : preparedCredits;
 
-const currentBalance = Number(
+ = Number(
   creditRow?.balance ?? 0
 );
 
@@ -184,7 +184,7 @@ const currentBalance = Number(
       console.error(
         "Image credit balance lookup failed:",
         balanceError.message
-      );
+      const currentBalance);
 
       return fail(
         "Could not load your Image Generator credits.",
