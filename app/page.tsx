@@ -2350,7 +2350,19 @@ export default function HomePage() {
               <span className="zuqen-flappy-bird">●</span>
               <span className="zuqen-flappy-label">Play Game</span>
             </button>
-
+<button
+  type="button"
+  className="zuqen-flappy-button"
+  onClick={() => {
+    window.location.href = "/bulk-messenger";
+  }}
+  title="Send Bulk to Eligible Contacts"
+>
+  <span className="zuqen-flappy-bird">📤</span>
+  <span className="zuqen-flappy-label">
+    Send Bulk to Eligible Contacts
+  </span>
+</button>
             <div className="zuqen-credit-wrap">
               <button
                 className="zuqen-credit-button"
