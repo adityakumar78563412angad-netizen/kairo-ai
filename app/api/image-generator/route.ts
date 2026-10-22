@@ -1,4 +1,3 @@
-
 import { NextResponse } from "next/server";
 import { createServerSupabaseClient } from "@/lib/supabase-server";
 
@@ -70,6 +69,7 @@ async function refundReservation(
 export async function POST(request: Request) {
   let supabase: any = null;
   let reservationId: string | null = null;
+
   const requestId = crypto.randomUUID();
 
   try {
@@ -148,43 +148,26 @@ export async function POST(request: Request) {
       );
     }
 
-   const {
-  data: preparedCredits,
-  error: balanceError,
-} = await supabase.rpc(
-  "prepare_image_generator_credits",
-  {
-    p_user_id: user.id,
-    p_default_credits: IMAGE_CREDIT_AMOUNT,
-  }
-);
+    // -------------------------------------------------------
+    // Prepare / reset Image Generator credits
+    // -------------------------------------------------------
 
-if (balanceError) {
-  console.error(
-    "Image credit preparation failed:",
-    balanceError.message
-  );
-
-  return fail(
-    "Could not load your Image Generator credits.",
-    500,
-    { code: "CREDIT_BALANCE_ERROR" }
-  );
-}
-
-const creditRow = Array.isArray(preparedCredits)
-  ? preparedCredits[0]
-  : preparedCredits;
-
-const currentBalance = Number(
-  creditRow?.balance ?? 0
-);
+    const {
+      data: preparedCredits,
+      error: balanceError,
+    } = await supabase.rpc(
+      "prepare_image_generator_credits",
+      {
+        p_user_id: user.id,
+        p_default_credits: IMAGE_CREDIT_AMOUNT,
+      }
+    );
 
     if (balanceError) {
       console.error(
-        "Image credit balance lookup failed:",
+        "Image credit preparation failed:",
         balanceError.message
-      const currentBalance);
+      );
 
       return fail(
         "Could not load your Image Generator credits.",
@@ -193,7 +176,17 @@ const currentBalance = Number(
       );
     }
 
-    
+    const creditRow = Array.isArray(preparedCredits)
+      ? preparedCredits[0]
+      : preparedCredits;
+
+    const currentBalance = Number(
+      creditRow?.balance ?? 0
+    );
+
+    // -------------------------------------------------------
+    // Check available Image Credits
+    // -------------------------------------------------------
 
     if (currentBalance < IMAGE_CREDIT_COST) {
       return fail(
@@ -202,26 +195,35 @@ const currentBalance = Number(
         {
           code: "INSUFFICIENT_CREDITS",
           creditsRemaining: currentBalance,
+          resetAt:
+            creditRow?.credit_reset_at ?? null,
         }
       );
     }
 
+    // -------------------------------------------------------
+    // Reserve one Image Credit
+    // -------------------------------------------------------
+
     const {
       data: reservation,
       error: reservationError,
-    } = await supabase.rpc("reserve_feature_credits", {
-      p_user_id: user.id,
-      p_feature_key: FEATURE_KEY,
-      p_amount: IMAGE_CREDIT_COST,
-      p_provider_request_id: requestId,
-      p_reference_id: requestId,
-      p_metadata: {
-        provider: "cloudflare-workers-ai",
-        model: CLOUDFLARE_MODEL,
-        prompt_length: prompt.length,
-        credits_reserved: IMAGE_CREDIT_COST,
-      },
-    });
+    } = await supabase.rpc(
+      "reserve_feature_credits",
+      {
+        p_user_id: user.id,
+        p_feature_key: FEATURE_KEY,
+        p_amount: IMAGE_CREDIT_COST,
+        p_provider_request_id: requestId,
+        p_reference_id: requestId,
+        p_metadata: {
+          provider: "cloudflare-workers-ai",
+          model: CLOUDFLARE_MODEL,
+          prompt_length: prompt.length,
+          credits_reserved: IMAGE_CREDIT_COST,
+        },
+      }
+    );
 
     if (reservationError) {
       console.error(
@@ -252,7 +254,13 @@ const currentBalance = Number(
       );
     }
 
-    reservationId = String(reservation.reservationId);
+    reservationId = String(
+      reservation.reservationId
+    );
+
+    // -------------------------------------------------------
+    // Cloudflare Workers AI
+    // -------------------------------------------------------
 
     const modelPath = CLOUDFLARE_MODEL
       .split("/")
@@ -302,6 +310,10 @@ const currentBalance = Number(
     const providerPayload: unknown =
       await providerResponse.json().catch(() => null);
 
+    // -------------------------------------------------------
+    // Cloudflare error handling
+    // -------------------------------------------------------
+
     if (
       !providerResponse.ok ||
       !isRecord(providerPayload) ||
@@ -312,15 +324,19 @@ const currentBalance = Number(
         isRecord(providerPayload) &&
         Array.isArray(providerPayload.errors) &&
         isRecord(providerPayload.errors[0]) &&
-        typeof providerPayload.errors[0].message === "string"
+        typeof providerPayload.errors[0].message ===
+          "string"
           ? providerPayload.errors[0].message
           : `Cloudflare returned HTTP ${providerResponse.status}.`;
 
-      console.error("Cloudflare Workers AI image error:", {
-        status: providerResponse.status,
-        model: CLOUDFLARE_MODEL,
-        message: providerMessage,
-      });
+      console.error(
+        "Cloudflare Workers AI image error:",
+        {
+          status: providerResponse.status,
+          model: CLOUDFLARE_MODEL,
+          message: providerMessage,
+        }
+      );
 
       await refundReservation(
         supabase,
@@ -345,6 +361,10 @@ const currentBalance = Number(
         }
       );
     }
+
+    // -------------------------------------------------------
+    // Get generated image
+    // -------------------------------------------------------
 
     const result = providerPayload.result;
 
@@ -376,11 +396,14 @@ const currentBalance = Number(
       );
     }
 
-    const imageDataUrl = base64Image.startsWith(
-      "data:image/"
-    )
-      ? base64Image
-      : `data:image/png;base64,${base64Image}`;
+    const imageDataUrl =
+      base64Image.startsWith("data:image/")
+        ? base64Image
+        : `data:image/png;base64,${base64Image}`;
+
+    // -------------------------------------------------------
+    // Settle Image Credit
+    // -------------------------------------------------------
 
     const {
       data: settlement,
@@ -421,55 +444,71 @@ const currentBalance = Number(
 
     const creditsRemaining = Number(
       settlement?.newBalance ??
-        Math.max(0, currentBalance - IMAGE_CREDIT_COST)
+        Math.max(
+          0,
+          currentBalance - IMAGE_CREDIT_COST
+        )
     );
-let resetAt: string | null =
-  creditRow?.credit_reset_at ?? null;
 
-if (creditsRemaining <= 0) {
-  const {
-    data: resetData,
-    error: resetError,
-  } = await supabase.rpc(
-    "schedule_image_credit_reset",
-    {
-      p_user_id: user.id,
-      p_reset_amount: IMAGE_CREDIT_AMOUNT,
+    // -------------------------------------------------------
+    // Start 24-hour reset timer when credits reach zero
+    // -------------------------------------------------------
+
+    let resetAt: string | null =
+      creditRow?.credit_reset_at ?? null;
+
+    if (creditsRemaining <= 0) {
+      const {
+        data: resetData,
+        error: resetError,
+      } = await supabase.rpc(
+        "schedule_image_credit_reset",
+        {
+          p_user_id: user.id,
+          p_reset_amount: IMAGE_CREDIT_AMOUNT,
+        }
+      );
+
+      if (resetError) {
+        console.error(
+          "Image credit reset scheduling failed:",
+          resetError.message
+        );
+      } else {
+        const resetRow = Array.isArray(resetData)
+          ? resetData[0]
+          : resetData;
+
+        resetAt =
+          resetRow?.credit_reset_at ?? null;
+      }
     }
-  );
 
-  if (resetError) {
-    console.error(
-      "Image credit reset scheduling failed:",
-      resetError.message
-    );
-  } else {
-    const resetRow = Array.isArray(resetData)
-      ? resetData[0]
-      : resetData;
+    // -------------------------------------------------------
+    // Success
+    // -------------------------------------------------------
 
-    resetAt =
-      resetRow?.credit_reset_at ?? null;
-  }
-}
     return NextResponse.json({
       success: true,
       image: imageDataUrl,
       provider: "cloudflare-workers-ai",
       feature: FEATURE_KEY,
       model: CLOUDFLARE_MODEL,
+
       usage: {
         tracked: true,
         imagesGenerated: 1,
       },
+
       billing: {
         creditsConsumed: IMAGE_CREDIT_COST,
         creditsRemaining,
-         resetAt,
+        resetAt,
       },
+
       creditsConsumed: IMAGE_CREDIT_COST,
       creditsRemaining,
-       resetAt,
+      resetAt,
     });
   } catch (error) {
     console.error(
