@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type Platform = {
   id: string;
@@ -13,6 +13,18 @@ type Contact = {
   id: string;
   name: string;
   address: string;
+};
+
+type ConnectionResponse = {
+  id: string;
+  provider: string;
+  provider_account_id?: string | null;
+  account_name?: string | null;
+  account_email?: string | null;
+  status: string;
+  scopes?: string[] | null;
+  created_at?: string;
+  updated_at?: string;
 };
 
 const PLATFORMS: Platform[] = [
@@ -71,6 +83,8 @@ export default function BulkMessengerPage() {
   const [selectedApps, setSelectedApps] = useState<string[]>([]);
   const [activeApp, setActiveApp] = useState<string | null>(null);
 
+  const [connectionsLoading, setConnectionsLoading] = useState(true);
+
   const [contactsByApp] = useState<Record<string, Contact[]>>({});
   const [selectedContactsByApp, setSelectedContactsByApp] = useState<
     Record<string, string[]>
@@ -88,6 +102,90 @@ export default function BulkMessengerPage() {
   );
 
   const [notice, setNotice] = useState<string | null>(null);
+
+  /*
+   * Provider IDs used by the backend are not always identical
+   * to the IDs used by the frontend.
+   *
+   * Google OAuth represents the Email/Gmail connection,
+   * so google -> email.
+   */
+  const providerToPlatform: Record<string, string> = {
+    google: "email",
+  };
+
+  /*
+   * Load real connections from Supabase through the server API.
+   *
+   * No connection is marked manually.
+   * No fake/demo connection is created here.
+   */
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadConnections() {
+      try {
+        setConnectionsLoading(true);
+
+        const response = await fetch("/api/connections", {
+          method: "GET",
+          cache: "no-store",
+        });
+
+        if (!response.ok) {
+          if (response.status === 401) {
+            if (!cancelled) {
+              setConnectedApps([]);
+            }
+
+            return;
+          }
+
+          throw new Error("Failed to load connected accounts.");
+        }
+
+        const result: {
+          connections?: ConnectionResponse[];
+        } = await response.json();
+
+        if (cancelled) {
+          return;
+        }
+
+        const realConnectedApps = Array.isArray(result.connections)
+          ? result.connections
+              .filter(
+                (connection) => connection.status === "connected"
+              )
+              .map((connection) => {
+                return providerToPlatform[connection.provider] ?? null;
+              })
+              .filter(
+                (platformId: string | null): platformId is string =>
+                  platformId !== null
+              )
+          : [];
+
+        setConnectedApps([...new Set(realConnectedApps)]);
+      } catch (error) {
+        console.error("Unable to load connected apps:", error);
+
+        if (!cancelled) {
+          setConnectedApps([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setConnectionsLoading(false);
+        }
+      }
+    }
+
+    loadConnections();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const selectedPlatforms = useMemo(
     () =>
@@ -129,7 +227,9 @@ export default function BulkMessengerPage() {
 
   function toggleSelectedApp(platformId: string) {
     if (!connectedApps.includes(platformId)) {
-      const platform = PLATFORMS.find((item) => item.id === platformId);
+      const platform = PLATFORMS.find(
+        (item) => item.id === platformId
+      );
 
       if (platform) {
         setConnectModalApp(platform);
@@ -158,20 +258,33 @@ export default function BulkMessengerPage() {
       return [...current, platformId];
     });
   }
-function handleConnect(platform: Platform) {
-  setConnectModalApp(null);
 
-  if (platform.id === "email") {
-    window.location.href = "/api/connections/google/connect";
-    return;
+  function handleConnect(platform: Platform) {
+    setConnectModalApp(null);
+
+    /*
+     * Email currently uses the real Google OAuth flow.
+     */
+    if (platform.id === "email") {
+      window.location.href = "/api/connections/google/connect";
+      return;
+    }
+
+    /*
+     * Other providers will use their official authorization
+     * flows when their production integrations are added.
+     *
+     * No fake connection is created.
+     */
+    showNotice(
+      `${platform.name} connection will be completed through its official authorization flow.`
+    );
   }
 
-  showNotice(
-    `${platform.name} connection will be completed through its official authorization flow.`
-  );
-}
-
-  function handleContactToggle(appId: string, contactId: string) {
+  function handleContactToggle(
+    appId: string,
+    contactId: string
+  ) {
     if (!connectedApps.includes(appId)) {
       showNotice("Connect this app first.");
       return;
@@ -209,6 +322,7 @@ function handleConnect(platform: Platform) {
       showNotice(
         `First connect ${platform?.name ?? "this app"} before sending.`
       );
+
       return;
     }
 
@@ -222,8 +336,17 @@ function handleConnect(platform: Platform) {
       return;
     }
 
+    if (scheduleEnabled) {
+      if (!scheduleDate || !scheduleTime) {
+        showNotice("Choose a schedule date and time first.");
+        return;
+      }
+    }
+
     /*
-     * Real sending will be connected to the backend/provider APIs later.
+     * Real provider sending will be connected through
+     * the production backend/provider adapters.
+     *
      * No fake send is performed here.
      */
     showNotice(
@@ -790,6 +913,7 @@ function handleConnect(platform: Platform) {
           <header className="bulk-header">
             <div>
               <h1 className="bulk-title">Bulk Messenger</h1>
+
               <p className="bulk-subtitle">
                 Connect your communication apps, select eligible contacts,
                 compose one message, and send or schedule it.
@@ -797,16 +921,25 @@ function handleConnect(platform: Platform) {
             </div>
 
             <div className="connection-count">
-              <strong>{connectedPlatforms.length}</strong> connected
-              {" · "}
-              <strong>{selectedApps.length}</strong> selected
+              {connectionsLoading ? (
+                <strong>Checking connections...</strong>
+              ) : (
+                <>
+                  <strong>{connectedPlatforms.length}</strong> connected
+                  {" · "}
+                  <strong>{selectedApps.length}</strong> selected
+                </>
+              )}
             </div>
           </header>
 
           <section className="apps-panel">
             <div className="section-head">
               <div>
-                <h2 className="section-title">Connect & Select Apps</h2>
+                <h2 className="section-title">
+                  Connect & Select Apps
+                </h2>
+
                 <p className="section-description">
                   Only connected apps can be selected for messaging.
                 </p>
@@ -815,20 +948,29 @@ function handleConnect(platform: Platform) {
 
             <div className="apps-grid">
               {PLATFORMS.map((platform) => {
-                const isConnected = connectedApps.includes(platform.id);
-                const isSelected = selectedApps.includes(platform.id);
+                const isConnected = connectedApps.includes(
+                  platform.id
+                );
+
+                const isSelected = selectedApps.includes(
+                  platform.id
+                );
 
                 return (
                   <button
                     key={platform.id}
                     type="button"
                     className={`app-card ${
-                      isConnected ? "connected" : "not-connected"
+                      isConnected
+                        ? "connected"
+                        : "not-connected"
                     } ${isSelected ? "selected" : ""}`}
                     onClick={() => handleAppClick(platform)}
                   >
                     <div className="app-top">
-                      <span className="app-icon">{platform.icon}</span>
+                      <span className="app-icon">
+                        {platform.icon}
+                      </span>
 
                       <span
                         className={`status-pill ${
@@ -837,11 +979,15 @@ function handleConnect(platform: Platform) {
                             : "status-not-connected"
                         }`}
                       >
-                        {isConnected ? "● Connected" : "○ Not connected"}
+                        {isConnected
+                          ? "● Connected"
+                          : "○ Not connected"}
                       </span>
                     </div>
 
-                    <div className="app-name">{platform.name}</div>
+                    <div className="app-name">
+                      {platform.name}
+                    </div>
 
                     <div className="app-description">
                       {platform.description}
@@ -863,9 +1009,13 @@ function handleConnect(platform: Platform) {
           <div className="main-grid">
             <section className="contacts-panel">
               <div className="contacts-head">
-                <h2 className="section-title">Eligible Contacts</h2>
+                <h2 className="section-title">
+                  Eligible Contacts
+                </h2>
+
                 <p className="section-description">
-                  Contacts are separated by app. No cross-app matching is used.
+                  Contacts are separated by app. No cross-app matching
+                  is used.
                 </p>
               </div>
 
@@ -876,9 +1026,13 @@ function handleConnect(platform: Platform) {
                       key={platform.id}
                       type="button"
                       className={`app-tab ${
-                        activeApp === platform.id ? "active" : ""
+                        activeApp === platform.id
+                          ? "active"
+                          : ""
                       }`}
-                      onClick={() => setActiveApp(platform.id)}
+                      onClick={() =>
+                        setActiveApp(platform.id)
+                      }
                     >
                       <span>{platform.icon}</span>
                       <span>{platform.name}</span>
@@ -894,7 +1048,8 @@ function handleConnect(platform: Platform) {
                       padding: "9px 0",
                     }}
                   >
-                    Select a connected app above to view its contacts.
+                    Select a connected app above to view its
+                    contacts.
                   </span>
                 </div>
               )}
@@ -902,9 +1057,12 @@ function handleConnect(platform: Platform) {
               <div className="contact-area">
                 {activeApp ? (
                   (() => {
-                    const contacts = contactsByApp[activeApp] ?? [];
+                    const contacts =
+                      contactsByApp[activeApp] ?? [];
+
                     const activePlatform = PLATFORMS.find(
-                      (platform) => platform.id === activeApp
+                      (platform) =>
+                        platform.id === activeApp
                     );
 
                     if (contacts.length === 0) {
@@ -920,10 +1078,11 @@ function handleConnect(platform: Platform) {
                             </div>
 
                             <p className="empty-text">
-                              ZUQEN has no contacts to display for this app
-                              yet. Once the official account connection and
-                              contact sync are completed, eligible contacts
-                              will appear here.
+                              ZUQEN has no contacts to display for
+                              this app yet. Once the official account
+                              connection and contact sync are
+                              completed, eligible contacts will
+                              appear here.
                             </p>
                           </div>
                         </div>
@@ -934,9 +1093,9 @@ function handleConnect(platform: Platform) {
                       <div className="contacts-list">
                         {contacts.map((contact) => {
                           const selected =
-                            selectedContactsByApp[activeApp]?.includes(
-                              contact.id
-                            ) ?? false;
+                            selectedContactsByApp[
+                              activeApp
+                            ]?.includes(contact.id) ?? false;
 
                           return (
                             <label
@@ -972,7 +1131,9 @@ function handleConnect(platform: Platform) {
                 ) : (
                   <div className="empty-contacts">
                     <div>
-                      <div className="empty-icon">🔗</div>
+                      <div className="empty-icon">
+                        🔗
+                      </div>
 
                       <div className="empty-title">
                         Connect and select an app first
@@ -992,7 +1153,10 @@ function handleConnect(platform: Platform) {
               <section className="composer-panel">
                 <div className="section-head">
                   <div>
-                    <h2 className="section-title">Compose Message</h2>
+                    <h2 className="section-title">
+                      Compose Message
+                    </h2>
+
                     <p className="section-description">
                       Your message will be prepared for the selected
                       connected apps.
@@ -1003,21 +1167,27 @@ function handleConnect(platform: Platform) {
                 <textarea
                   className="textarea"
                   value={message}
-                  onChange={(event) => setMessage(event.target.value)}
+                  onChange={(event) =>
+                    setMessage(event.target.value)
+                  }
                   placeholder="Write your message..."
                 />
 
                 <div className="composer-actions">
                   <label className="attachment-button">
-                    📎 {attachmentName || "Attach file"}
+                    📎{" "}
+                    {attachmentName || "Attach file"}
 
                     <input
                       className="attachment-input"
                       type="file"
                       onChange={(event) => {
-                        const file = event.target.files?.[0];
+                        const file =
+                          event.target.files?.[0];
 
-                        setAttachmentName(file?.name ?? "");
+                        setAttachmentName(
+                          file?.name ?? ""
+                        );
                       }}
                     />
                   </label>
@@ -1038,9 +1208,12 @@ function handleConnect(platform: Platform) {
                       type="checkbox"
                       checked={scheduleEnabled}
                       onChange={(event) =>
-                        setScheduleEnabled(event.target.checked)
+                        setScheduleEnabled(
+                          event.target.checked
+                        )
                       }
                     />
+
                     Schedule instead of sending now
                   </label>
 
@@ -1050,7 +1223,9 @@ function handleConnect(platform: Platform) {
                         type="date"
                         value={scheduleDate}
                         onChange={(event) =>
-                          setScheduleDate(event.target.value)
+                          setScheduleDate(
+                            event.target.value
+                          )
                         }
                       />
 
@@ -1058,7 +1233,9 @@ function handleConnect(platform: Platform) {
                         type="time"
                         value={scheduleTime}
                         onChange={(event) =>
-                          setScheduleTime(event.target.value)
+                          setScheduleTime(
+                            event.target.value
+                          )
                         }
                       />
                     </div>
@@ -1069,27 +1246,35 @@ function handleConnect(platform: Platform) {
               <section className="preview-panel">
                 <div className="section-head">
                   <div>
-                    <h2 className="section-title">Preview</h2>
+                    <h2 className="section-title">
+                      Preview
+                    </h2>
+
                     <p className="section-description">
-                      Review the message before the real provider sending
-                      system is connected.
+                      Review the message before the real provider
+                      sending system is connected.
                     </p>
                   </div>
                 </div>
 
                 <div className="preview-message">
-                  {message.trim() || "Your message preview will appear here."}
+                  {message.trim() ||
+                    "Your message preview will appear here."}
                 </div>
 
                 <div className="send-meta">
                   <span>
                     {selectedApps.length} app
-                    {selectedApps.length === 1 ? "" : "s"}
+                    {selectedApps.length === 1
+                      ? ""
+                      : "s"}
                   </span>
 
                   <span>
                     {totalSelectedContacts} contact
-                    {totalSelectedContacts === 1 ? "" : "s"}
+                    {totalSelectedContacts === 1
+                      ? ""
+                      : "s"}
                   </span>
                 </div>
 
@@ -1098,7 +1283,9 @@ function handleConnect(platform: Platform) {
                   className="send-button"
                   onClick={handleSend}
                 >
-                  {scheduleEnabled ? "Schedule Message" : "Send Message"}
+                  {scheduleEnabled
+                    ? "Schedule Message"
+                    : "Send Message"}
                 </button>
               </section>
             </div>
@@ -1110,30 +1297,36 @@ function handleConnect(platform: Platform) {
         <div
           className="modal-backdrop"
           onMouseDown={(event) => {
-            if (event.target === event.currentTarget) {
+            if (
+              event.target === event.currentTarget
+            ) {
               setConnectModalApp(null);
             }
           }}
         >
           <div className="connect-modal">
-            <div className="modal-icon">{connectModalApp.icon}</div>
+            <div className="modal-icon">
+              {connectModalApp.icon}
+            </div>
 
             <h2 className="modal-title">
               First connect {connectModalApp.name}
             </h2>
 
             <p className="modal-text">
-              You selected {connectModalApp.name}, but this account is not
-              connected to ZUQEN yet. Connect it through the official
-              authorization system before selecting contacts or sending
-              messages.
+              You selected {connectModalApp.name}, but this
+              account is not connected to ZUQEN yet. Connect it
+              through the official authorization system before
+              selecting contacts or sending messages.
             </p>
 
             <div className="modal-actions">
               <button
                 type="button"
                 className="modal-cancel"
-                onClick={() => setConnectModalApp(null)}
+                onClick={() =>
+                  setConnectModalApp(null)
+                }
               >
                 Cancel
               </button>
@@ -1141,7 +1334,9 @@ function handleConnect(platform: Platform) {
               <button
                 type="button"
                 className="modal-connect"
-                onClick={() => handleConnect(connectModalApp)}
+                onClick={() =>
+                  handleConnect(connectModalApp)
+                }
               >
                 Connect {connectModalApp.name}
               </button>
@@ -1150,7 +1345,11 @@ function handleConnect(platform: Platform) {
         </div>
       )}
 
-      {notice && <div className="notice">{notice}</div>}
+      {notice && (
+        <div className="notice">
+          {notice}
+        </div>
+      )}
     </main>
   );
 }
