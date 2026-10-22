@@ -193,9 +193,7 @@ const currentBalance = Number(
       );
     }
 
-    const currentBalance = Number(
-      balanceRow?.balance ?? 0
-    );
+    
 
     if (currentBalance < IMAGE_CREDIT_COST) {
       return fail(
