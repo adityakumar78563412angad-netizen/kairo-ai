@@ -176,7 +176,7 @@ const creditRow = Array.isArray(preparedCredits)
   ? preparedCredits[0]
   : preparedCredits;
 
- = Number(
+const currentBalance = Number(
   creditRow?.balance ?? 0
 );
 
