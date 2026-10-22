@@ -8,6 +8,7 @@ export const maxDuration = 120;
 
 const FEATURE_KEY = "image_generator";
 const IMAGE_CREDIT_COST = 1;
+const IMAGE_CREDIT_AMOUNT = 10;
 
 const CLOUDFLARE_MODEL =
   process.env.CLOUDFLARE_IMAGE_MODEL ||
@@ -147,13 +148,37 @@ export async function POST(request: Request) {
       );
     }
 
-    const { data: balanceRow, error: balanceError } =
-      await supabase
-        .from("feature_credit_balances")
-        .select("balance,total_granted,total_used")
-        .eq("user_id", user.id)
-        .eq("feature_key", FEATURE_KEY)
-        .maybeSingle();
+   const {
+  data: preparedCredits,
+  error: balanceError,
+} = await supabase.rpc(
+  "prepare_image_generator_credits",
+  {
+    p_user_id: user.id,
+    p_default_credits: IMAGE_CREDIT_AMOUNT,
+  }
+);
+
+if (balanceError) {
+  console.error(
+    "Image credit preparation failed:",
+    balanceError.message
+  );
+
+  return fail(
+    "Could not load your Image Generator credits.",
+    500,
+    { code: "CREDIT_BALANCE_ERROR" }
+  );
+}
+
+const creditRow = Array.isArray(preparedCredits)
+  ? preparedCredits[0]
+  : preparedCredits;
+
+const currentBalance = Number(
+  creditRow?.balance ?? 0
+);
 
     if (balanceError) {
       console.error(
@@ -400,7 +425,35 @@ export async function POST(request: Request) {
       settlement?.newBalance ??
         Math.max(0, currentBalance - IMAGE_CREDIT_COST)
     );
+let resetAt: string | null =
+  creditRow?.credit_reset_at ?? null;
 
+if (creditsRemaining <= 0) {
+  const {
+    data: resetData,
+    error: resetError,
+  } = await supabase.rpc(
+    "schedule_image_credit_reset",
+    {
+      p_user_id: user.id,
+      p_reset_amount: IMAGE_CREDIT_AMOUNT,
+    }
+  );
+
+  if (resetError) {
+    console.error(
+      "Image credit reset scheduling failed:",
+      resetError.message
+    );
+  } else {
+    const resetRow = Array.isArray(resetData)
+      ? resetData[0]
+      : resetData;
+
+    resetAt =
+      resetRow?.credit_reset_at ?? null;
+  }
+}
     return NextResponse.json({
       success: true,
       image: imageDataUrl,
@@ -414,9 +467,11 @@ export async function POST(request: Request) {
       billing: {
         creditsConsumed: IMAGE_CREDIT_COST,
         creditsRemaining,
+         resetAt,
       },
       creditsConsumed: IMAGE_CREDIT_COST,
       creditsRemaining,
+       resetAt,
     });
   } catch (error) {
     console.error(
