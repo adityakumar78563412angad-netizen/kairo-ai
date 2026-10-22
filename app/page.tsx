@@ -87,12 +87,6 @@ const AGENTS: Agent[] = [
     route: "/website-builder",
   },
   {
-    name: "Text to Image",
-    description: "Create visuals from prompts",
-    icon: "◈",
-    route: "/image-generator",
-  },
-  {
     name: "Text to Video",
     description: "Bring ideas into motion",
     icon: "▶",
@@ -429,32 +423,11 @@ function MessageContent({ content }: { content: string }) {
     const src = match[2];
 
     parts.push(
-      <div
+      <GeneratedImage
         key={`generated-image-${imageIndex}`}
-        style={{
-          marginTop: 12,
-          marginBottom: 12,
-          width: "100%",
-          maxWidth: 720,
-          overflow: "hidden",
-          borderRadius: 16,
-          border: "1px solid rgba(120, 120, 140, 0.18)",
-          background: "rgba(0, 0, 0, 0.03)",
-        }}
-      >
-        <img
-          src={src}
-          alt={alt}
-          loading="lazy"
-          style={{
-            display: "block",
-            width: "100%",
-            height: "auto",
-            maxHeight: 720,
-            objectFit: "contain",
-          }}
-        />
-      </div>
+        src={src}
+        alt={alt}
+      />
     );
 
     lastIndex = imageRegex.lastIndex;
@@ -486,6 +459,310 @@ function MessageContent({ content }: { content: string }) {
    
 
 
+
+function GeneratedImage({
+  src,
+  alt,
+}: {
+  src: string;
+  alt: string;
+}) {
+  const [open, setOpen] = useState(false);
+
+  const downloadImage = () => {
+    const link = document.createElement("a");
+    link.href = src;
+    link.download = `zuqen-generated-${Date.now()}.png`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  };
+
+  return (
+    <>
+      <div
+        className="zuqen-generated-image"
+        onClick={() => setOpen(true)}
+        title="Open image"
+      >
+        <img src={src} alt={alt} loading="lazy" />
+      </div>
+
+      {open && (
+        <div
+          className="zuqen-image-viewer"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Generated image viewer"
+          onClick={() => setOpen(false)}
+        >
+          <button
+            type="button"
+            className="zuqen-image-close"
+            onClick={(event) => {
+              event.stopPropagation();
+              setOpen(false);
+            }}
+            aria-label="Close image"
+          >
+            ×
+          </button>
+
+          <img
+            src={src}
+            alt={alt}
+            className="zuqen-image-viewer-image"
+            onClick={(event) => event.stopPropagation()}
+          />
+
+          <button
+            type="button"
+            className="zuqen-image-download"
+            onClick={(event) => {
+              event.stopPropagation();
+              downloadImage();
+            }}
+          >
+            ↓ Download
+          </button>
+        </div>
+      )}
+    </>
+  );
+}
+
+function FlappyBirdGame({
+  initialScore,
+  onClose,
+  onScoreChange,
+}: {
+  initialScore: number;
+  onClose: () => void;
+  onScoreChange: (score: number) => void;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const scoreRef = useRef(initialScore);
+  const [score, setScore] = useState(initialScore);
+  const [gameOver, setGameOver] = useState(false);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const width = 520;
+    const height = 620;
+    const ground = 555;
+    canvas.width = width;
+    canvas.height = height;
+
+    let raf = 0;
+    let running = true;
+    let gameFinished = false;
+    let last = performance.now();
+    let birdY = 275;
+    let velocity = 0;
+    let spawnTimer = 0;
+    let pipes: Array<{ x: number; gapY: number; passed: boolean }> = [];
+
+    const flap = () => {
+      if (!running || gameFinished) return;
+      velocity = -430;
+    };
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.code === "Space" || event.code === "ArrowUp") {
+        event.preventDefault();
+        flap();
+      }
+      if (event.code === "Escape") onClose();
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    canvas.addEventListener("pointerdown", flap);
+
+    const resetGame = () => {
+      running = true;
+      setGameOver(false);
+      birdY = 275;
+      velocity = 0;
+      spawnTimer = 0;
+      pipes = [];
+      last = performance.now();
+    };
+
+    const draw = (now: number) => {
+      const dt = Math.min((now - last) / 1000, 0.035);
+      last = now;
+
+      ctx.clearRect(0, 0, width, height);
+
+      const sky = ctx.createLinearGradient(0, 0, 0, height);
+      sky.addColorStop(0, "#d9e9f4");
+      sky.addColorStop(0.72, "#f6ead6");
+      sky.addColorStop(0.72, "#d8bd8e");
+      sky.addColorStop(1, "#b98d5f");
+      ctx.fillStyle = sky;
+      ctx.fillRect(0, 0, width, height);
+
+      ctx.fillStyle = "rgba(255,255,255,.55)";
+      ctx.beginPath();
+      ctx.arc(95, 105, 32, 0, Math.PI * 2);
+      ctx.arc(125, 105, 24, 0, Math.PI * 2);
+      ctx.arc(150, 105, 30, 0, Math.PI * 2);
+      ctx.fill();
+
+      if (running && !gameFinished) {
+        velocity += 1050 * dt;
+        birdY += velocity * dt;
+
+        spawnTimer += dt;
+        if (spawnTimer >= 1.55) {
+          spawnTimer = 0;
+          const gapY = 150 + Math.random() * 250;
+          pipes.push({ x: width + 35, gapY, passed: false });
+        }
+
+        for (const pipe of pipes) {
+          pipe.x -= 205 * dt;
+
+          if (!pipe.passed && pipe.x + 58 < 86) {
+            pipe.passed = true;
+            scoreRef.current += 1;
+            setScore(scoreRef.current);
+            onScoreChange(scoreRef.current);
+          }
+        }
+
+        pipes = pipes.filter((pipe) => pipe.x > -90);
+
+        const birdLeft = 72;
+        const birdRight = 100;
+        const birdTop = birdY - 15;
+        const birdBottom = birdY + 15;
+
+        const hitPipe = pipes.some((pipe) => {
+          const pipeLeft = pipe.x;
+          const pipeRight = pipe.x + 58;
+          const gapTop = pipe.gapY - 62;
+          const gapBottom = pipe.gapY + 62;
+          const horizontal = birdRight > pipeLeft && birdLeft < pipeRight;
+          const vertical = birdTop < gapTop || birdBottom > gapBottom;
+          return horizontal && vertical;
+        });
+
+        if (birdTop < 0 || birdBottom > ground || hitPipe) {
+          running = false;
+          gameFinished = true;
+          setGameOver(true);
+        }
+      }
+
+      for (const pipe of pipes) {
+        const gapTop = pipe.gapY - 62;
+        const gapBottom = pipe.gapY + 62;
+        ctx.fillStyle = "#587b57";
+        ctx.fillRect(pipe.x, 0, 58, gapTop);
+        ctx.fillRect(pipe.x, gapBottom, 58, ground - gapBottom);
+        ctx.fillStyle = "#78996c";
+        ctx.fillRect(pipe.x - 6, gapTop - 18, 70, 18);
+        ctx.fillRect(pipe.x - 6, gapBottom, 70, 18);
+      }
+
+      ctx.fillStyle = "#e2b84c";
+      ctx.beginPath();
+      ctx.ellipse(86, birdY, 17, 14, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#f4d46e";
+      ctx.beginPath();
+      ctx.ellipse(80, birdY + 5, 10, 7, -0.25, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#fff";
+      ctx.beginPath();
+      ctx.arc(92, birdY - 7, 5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#222";
+      ctx.beginPath();
+      ctx.arc(94, birdY - 7, 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#d8794b";
+      ctx.beginPath();
+      ctx.moveTo(101, birdY);
+      ctx.lineTo(116, birdY + 5);
+      ctx.lineTo(101, birdY + 9);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.fillStyle = "#6e5339";
+      ctx.fillRect(0, ground, width, height - ground);
+
+      ctx.fillStyle = "rgba(255,255,255,.9)";
+      ctx.font = "800 22px Manrope, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText(`Score ${scoreRef.current}`, width / 2, 42);
+
+      if (!gameOver) {
+        ctx.fillStyle = "rgba(30,35,28,.58)";
+        ctx.font = "600 12px DM Sans, sans-serif";
+        ctx.fillText("Click / Space / ↑ to flap", width / 2, 70);
+      } else {
+        ctx.fillStyle = "rgba(25,28,24,.78)";
+        ctx.fillRect(95, 220, 330, 145);
+        ctx.fillStyle = "#fffaf3";
+        ctx.font = "800 25px Manrope, sans-serif";
+        ctx.fillText("Game over", width / 2, 262);
+        ctx.font = "600 14px DM Sans, sans-serif";
+        ctx.fillText(`Score: ${scoreRef.current}`, width / 2, 292);
+        ctx.fillStyle = "#d8794b";
+        ctx.fillText("Click Restart to play again", width / 2, 326);
+      }
+
+      if (running && !gameFinished) raf = requestAnimationFrame(draw);
+    };
+
+    raf = requestAnimationFrame(draw);
+
+    return () => {
+      cancelAnimationFrame(raf);
+      canvas.removeEventListener("pointerdown", flap);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, []);
+
+  return (
+    <div className="zuqen-game-overlay">
+      <div className="zuqen-game-card">
+        <div className="zuqen-game-head">
+          <div>
+            <div className="zuqen-game-eyebrow">ZUQEN ARCADE</div>
+            <h2>Flappy Bird</h2>
+            <p>Pass 10 pipes to earn 10 score. 10 score = 1 Chat credit.</p>
+          </div>
+          <button type="button" className="zuqen-game-close" onClick={onClose}>
+            ×
+          </button>
+        </div>
+        <canvas ref={canvasRef} className="zuqen-game-canvas" />
+        {gameOver && (
+          <button
+            type="button"
+            className="zuqen-game-restart"
+            onClick={onClose}
+          >
+            Close game
+          </button>
+        )}
+        <div className="zuqen-game-footer">
+          <span>Current score: <strong>{score}</strong></span>
+          <span>Exchange from the credit menu anytime.</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function HomePage() {
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
@@ -510,6 +787,9 @@ export default function HomePage() {
 
   const [creditsOpen, setCreditsOpen] = useState(false);
   const [chatCredits, setChatCredits] = useState<number | null>(null);
+  const [flappyScore, setFlappyScore] = useState(0);
+  const [flappyOpen, setFlappyOpen] = useState(false);
+  const [flappyLoading, setFlappyLoading] = useState(false);
 
   const [archivedOpen, setArchivedOpen] = useState(false);
   const [menuId, setMenuId] = useState<string | null>(null);
@@ -598,6 +878,73 @@ export default function HomePage() {
     const row = data as CreditRow | null;
     setChatCredits(row ? Number(row.balance) : 0);
   }, []);
+
+  const loadFlappyScore = useCallback(async (userId: string) => {
+    const { data, error } = await supabase
+      .from("zuqen_flappy_scores")
+      .select("score")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (error) {
+      console.error("loadFlappyScore:", error);
+      setFlappyScore(0);
+      return;
+    }
+
+    setFlappyScore(Number(data?.score ?? 0));
+  }, []);
+
+  const persistFlappyScore = useCallback(async (score: number) => {
+    if (!user?.id || user.is_anonymous) return;
+
+    const { error } = await supabase
+      .from("zuqen_flappy_scores")
+      .upsert({
+        user_id: user.id,
+        score: Math.max(0, Math.floor(score)),
+        updated_at: new Date().toISOString(),
+      });
+
+    if (error) console.error("persistFlappyScore:", error);
+  }, [user]);
+
+  const exchangeFlappyScore = async () => {
+    if (!user?.id || user.is_anonymous) {
+      setErrorMessage("Please sign in before exchanging Flappy Bird score.");
+      return;
+    }
+
+    setFlappyLoading(true);
+    try {
+      const { data, error } = await supabase.rpc("exchange_flappy_score");
+      if (error) throw error;
+
+      if (!data?.success) {
+        if (data?.error === "NOT_ENOUGH_SCORE") {
+          setErrorMessage("You need at least 10 score to exchange for 1 Chat credit.");
+        } else {
+          setErrorMessage("Your Flappy Bird score could not be exchanged.");
+        }
+        return;
+      }
+
+      setFlappyScore((previous) =>
+        Math.max(0, previous - Number(data.scoreUsed ?? 0))
+      );
+      await Promise.all([loadChatCredits(user.id), loadFlappyScore(user.id)]);
+      setErrorMessage("");
+    } catch (error) {
+      console.error("exchangeFlappyScore:", error);
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to exchange Flappy Bird score."
+      );
+    } finally {
+      setFlappyLoading(false);
+    }
+  };
 
   const initializeAuth = useCallback(async () => {
     try {
@@ -690,6 +1037,7 @@ export default function HomePage() {
       await Promise.all([
         loadChats(currentUser.id),
         loadChatCredits(currentUser.id),
+        loadFlappyScore(currentUser.id),
       ]);
     } catch (error) {
       console.error("initializeAuth:", error);
@@ -701,7 +1049,7 @@ export default function HomePage() {
     } finally {
       setAuthReady(true);
     }
-  }, [loadChats, loadChatCredits]);
+  }, [loadChats, loadChatCredits, loadFlappyScore]);
 
   useEffect(() => {
     let mounted = true;
@@ -727,6 +1075,7 @@ export default function HomePage() {
         await Promise.all([
           loadChats(session.user.id),
           loadChatCredits(session.user.id),
+          loadFlappyScore(session.user.id),
         ]);
 
         return;
@@ -744,7 +1093,7 @@ export default function HomePage() {
       subscription.unsubscribe();
       streamAbortRef.current?.abort();
     };
-  }, [initializeAuth, loadChats, loadChatCredits]);
+  }, [initializeAuth, loadChats, loadChatCredits, loadFlappyScore]);
 
   useEffect(() => {
     const savedTheme = localStorage.getItem("zuqen-theme");
@@ -1720,6 +2069,30 @@ export default function HomePage() {
         .zuqen-credit-icon{color:var(--accent-strong);font-size:17px}
         .zuqen-credit-count{font-size:12px;font-weight:800;font-variant-numeric:tabular-nums}
         .zuqen-credit-label{font-size:10px;color:var(--muted)}
+        .zuqen-flappy-button{display:flex;align-items:center;gap:7px;padding:8px 10px;border:1px solid var(--border);border-radius:11px;background:var(--surface);color:var(--text);cursor:pointer;transition:.16s}
+        .zuqen-flappy-button:hover{border-color:#d5b69d;background:var(--surface-2);transform:translateY(-1px)}
+        .zuqen-flappy-bird{width:22px;height:22px;display:grid;place-items:center;border-radius:8px;background:#e2b84c;color:#fff;font-size:10px;box-shadow:0 2px 8px rgba(120,90,30,.18)}
+        .zuqen-flappy-score{font-size:12px;font-weight:800;font-variant-numeric:tabular-nums}
+        .zuqen-flappy-label{font-size:9px;color:var(--muted)}
+        .zuqen-exchange-button{width:100%;margin-top:13px;padding:9px 10px;border-radius:9px;background:var(--accent);color:#fff;font-size:10px;font-weight:800;cursor:pointer}
+        .zuqen-exchange-button:disabled{opacity:.4;cursor:not-allowed}
+        .zuqen-generated-image{margin:12px 0;width:100%;max-width:720px;overflow:hidden;border-radius:16px;border:1px solid rgba(120,120,140,.18);background:rgba(0,0,0,.03);cursor:zoom-in}
+        .zuqen-generated-image img{display:block;width:100%;height:auto;max-height:720px;object-fit:contain}
+        .zuqen-image-viewer{position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.88);display:flex;align-items:center;justify-content:center;padding:24px}
+        .zuqen-image-viewer-image{max-width:92vw;max-height:86vh;object-fit:contain;border-radius:14px}
+        .zuqen-image-close{position:fixed;top:20px;right:20px;width:42px;height:42px;border:1px solid rgba(255,255,255,.2);border-radius:12px;background:rgba(20,20,20,.72);color:#fff;font-size:25px;cursor:pointer;z-index:2}
+        .zuqen-image-download{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);padding:11px 18px;border:1px solid rgba(255,255,255,.2);border-radius:12px;background:#fff;color:#111;font-weight:800;cursor:pointer;z-index:2}
+        .zuqen-game-overlay{position:fixed;inset:0;z-index:99998;display:grid;place-items:center;padding:20px;background:rgba(18,20,17,.58);backdrop-filter:blur(12px)}
+        .zuqen-game-card{width:min(580px,96vw);max-height:96vh;overflow:auto;border:1px solid var(--border);border-radius:22px;background:var(--surface);box-shadow:0 30px 90px rgba(20,20,16,.28);padding:16px}
+        .zuqen-game-head{display:flex;justify-content:space-between;gap:15px;align-items:flex-start;padding:4px 4px 13px}
+        .zuqen-game-eyebrow{font-size:8px;font-weight:800;letter-spacing:1.5px;color:var(--accent)}
+        .zuqen-game-head h2{margin:5px 0 4px;font:800 23px Manrope,sans-serif}
+        .zuqen-game-head p{margin:0;color:var(--muted);font-size:10px;line-height:1.5}
+        .zuqen-game-close{width:35px;height:35px;border-radius:10px;background:var(--surface-2);color:var(--text);font-size:22px;cursor:pointer}
+        .zuqen-game-canvas{display:block;width:100%;max-width:520px;height:auto;margin:0 auto;border-radius:16px;touch-action:none;cursor:pointer}
+        .zuqen-game-restart{display:block;margin:-55px auto 18px;position:relative;z-index:2;padding:10px 16px;border-radius:10px;background:var(--accent);color:#fff;font-weight:800;cursor:pointer}
+        .zuqen-game-footer{display:flex;justify-content:space-between;gap:10px;margin-top:12px;padding:10px 4px 2px;color:var(--muted);font-size:9px}
+        .zuqen-game-footer strong{color:var(--text)}
         .zuqen-credit-dropdown{top:46px;right:0;width:235px;padding:16px}
         .zuqen-credit-dropdown-title{font-size:11px;font-weight:800}
         .zuqen-credit-big{margin-top:15px;font:800 30px Manrope,sans-serif}
@@ -1789,14 +2162,14 @@ export default function HomePage() {
         .zuqen-mini-agent:nth-child(2){background:#e6dceb}
         .zuqen-mini-agent:nth-child(3){background:#dde5d9}
         .zuqen-mini-agent:nth-child(4){background:#f0dccb}
-        .zuqen-mini-agent:nth-child(5){grid-column:1/-1;display:grid;grid-template-columns:120px 1fr;grid-template-rows:auto auto auto;column-gap:14px;align-items:center;background:#e6ded0}
-        .zuqen-mini-agent:nth-child(5) .zuqen-chat-card-art{grid-column:1;grid-row:1/4;position:relative;display:grid;place-items:center;min-height:85px;border-radius:11px;background:radial-gradient(circle at 50% 50%,#d8794b 0 8%,#b9653c 9% 18%,#303c35 19% 40%,#252923 41% 100%);color:#fffaf5;font-size:32px;overflow:hidden}
+        .zuqen-mini-agent:nth-child(4){grid-column:1/-1;display:grid;grid-template-columns:120px 1fr;grid-template-rows:auto auto auto;column-gap:14px;align-items:center;background:#e6ded0}
+        .zuqen-mini-agent:nth-child(4) .zuqen-chat-card-art{grid-column:1;grid-row:1/4;position:relative;display:grid;place-items:center;min-height:85px;border-radius:11px;background:radial-gradient(circle at 50% 50%,#d8794b 0 8%,#b9653c 9% 18%,#303c35 19% 40%,#252923 41% 100%);color:#fffaf5;font-size:32px;overflow:hidden}
         .zuqen-chat-orbit{position:absolute;width:75px;height:75px;border:1px solid #fffaf580;border-radius:50%}
         .zuqen-chat-orbit.orbit-two{width:100px;height:55px;transform:rotate(-35deg)}
-        .zuqen-mini-agent:nth-child(5) .zuqen-card-meta,.zuqen-mini-agent:nth-child(5) .zuqen-mini-agent-name,.zuqen-mini-agent:nth-child(5) .zuqen-mini-agent-desc{grid-column:2}
-        .zuqen-mini-agent:nth-child(5) .zuqen-card-meta{grid-row:1}
-        .zuqen-mini-agent:nth-child(5) .zuqen-mini-agent-name{grid-row:2}
-        .zuqen-mini-agent:nth-child(5) .zuqen-mini-agent-desc{grid-row:3}
+        .zuqen-mini-agent:nth-child(4) .zuqen-card-meta,.zuqen-mini-agent:nth-child(4) .zuqen-mini-agent-name,.zuqen-mini-agent:nth-child(4) .zuqen-mini-agent-desc{grid-column:2}
+        .zuqen-mini-agent:nth-child(4) .zuqen-card-meta{grid-row:1}
+        .zuqen-mini-agent:nth-child(4) .zuqen-mini-agent-name{grid-row:2}
+        .zuqen-mini-agent:nth-child(4) .zuqen-mini-agent-desc{grid-row:3}
         .zuqen-home-tools{width:min(800px,100%);margin:26px auto 0}
         .zuqen-home-tools-title{font:800 15px Manrope,sans-serif;color:var(--text);margin:0 0 12px}
         .zuqen-home-tools-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
@@ -1844,9 +2217,9 @@ export default function HomePage() {
         .z-code-body{margin:0;max-height:460px;overflow:auto;padding:14px;color:#f4f0e9;font:12px/1.75 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre}
         .z-code-body code{font:inherit}
         .z-code-preview{display:block;width:100%;height:390px;border:0;background:white}
-        .zuqen-message-actions{display:flex;gap:5px;margin-top:7px;opacity:.65}
+        .zuqen-message-actions{display:flex;gap:5px;margin-top:7px;opacity:0;pointer-events:none;transition:opacity .16s ease}
         .zuqen-message-row.user .zuqen-message-actions{justify-content:flex-end}
-        .zuqen-message-block:hover .zuqen-message-actions{opacity:1}
+        .zuqen-message-block:hover .zuqen-message-actions{opacity:1;pointer-events:auto}
         .zuqen-action{width:30px;height:29px;display:grid;place-items:center;border:1px solid transparent;border-radius:8px;background:transparent;color:var(--muted);cursor:pointer}
         .zuqen-action:hover{background:var(--surface-2);border-color:var(--border);color:var(--text)}
         .zuqen-action:disabled{opacity:.4;cursor:not-allowed}
@@ -1880,7 +2253,7 @@ export default function HomePage() {
         @media(max-width:1050px){
           .zuqen-sidebar{width:250px;flex-basis:250px}
           .zuqen-agent-cards{grid-template-columns:repeat(2,minmax(0,1fr))}
-          .zuqen-mini-agent:nth-child(5){grid-column:1/-1}
+          .zuqen-mini-agent:nth-child(4){grid-column:1/-1}
         }
         @media(max-width:760px){
           .zuqen-sidebar{position:absolute;left:0;top:0;bottom:0;width:min(300px,86vw);flex-basis:min(300px,86vw);box-shadow:12px 0 40px rgba(30,25,20,.12)}
@@ -1902,8 +2275,8 @@ export default function HomePage() {
           .zuqen-home-selected-agent{display:none}
           .zuqen-home-tools-grid{grid-template-columns:1fr}
           .zuqen-agent-cards{grid-template-columns:repeat(2,minmax(0,1fr))}
-          .zuqen-mini-agent:nth-child(5){grid-template-columns:85px 1fr}
-          .zuqen-mini-agent:nth-child(5) .zuqen-chat-card-art{min-height:76px}
+          .zuqen-mini-agent:nth-child(4){grid-template-columns:85px 1fr}
+          .zuqen-mini-agent:nth-child(4) .zuqen-chat-card-art{min-height:76px}
           .zuqen-messages{padding:20px 12px 12px}
           .zuqen-message-block,.zuqen-message-row.user .zuqen-message-block{max-width:97%}
           .zuqen-message-bubble{padding:12px;font-size:12px}
@@ -1921,8 +2294,8 @@ export default function HomePage() {
           .zuqen-home-voice{width:34px;height:34px}
           .zuqen-home-composer-toolbar .zuqen-send{width:34px;height:34px;flex-basis:34px}
           .zuqen-agent-cards{grid-template-columns:1fr}
-          .zuqen-mini-agent:nth-child(5){grid-column:auto}
-          .zuqen-mini-agent:nth-child(5){grid-template-columns:90px 1fr}
+          .zuqen-mini-agent:nth-child(4){grid-column:auto}
+          .zuqen-mini-agent:nth-child(4){grid-template-columns:90px 1fr}
           .zuqen-composer-footer span:last-child{display:none}
           .zuqen-welcome h1{letter-spacing:-1.8px}
         }
@@ -2267,6 +2640,23 @@ export default function HomePage() {
           </div>
 
           <div className="zuqen-top-right">
+            <button
+              type="button"
+              className="zuqen-flappy-button"
+              onClick={() => {
+                if (user?.is_anonymous) {
+                  setErrorMessage("Please sign in before entering Flappy Bird.");
+                  return;
+                }
+                setFlappyOpen(true);
+              }}
+              title={user?.is_anonymous ? "Sign in to play" : "Play Flappy Bird"}
+            >
+              <span className="zuqen-flappy-bird">●</span>
+              <span className="zuqen-flappy-score">{flappyScore}</span>
+              <span className="zuqen-flappy-label">Flappy</span>
+            </button>
+
             <div className="zuqen-credit-wrap">
               <button
                 className="zuqen-credit-button"
@@ -2287,6 +2677,28 @@ export default function HomePage() {
                   </div>
                   <div className="zuqen-credit-small">
                     Available for AI conversations
+                  </div>
+                  <div className="zuqen-credit-line" />
+                  <div className="zuqen-credit-row">
+                    <span>Flappy score</span>
+                    <strong>{flappyScore}</strong>
+                  </div>
+                  <button
+                    type="button"
+                    className="zuqen-exchange-button"
+                    onClick={exchangeFlappyScore}
+                    disabled={
+                      flappyLoading ||
+                      !!user?.is_anonymous ||
+                      flappyScore < 10
+                    }
+                  >
+                    {flappyLoading
+                      ? "Exchanging..."
+                      : `Exchange ${Math.floor(flappyScore / 10)} credit${Math.floor(flappyScore / 10) === 1 ? "" : "s"}`}
+                  </button>
+                  <div className="zuqen-credit-small">
+                    10 score = 1 Chat credit. Your remaining score stays saved.
                   </div>
                   <div className="zuqen-credit-line" />
                   <div className="zuqen-credit-row">
@@ -2786,7 +3198,7 @@ export default function HomePage() {
 
                 <div className="zuqen-agent-strip">
                   <div className="zuqen-strip-title">
-                    EXPLORE YOUR WORKSPACE · 5 AI AGENTS
+                    EXPLORE YOUR WORKSPACE · 4 AI AGENTS
                   </div>
 
                   <div className="zuqen-agent-cards">
@@ -2838,34 +3250,6 @@ export default function HomePage() {
                         className="zuqen-card-art"
                         viewBox="0 0 300 150"
                         role="img"
-                        aria-label="Generative image artwork"
-                      >
-                        <rect width="300" height="150" rx="14" fill="#e6dceb" />
-                        <circle cx="150" cy="75" r="52" fill="#a28ab9" />
-                        <ellipse cx="150" cy="51" rx="18" ry="35" fill="#f5d9b2" />
-                        <ellipse cx="150" cy="99" rx="18" ry="35" fill="#f5d9b2" />
-                        <ellipse cx="126" cy="75" rx="35" ry="18" fill="#f5d9b2" />
-                        <ellipse cx="174" cy="75" rx="35" ry="18" fill="#f5d9b2" />
-                        <circle cx="150" cy="75" r="15" fill="#b9653c" />
-                        <circle cx="60" cy="32" r="4" fill="#fffaf5" />
-                        <circle cx="241" cy="112" r="5" fill="#fffaf5" />
-                      </svg>
-                      <span className="zuqen-card-meta purple">02 / IMAGINE</span>
-                      <span className="zuqen-mini-agent-name">Text to Image</span>
-                      <span className="zuqen-mini-agent-desc">
-                        Create original visuals with AI.
-                      </span>
-                    </button>
-
-                    <button
-                      type="button"
-                      className="zuqen-mini-agent"
-                      onClick={() => navigateAgent(AGENTS[3])}
-                    >
-                      <svg
-                        className="zuqen-card-art"
-                        viewBox="0 0 300 150"
-                        role="img"
                         aria-label="Cinematic video artwork"
                       >
                         <rect width="300" height="150" rx="14" fill="#dce5d8" />
@@ -2891,7 +3275,7 @@ export default function HomePage() {
                     <button
                       type="button"
                       className="zuqen-mini-agent"
-                      onClick={() => navigateAgent(AGENTS[4])}
+                      onClick={() => navigateAgent(AGENTS[3])}
                     >
                       <svg
                         className="zuqen-card-art"
@@ -2922,7 +3306,7 @@ export default function HomePage() {
                           }
                         )}
                       </svg>
-                      <span className="zuqen-card-meta">04 / SOUND</span>
+                      <span className="zuqen-card-meta">03 / SOUND</span>
                       <span className="zuqen-mini-agent-name">Voice Generator</span>
                       <span className="zuqen-mini-agent-desc">
                         Give words a natural voice.
@@ -2939,7 +3323,7 @@ export default function HomePage() {
                         <span className="zuqen-chat-orbit" />
                         <span className="zuqen-chat-orbit orbit-two" />
                       </span>
-                      <span className="zuqen-card-meta">05 / THINK</span>
+                      <span className="zuqen-card-meta">04 / THINK</span>
                       <span className="zuqen-mini-agent-name">ZUQEN AI Chat</span>
                       <span className="zuqen-mini-agent-desc">
                         Ask questions, explore ideas and work through conversations.
@@ -3026,6 +3410,16 @@ export default function HomePage() {
           )}
         </div>
       </section>
+      {flappyOpen && user && !user.is_anonymous && (
+        <FlappyBirdGame
+          initialScore={flappyScore}
+          onClose={() => setFlappyOpen(false)}
+          onScoreChange={(nextScore) => {
+            setFlappyScore(nextScore);
+            void persistFlappyScore(nextScore);
+          }}
+        />
+      )}
     </main>
   );
 }
