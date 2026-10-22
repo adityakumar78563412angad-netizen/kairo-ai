@@ -531,238 +531,6 @@ function GeneratedImage({
   );
 }
 
-function FlappyBirdGame({
-  initialScore,
-  onClose,
-  onScoreChange,
-}: {
-  initialScore: number;
-  onClose: () => void;
-  onScoreChange: (score: number) => void;
-}) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const scoreRef = useRef(initialScore);
-  const [score, setScore] = useState(initialScore);
-  const [gameOver, setGameOver] = useState(false);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    const width = 520;
-    const height = 620;
-    const ground = 555;
-    canvas.width = width;
-    canvas.height = height;
-
-    let raf = 0;
-    let running = true;
-    let gameFinished = false;
-    let last = performance.now();
-    let birdY = 275;
-    let velocity = 0;
-    let spawnTimer = 0;
-    let pipes: Array<{ x: number; gapY: number; passed: boolean }> = [];
-
-    const flap = () => {
-      if (!running || gameFinished) return;
-      velocity = -430;
-    };
-
-    const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.code === "Space" || event.code === "ArrowUp") {
-        event.preventDefault();
-        flap();
-      }
-      if (event.code === "Escape") onClose();
-    };
-
-    window.addEventListener("keydown", onKeyDown);
-    canvas.addEventListener("pointerdown", flap);
-
-    const resetGame = () => {
-      running = true;
-      setGameOver(false);
-      birdY = 275;
-      velocity = 0;
-      spawnTimer = 0;
-      pipes = [];
-      last = performance.now();
-    };
-
-    const draw = (now: number) => {
-      const dt = Math.min((now - last) / 1000, 0.035);
-      last = now;
-
-      ctx.clearRect(0, 0, width, height);
-
-      const sky = ctx.createLinearGradient(0, 0, 0, height);
-      sky.addColorStop(0, "#d9e9f4");
-      sky.addColorStop(0.72, "#f6ead6");
-      sky.addColorStop(0.72, "#d8bd8e");
-      sky.addColorStop(1, "#b98d5f");
-      ctx.fillStyle = sky;
-      ctx.fillRect(0, 0, width, height);
-
-      ctx.fillStyle = "rgba(255,255,255,.55)";
-      ctx.beginPath();
-      ctx.arc(95, 105, 32, 0, Math.PI * 2);
-      ctx.arc(125, 105, 24, 0, Math.PI * 2);
-      ctx.arc(150, 105, 30, 0, Math.PI * 2);
-      ctx.fill();
-
-      if (running && !gameFinished) {
-        velocity += 1050 * dt;
-        birdY += velocity * dt;
-
-        spawnTimer += dt;
-        if (spawnTimer >= 1.55) {
-          spawnTimer = 0;
-          const gapY = 150 + Math.random() * 250;
-          pipes.push({ x: width + 35, gapY, passed: false });
-        }
-
-        for (const pipe of pipes) {
-          pipe.x -= 205 * dt;
-
-          if (!pipe.passed && pipe.x + 58 < 86) {
-            pipe.passed = true;
-            scoreRef.current += 1;
-            setScore(scoreRef.current);
-            onScoreChange(scoreRef.current);
-          }
-        }
-
-        pipes = pipes.filter((pipe) => pipe.x > -90);
-
-        const birdLeft = 72;
-        const birdRight = 100;
-        const birdTop = birdY - 15;
-        const birdBottom = birdY + 15;
-
-        const hitPipe = pipes.some((pipe) => {
-          const pipeLeft = pipe.x;
-          const pipeRight = pipe.x + 58;
-          const gapTop = pipe.gapY - 62;
-          const gapBottom = pipe.gapY + 62;
-          const horizontal = birdRight > pipeLeft && birdLeft < pipeRight;
-          const vertical = birdTop < gapTop || birdBottom > gapBottom;
-          return horizontal && vertical;
-        });
-
-        if (birdTop < 0 || birdBottom > ground || hitPipe) {
-          running = false;
-          gameFinished = true;
-          setGameOver(true);
-        }
-      }
-
-      for (const pipe of pipes) {
-        const gapTop = pipe.gapY - 62;
-        const gapBottom = pipe.gapY + 62;
-        ctx.fillStyle = "#587b57";
-        ctx.fillRect(pipe.x, 0, 58, gapTop);
-        ctx.fillRect(pipe.x, gapBottom, 58, ground - gapBottom);
-        ctx.fillStyle = "#78996c";
-        ctx.fillRect(pipe.x - 6, gapTop - 18, 70, 18);
-        ctx.fillRect(pipe.x - 6, gapBottom, 70, 18);
-      }
-
-      ctx.fillStyle = "#e2b84c";
-      ctx.beginPath();
-      ctx.ellipse(86, birdY, 17, 14, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = "#f4d46e";
-      ctx.beginPath();
-      ctx.ellipse(80, birdY + 5, 10, 7, -0.25, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = "#fff";
-      ctx.beginPath();
-      ctx.arc(92, birdY - 7, 5, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = "#222";
-      ctx.beginPath();
-      ctx.arc(94, birdY - 7, 2, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = "#d8794b";
-      ctx.beginPath();
-      ctx.moveTo(101, birdY);
-      ctx.lineTo(116, birdY + 5);
-      ctx.lineTo(101, birdY + 9);
-      ctx.closePath();
-      ctx.fill();
-
-      ctx.fillStyle = "#6e5339";
-      ctx.fillRect(0, ground, width, height - ground);
-
-      ctx.fillStyle = "rgba(255,255,255,.9)";
-      ctx.font = "800 22px Manrope, sans-serif";
-      ctx.textAlign = "center";
-      ctx.fillText(`Score ${scoreRef.current}`, width / 2, 42);
-
-      if (!gameOver) {
-        ctx.fillStyle = "rgba(30,35,28,.58)";
-        ctx.font = "600 12px DM Sans, sans-serif";
-        ctx.fillText("Click / Space / ↑ to flap", width / 2, 70);
-      } else {
-        ctx.fillStyle = "rgba(25,28,24,.78)";
-        ctx.fillRect(95, 220, 330, 145);
-        ctx.fillStyle = "#fffaf3";
-        ctx.font = "800 25px Manrope, sans-serif";
-        ctx.fillText("Game over", width / 2, 262);
-        ctx.font = "600 14px DM Sans, sans-serif";
-        ctx.fillText(`Score: ${scoreRef.current}`, width / 2, 292);
-        ctx.fillStyle = "#d8794b";
-        ctx.fillText("Click Restart to play again", width / 2, 326);
-      }
-
-      if (running && !gameFinished) raf = requestAnimationFrame(draw);
-    };
-
-    raf = requestAnimationFrame(draw);
-
-    return () => {
-      cancelAnimationFrame(raf);
-      canvas.removeEventListener("pointerdown", flap);
-      window.removeEventListener("keydown", onKeyDown);
-    };
-  }, []);
-
-  return (
-    <div className="zuqen-game-overlay">
-      <div className="zuqen-game-card">
-        <div className="zuqen-game-head">
-          <div>
-            <div className="zuqen-game-eyebrow">ZUQEN ARCADE</div>
-            <h2>Flappy Bird</h2>
-            <p>Pass 10 pipes to earn 10 score. 10 score = 1 Chat credit.</p>
-          </div>
-          <button type="button" className="zuqen-game-close" onClick={onClose}>
-            ×
-          </button>
-        </div>
-        <canvas ref={canvasRef} className="zuqen-game-canvas" />
-        {gameOver && (
-          <button
-            type="button"
-            className="zuqen-game-restart"
-            onClick={onClose}
-          >
-            Close game
-          </button>
-        )}
-        <div className="zuqen-game-footer">
-          <span>Current score: <strong>{score}</strong></span>
-          <span>Exchange from the credit menu anytime.</span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export default function HomePage() {
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
@@ -787,9 +555,6 @@ export default function HomePage() {
 
   const [creditsOpen, setCreditsOpen] = useState(false);
   const [chatCredits, setChatCredits] = useState<number | null>(null);
-  const [flappyScore, setFlappyScore] = useState(0);
-  const [flappyOpen, setFlappyOpen] = useState(false);
-  const [flappyLoading, setFlappyLoading] = useState(false);
 
   const [archivedOpen, setArchivedOpen] = useState(false);
   const [menuId, setMenuId] = useState<string | null>(null);
@@ -879,72 +644,8 @@ export default function HomePage() {
     setChatCredits(row ? Number(row.balance) : 0);
   }, []);
 
-  const loadFlappyScore = useCallback(async (userId: string) => {
-    const { data, error } = await supabase
-      .from("zuqen_flappy_scores")
-      .select("score")
-      .eq("user_id", userId)
-      .maybeSingle();
 
-    if (error) {
-      console.error("loadFlappyScore:", error);
-      setFlappyScore(0);
-      return;
-    }
 
-    setFlappyScore(Number(data?.score ?? 0));
-  }, []);
-
-  const persistFlappyScore = useCallback(async (score: number) => {
-    if (!user?.id || user.is_anonymous) return;
-
-    const { error } = await supabase
-      .from("zuqen_flappy_scores")
-      .upsert({
-        user_id: user.id,
-        score: Math.max(0, Math.floor(score)),
-        updated_at: new Date().toISOString(),
-      });
-
-    if (error) console.error("persistFlappyScore:", error);
-  }, [user]);
-
-  const exchangeFlappyScore = async () => {
-    if (!user?.id || user.is_anonymous) {
-      setErrorMessage("Please sign in before exchanging Flappy Bird score.");
-      return;
-    }
-
-    setFlappyLoading(true);
-    try {
-      const { data, error } = await supabase.rpc("exchange_flappy_score");
-      if (error) throw error;
-
-      if (!data?.success) {
-        if (data?.error === "NOT_ENOUGH_SCORE") {
-          setErrorMessage("You need at least 10 score to exchange for 1 Chat credit.");
-        } else {
-          setErrorMessage("Your Flappy Bird score could not be exchanged.");
-        }
-        return;
-      }
-
-      setFlappyScore((previous) =>
-        Math.max(0, previous - Number(data.scoreUsed ?? 0))
-      );
-      await Promise.all([loadChatCredits(user.id), loadFlappyScore(user.id)]);
-      setErrorMessage("");
-    } catch (error) {
-      console.error("exchangeFlappyScore:", error);
-      setErrorMessage(
-        error instanceof Error
-          ? error.message
-          : "Unable to exchange Flappy Bird score."
-      );
-    } finally {
-      setFlappyLoading(false);
-    }
-  };
 
   const initializeAuth = useCallback(async () => {
     try {
@@ -1037,7 +738,6 @@ export default function HomePage() {
       await Promise.all([
         loadChats(currentUser.id),
         loadChatCredits(currentUser.id),
-        loadFlappyScore(currentUser.id),
       ]);
     } catch (error) {
       console.error("initializeAuth:", error);
@@ -1049,7 +749,7 @@ export default function HomePage() {
     } finally {
       setAuthReady(true);
     }
-  }, [loadChats, loadChatCredits, loadFlappyScore]);
+  }, [loadChats, loadChatCredits]);
 
   useEffect(() => {
     let mounted = true;
@@ -1075,7 +775,6 @@ export default function HomePage() {
         await Promise.all([
           loadChats(session.user.id),
           loadChatCredits(session.user.id),
-          loadFlappyScore(session.user.id),
         ]);
 
         return;
@@ -1093,7 +792,7 @@ export default function HomePage() {
       subscription.unsubscribe();
       streamAbortRef.current?.abort();
     };
-  }, [initializeAuth, loadChats, loadChatCredits, loadFlappyScore]);
+  }, [initializeAuth, loadChats, loadChatCredits]);
 
   useEffect(() => {
     const savedTheme = localStorage.getItem("zuqen-theme");
@@ -2644,17 +2343,12 @@ export default function HomePage() {
               type="button"
               className="zuqen-flappy-button"
               onClick={() => {
-                if (user?.is_anonymous) {
-                  setErrorMessage("Please sign in before entering Flappy Bird.");
-                  return;
-                }
-                setFlappyOpen(true);
+                window.location.href = "/game";
               }}
-              title={user?.is_anonymous ? "Sign in to play" : "Play Flappy Bird"}
+              title="Play Game"
             >
               <span className="zuqen-flappy-bird">●</span>
-              <span className="zuqen-flappy-score">{flappyScore}</span>
-              <span className="zuqen-flappy-label">Flappy</span>
+              <span className="zuqen-flappy-label">Play Game</span>
             </button>
 
             <div className="zuqen-credit-wrap">
@@ -2677,28 +2371,6 @@ export default function HomePage() {
                   </div>
                   <div className="zuqen-credit-small">
                     Available for AI conversations
-                  </div>
-                  <div className="zuqen-credit-line" />
-                  <div className="zuqen-credit-row">
-                    <span>Flappy score</span>
-                    <strong>{flappyScore}</strong>
-                  </div>
-                  <button
-                    type="button"
-                    className="zuqen-exchange-button"
-                    onClick={exchangeFlappyScore}
-                    disabled={
-                      flappyLoading ||
-                      !!user?.is_anonymous ||
-                      flappyScore < 10
-                    }
-                  >
-                    {flappyLoading
-                      ? "Exchanging..."
-                      : `Exchange ${Math.floor(flappyScore / 10)} credit${Math.floor(flappyScore / 10) === 1 ? "" : "s"}`}
-                  </button>
-                  <div className="zuqen-credit-small">
-                    10 score = 1 Chat credit. Your remaining score stays saved.
                   </div>
                   <div className="zuqen-credit-line" />
                   <div className="zuqen-credit-row">
@@ -3410,16 +3082,6 @@ export default function HomePage() {
           )}
         </div>
       </section>
-      {flappyOpen && user && !user.is_anonymous && (
-        <FlappyBirdGame
-          initialScore={flappyScore}
-          onClose={() => setFlappyOpen(false)}
-          onScoreChange={(nextScore) => {
-            setFlappyScore(nextScore);
-            void persistFlappyScore(nextScore);
-          }}
-        />
-      )}
     </main>
   );
 }
