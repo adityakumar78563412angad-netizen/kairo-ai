@@ -67,13 +67,11 @@ const PLATFORMS: Platform[] = [
 ];
 
 export default function BulkMessengerPage() {
+  const [connectedApps, setConnectedApps] = useState<string[]>([]);
   const [selectedApps, setSelectedApps] = useState<string[]>([]);
   const [activeApp, setActiveApp] = useState<string | null>(null);
 
-  const [contactsByApp, setContactsByApp] = useState<
-    Record<string, Contact[]>
-  >({});
-
+  const [contactsByApp] = useState<Record<string, Contact[]>>({});
   const [selectedContactsByApp, setSelectedContactsByApp] = useState<
     Record<string, string[]>
   >({});
@@ -85,1246 +83,1077 @@ export default function BulkMessengerPage() {
   const [scheduleDate, setScheduleDate] = useState("");
   const [scheduleTime, setScheduleTime] = useState("");
 
-  const selectedPlatformObjects = useMemo(
+  const [connectModalApp, setConnectModalApp] = useState<Platform | null>(
+    null
+  );
+
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const selectedPlatforms = useMemo(
     () =>
-      PLATFORMS.filter((platform) =>
-        selectedApps.includes(platform.id)
-      ),
+      PLATFORMS.filter((platform) => selectedApps.includes(platform.id)),
     [selectedApps]
   );
 
-  const activeContacts = activeApp
-    ? contactsByApp[activeApp] ?? []
-    : [];
+  const connectedPlatforms = useMemo(
+    () =>
+      PLATFORMS.filter((platform) => connectedApps.includes(platform.id)),
+    [connectedApps]
+  );
 
-  const activeSelectedContacts = activeApp
-    ? selectedContactsByApp[activeApp] ?? []
-    : [];
+  const totalSelectedContacts = useMemo(() => {
+    return Object.values(selectedContactsByApp).reduce(
+      (total, contacts) => total + contacts.length,
+      0
+    );
+  }, [selectedContactsByApp]);
 
-  const totalSelectedContacts = Object.values(
-    selectedContactsByApp
-  ).reduce((total, contacts) => total + contacts.length, 0);
+  function showNotice(text: string) {
+    setNotice(text);
 
-  const toggleApp = (appId: string) => {
-    setSelectedApps((current) => {
-      const exists = current.includes(appId);
+    window.setTimeout(() => {
+      setNotice(null);
+    }, 3500);
+  }
 
-      if (exists) {
-        if (activeApp === appId) {
-          const nextActive =
-            current.find((id) => id !== appId) ?? null;
-          setActiveApp(nextActive);
-        }
+  function handleAppClick(platform: Platform) {
+    const isConnected = connectedApps.includes(platform.id);
 
-        return current.filter((id) => id !== appId);
-      }
-
-      if (!activeApp) {
-        setActiveApp(appId);
-      }
-
-      return [...current, appId];
-    });
-  };
-
-  const selectAppForContacts = (appId: string) => {
-    if (!selectedApps.includes(appId)) return;
-    setActiveApp(appId);
-  };
-
-  const toggleContact = (contactId: string) => {
-    if (!activeApp) return;
-
-    setSelectedContactsByApp((current) => {
-      const existing = current[activeApp] ?? [];
-
-      return {
-        ...current,
-        [activeApp]: existing.includes(contactId)
-          ? existing.filter((id) => id !== contactId)
-          : [...existing, contactId],
-      };
-    });
-  };
-
-  const clearSelectedContactsForActiveApp = () => {
-    if (!activeApp) return;
-
-    setSelectedContactsByApp((current) => ({
-      ...current,
-      [activeApp]: [],
-    }));
-  };
-
-  const selectAllActiveContacts = () => {
-    if (!activeApp) return;
-
-    const allIds = activeContacts.map((contact) => contact.id);
-
-    setSelectedContactsByApp((current) => ({
-      ...current,
-      [activeApp]:
-        activeSelectedContacts.length === allIds.length
-          ? []
-          : allIds,
-    }));
-  };
-
-  const handleAttachment = (
-    event: React.ChangeEvent<HTMLInputElement>
-  ) => {
-    const file = event.target.files?.[0];
-
-    if (!file) {
-      setAttachmentName("");
+    if (!isConnected) {
+      setConnectModalApp(platform);
       return;
     }
 
-    setAttachmentName(file.name);
-  };
+    toggleSelectedApp(platform.id);
+  }
 
-  const clearEverything = () => {
-    setSelectedApps([]);
-    setActiveApp(null);
-    setSelectedContactsByApp({});
-    setMessage("");
-    setAttachmentName("");
-    setScheduleEnabled(false);
-    setScheduleDate("");
-    setScheduleTime("");
-  };
+  function toggleSelectedApp(platformId: string) {
+    if (!connectedApps.includes(platformId)) {
+      const platform = PLATFORMS.find((item) => item.id === platformId);
 
-  const canContinue =
-    selectedApps.length > 0 &&
-    totalSelectedContacts > 0 &&
-    message.trim().length > 0;
+      if (platform) {
+        setConnectModalApp(platform);
+      }
+
+      return;
+    }
+
+    setSelectedApps((current) => {
+      const alreadySelected = current.includes(platformId);
+
+      if (alreadySelected) {
+        const next = current.filter((id) => id !== platformId);
+
+        if (activeApp === platformId) {
+          setActiveApp(next[0] ?? null);
+        }
+
+        return next;
+      }
+
+      if (!activeApp) {
+        setActiveApp(platformId);
+      }
+
+      return [...current, platformId];
+    });
+  }
+
+  function handleConnect(platform: Platform) {
+    /*
+     * IMPORTANT:
+     * This UI does NOT fake a connection.
+     *
+     * The real OAuth/API connection for each platform will be wired here.
+     * Until then, we intentionally do not mark the platform as connected.
+     */
+    setConnectModalApp(null);
+
+    showNotice(
+      `${platform.name} connection will be completed through its official authorization flow.`
+    );
+  }
+
+  function handleContactToggle(appId: string, contactId: string) {
+    if (!connectedApps.includes(appId)) {
+      showNotice("Connect this app first.");
+      return;
+    }
+
+    setSelectedContactsByApp((current) => {
+      const existing = current[appId] ?? [];
+
+      const next = existing.includes(contactId)
+        ? existing.filter((id) => id !== contactId)
+        : [...existing, contactId];
+
+      return {
+        ...current,
+        [appId]: next,
+      };
+    });
+  }
+
+  function handleSend() {
+    if (selectedApps.length === 0) {
+      showNotice("Select at least one connected app first.");
+      return;
+    }
+
+    const disconnectedSelectedApp = selectedApps.find(
+      (appId) => !connectedApps.includes(appId)
+    );
+
+    if (disconnectedSelectedApp) {
+      const platform = PLATFORMS.find(
+        (item) => item.id === disconnectedSelectedApp
+      );
+
+      showNotice(
+        `First connect ${platform?.name ?? "this app"} before sending.`
+      );
+      return;
+    }
+
+    if (totalSelectedContacts === 0) {
+      showNotice("Select at least one eligible contact first.");
+      return;
+    }
+
+    if (!message.trim()) {
+      showNotice("Write a message first.");
+      return;
+    }
+
+    /*
+     * Real sending will be connected to the backend/provider APIs later.
+     * No fake send is performed here.
+     */
+    showNotice(
+      scheduleEnabled
+        ? "Schedule request is ready for the real sending system."
+        : "Send request is ready for the real sending system."
+    );
+  }
 
   return (
-    <main className="bulk-page">
-      <style jsx>{`
+    <main className="min-h-screen bg-[#f7f8fa] text-[#111827]">
+      <style jsx global>{`
         * {
           box-sizing: border-box;
         }
 
-        .bulk-page {
+        body {
+          margin: 0;
+          background: #f7f8fa;
+        }
+
+        .bulk-shell {
           min-height: 100vh;
-          padding: 24px;
-          color: #111827;
-          background:
-            radial-gradient(
-              circle at 10% 0%,
-              rgba(255, 255, 255, 0.95),
-              transparent 30%
-            ),
-            radial-gradient(
-              circle at 90% 10%,
-              rgba(226, 232, 240, 0.7),
-              transparent 30%
-            ),
-            linear-gradient(
-              135deg,
-              #f8fafc 0%,
-              #eef2f7 50%,
-              #e5e7eb 100%
-            );
-          font-family:
-            Inter,
-            ui-sans-serif,
-            system-ui,
-            -apple-system,
-            BlinkMacSystemFont,
-            "Segoe UI",
-            sans-serif;
+          padding: 32px;
         }
 
-        button,
-        textarea,
-        input {
-          font: inherit;
-        }
-
-        .shell {
-          width: min(1500px, 100%);
+        .bulk-container {
+          max-width: 1400px;
           margin: 0 auto;
         }
 
-        .topbar {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 20px;
-          margin-bottom: 20px;
-        }
-
-        .brand {
-          display: flex;
-          align-items: center;
-          gap: 13px;
-        }
-
-        .logo {
-          width: 45px;
-          height: 45px;
-          border-radius: 15px;
-          display: grid;
-          place-items: center;
-          color: white;
-          font-weight: 900;
-          background: linear-gradient(
-            135deg,
-            #0f172a,
-            #374151
-          );
-          box-shadow:
-            0 12px 28px rgba(15, 23, 42, 0.18),
-            inset 0 1px 0 rgba(255, 255, 255, 0.2);
-        }
-
-        .brand-title {
-          font-size: 18px;
-          font-weight: 850;
-          letter-spacing: -0.03em;
-        }
-
-        .brand-subtitle {
-          margin-top: 3px;
-          color: #64748b;
-          font-size: 11px;
-        }
-
-        .top-actions {
-          display: flex;
-          gap: 9px;
-        }
-
-        .top-button {
-          border: 1px solid rgba(148, 163, 184, 0.3);
-          border-radius: 12px;
-          padding: 10px 14px;
-          background: rgba(255, 255, 255, 0.65);
-          color: #1f2937;
-          cursor: pointer;
-          transition: 0.2s ease;
-          backdrop-filter: blur(15px);
-        }
-
-        .top-button:hover {
-          background: white;
-          transform: translateY(-1px);
-        }
-
-        .hero {
-          margin-bottom: 18px;
-          padding: 27px;
-          border: 1px solid rgba(148, 163, 184, 0.28);
-          border-radius: 24px;
-          background: rgba(255, 255, 255, 0.66);
-          box-shadow: 0 18px 55px rgba(15, 23, 42, 0.07);
-          backdrop-filter: blur(20px);
-        }
-
-        .eyebrow {
-          display: inline-flex;
-          align-items: center;
-          gap: 7px;
-          padding: 6px 10px;
-          border-radius: 999px;
-          background: rgba(15, 23, 42, 0.06);
-          color: #475569;
-          font-size: 10px;
-          font-weight: 800;
-          letter-spacing: 0.08em;
-          text-transform: uppercase;
-        }
-
-        .hero h1 {
-          margin: 12px 0 0;
-          font-size: clamp(28px, 4vw, 43px);
-          line-height: 1.05;
-          letter-spacing: -0.05em;
-        }
-
-        .hero p {
-          max-width: 820px;
-          margin: 12px 0 0;
-          color: #64748b;
-          font-size: 14px;
-          line-height: 1.6;
-        }
-
-        .workspace {
-          display: grid;
-          grid-template-columns: minmax(0, 1.55fr) minmax(
-              320px,
-              0.75fr
-            );
-          gap: 18px;
-          align-items: start;
-        }
-
-        .left,
-        .right {
-          display: flex;
-          flex-direction: column;
-          gap: 18px;
-        }
-
-        .card {
-          padding: 21px;
-          border: 1px solid rgba(148, 163, 184, 0.27);
-          border-radius: 21px;
-          background: rgba(255, 255, 255, 0.68);
-          box-shadow: 0 14px 45px rgba(15, 23, 42, 0.055);
-          backdrop-filter: blur(18px);
-        }
-
-        .card-head {
+        .bulk-header {
           display: flex;
           justify-content: space-between;
           align-items: flex-start;
-          gap: 15px;
-          margin-bottom: 17px;
+          gap: 24px;
+          margin-bottom: 28px;
         }
 
-        .title-line {
-          display: flex;
-          align-items: center;
-          gap: 9px;
-          font-size: 15px;
-          font-weight: 800;
-        }
-
-        .step {
-          width: 26px;
-          height: 26px;
-          border-radius: 9px;
-          display: grid;
-          place-items: center;
-          background: #111827;
-          color: white;
-          font-size: 11px;
-          font-weight: 800;
-        }
-
-        .subtitle {
-          margin-top: 5px;
-          color: #64748b;
-          font-size: 11px;
-          line-height: 1.5;
-        }
-
-        .count-pill {
-          padding: 6px 9px;
-          border-radius: 999px;
-          background: #f1f5f9;
-          color: #475569;
-          font-size: 10px;
+        .bulk-title {
+          font-size: 32px;
           font-weight: 750;
+          letter-spacing: -0.8px;
+          margin: 0;
+        }
+
+        .bulk-subtitle {
+          margin: 8px 0 0;
+          color: #667085;
+          font-size: 15px;
+          line-height: 1.6;
+        }
+
+        .connection-count {
+          border: 1px solid #e4e7ec;
+          background: rgba(255, 255, 255, 0.8);
+          border-radius: 14px;
+          padding: 11px 15px;
+          font-size: 13px;
+          color: #475467;
           white-space: nowrap;
         }
 
-        .app-grid {
+        .connection-count strong {
+          color: #111827;
+        }
+
+        .apps-panel,
+        .contacts-panel,
+        .composer-panel,
+        .preview-panel {
+          background: rgba(255, 255, 255, 0.88);
+          border: 1px solid #e4e7ec;
+          border-radius: 20px;
+          box-shadow: 0 10px 35px rgba(16, 24, 40, 0.045);
+        }
+
+        .apps-panel {
+          padding: 22px;
+          margin-bottom: 20px;
+        }
+
+        .section-head {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-end;
+          gap: 20px;
+          margin-bottom: 18px;
+        }
+
+        .section-title {
+          font-size: 17px;
+          font-weight: 700;
+          margin: 0;
+        }
+
+        .section-description {
+          margin: 5px 0 0;
+          color: #667085;
+          font-size: 13px;
+        }
+
+        .apps-grid {
           display: grid;
           grid-template-columns: repeat(4, minmax(0, 1fr));
-          gap: 10px;
+          gap: 12px;
         }
 
         .app-card {
           position: relative;
-          min-height: 110px;
-          padding: 14px;
+          border: 1px solid #e4e7ec;
+          background: #fff;
+          border-radius: 16px;
+          padding: 15px;
           text-align: left;
-          border: 1px solid rgba(148, 163, 184, 0.27);
-          border-radius: 15px;
-          background: rgba(248, 250, 252, 0.7);
           cursor: pointer;
-          transition: 0.2s ease;
+          transition:
+            border-color 0.18s ease,
+            box-shadow 0.18s ease,
+            transform 0.18s ease;
         }
 
         .app-card:hover {
-          background: white;
-          transform: translateY(-2px);
+          transform: translateY(-1px);
+          border-color: #c7ccd5;
+          box-shadow: 0 8px 22px rgba(16, 24, 40, 0.07);
         }
 
         .app-card.selected {
           border-color: #111827;
-          box-shadow: inset 0 0 0 1px #111827;
-          background: #f8fafc;
+          box-shadow: 0 0 0 1px #111827;
         }
 
-        .app-icon {
-          width: 37px;
-          height: 37px;
-          display: grid;
-          place-items: center;
-          border-radius: 11px;
-          background: white;
-          border: 1px solid rgba(148, 163, 184, 0.22);
-          font-size: 18px;
-          margin-bottom: 10px;
+        .app-card.connected {
+          background: #fbfffc;
         }
 
-        .app-name {
-          font-size: 12px;
-          font-weight: 800;
+        .app-card.not-connected {
+          opacity: 0.92;
         }
 
-        .app-description {
-          margin-top: 3px;
-          color: #64748b;
-          font-size: 9px;
-        }
-
-        .check {
-          position: absolute;
-          top: 9px;
-          right: 9px;
-          width: 20px;
-          height: 20px;
-          display: grid;
-          place-items: center;
-          border-radius: 7px;
-          background: #111827;
-          color: white;
-          font-size: 10px;
-        }
-
-        .contact-app-tabs {
-          display: flex;
-          gap: 8px;
-          overflow-x: auto;
-          padding-bottom: 5px;
-        }
-
-        .contact-app-tab {
-          display: inline-flex;
-          align-items: center;
-          gap: 7px;
-          flex-shrink: 0;
-          padding: 9px 12px;
-          border: 1px solid rgba(148, 163, 184, 0.28);
-          border-radius: 12px;
-          background: rgba(248, 250, 252, 0.72);
-          color: #475569;
-          cursor: pointer;
-          font-size: 11px;
-          font-weight: 750;
-        }
-
-        .contact-app-tab.active {
-          background: #111827;
-          color: white;
-          border-color: #111827;
-        }
-
-        .contact-list {
-          margin-top: 15px;
-          min-height: 230px;
-          border-radius: 16px;
-          border: 1px dashed rgba(148, 163, 184, 0.38);
-          background: rgba(248, 250, 252, 0.45);
-          overflow: hidden;
-        }
-
-        .contact-toolbar {
+        .app-top {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding: 11px 13px;
-          border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+          gap: 10px;
         }
 
-        .toolbar-button {
-          border: 0;
-          background: transparent;
-          color: #334155;
+        .app-icon {
+          width: 42px;
+          height: 42px;
+          display: grid;
+          place-items: center;
+          border-radius: 12px;
+          background: #f2f4f7;
+          font-size: 21px;
+        }
+
+        .app-card.selected .app-icon {
+          background: #111827;
+        }
+
+        .status-pill {
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          border-radius: 999px;
+          padding: 5px 8px;
+          font-size: 10px;
+          font-weight: 700;
+        }
+
+        .status-connected {
+          background: #ecfdf3;
+          color: #027a48;
+        }
+
+        .status-not-connected {
+          background: #f2f4f7;
+          color: #667085;
+        }
+
+        .app-name {
+          margin-top: 13px;
+          font-size: 14px;
+          font-weight: 700;
+        }
+
+        .app-description {
+          margin-top: 4px;
+          color: #667085;
+          font-size: 12px;
+        }
+
+        .app-action {
+          margin-top: 13px;
+          font-size: 12px;
+          font-weight: 650;
+          color: #344054;
+        }
+
+        .app-card.connected .app-action {
+          color: #027a48;
+        }
+
+        .main-grid {
+          display: grid;
+          grid-template-columns: minmax(0, 1.35fr) minmax(340px, 0.65fr);
+          gap: 20px;
+          align-items: start;
+        }
+
+        .contacts-panel {
+          min-height: 500px;
+          overflow: hidden;
+        }
+
+        .contacts-head {
+          padding: 21px 22px 0;
+        }
+
+        .app-tabs {
+          display: flex;
+          gap: 8px;
+          overflow-x: auto;
+          padding: 16px 22px 0;
+        }
+
+        .app-tab {
+          flex: 0 0 auto;
+          display: inline-flex;
+          align-items: center;
+          gap: 7px;
+          border: 1px solid #e4e7ec;
+          background: #fff;
+          border-radius: 11px;
+          padding: 9px 12px;
           cursor: pointer;
-          font-size: 11px;
-          font-weight: 750;
+          font-size: 12px;
+          font-weight: 650;
+          color: #475467;
         }
 
-        .empty-state {
-          min-height: 185px;
+        .app-tab.active {
+          background: #111827;
+          color: #fff;
+          border-color: #111827;
+        }
+
+        .contact-area {
+          padding: 20px 22px 24px;
+        }
+
+        .empty-contacts {
+          min-height: 300px;
           display: flex;
           align-items: center;
           justify-content: center;
-          flex-direction: column;
-          padding: 30px;
           text-align: center;
-          color: #64748b;
+          border: 1px dashed #d0d5dd;
+          border-radius: 16px;
+          padding: 35px;
+          background: #fcfcfd;
         }
 
         .empty-icon {
-          width: 46px;
-          height: 46px;
+          width: 52px;
+          height: 52px;
+          margin: 0 auto 14px;
           display: grid;
           place-items: center;
           border-radius: 15px;
-          background: white;
-          border: 1px solid rgba(148, 163, 184, 0.22);
-          font-size: 20px;
-          margin-bottom: 10px;
+          background: #f2f4f7;
+          font-size: 22px;
         }
 
         .empty-title {
-          color: #334155;
-          font-size: 13px;
-          font-weight: 800;
+          font-size: 15px;
+          font-weight: 700;
         }
 
         .empty-text {
-          max-width: 390px;
-          margin-top: 6px;
-          font-size: 11px;
-          line-height: 1.55;
+          max-width: 420px;
+          margin: 7px auto 0;
+          color: #667085;
+          font-size: 13px;
+          line-height: 1.6;
+        }
+
+        .contacts-list {
+          display: grid;
+          gap: 9px;
         }
 
         .contact-row {
           display: flex;
           align-items: center;
-          gap: 10px;
-          padding: 11px 13px;
-          border-bottom: 1px solid rgba(148, 163, 184, 0.15);
-          cursor: pointer;
+          gap: 12px;
+          padding: 12px;
+          border: 1px solid #eaecf0;
+          border-radius: 13px;
         }
 
-        .contact-row:last-child {
-          border-bottom: 0;
+        .contact-row input {
+          width: 17px;
+          height: 17px;
         }
 
-        .contact-checkbox {
-          width: 18px;
-          height: 18px;
-          display: grid;
-          place-items: center;
-          border: 1px solid #94a3b8;
-          border-radius: 6px;
-          font-size: 10px;
-        }
-
-        .contact-checkbox.selected {
-          background: #111827;
-          border-color: #111827;
-          color: white;
-        }
-
-        .contact-avatar {
-          width: 34px;
-          height: 34px;
-          display: grid;
-          place-items: center;
-          flex-shrink: 0;
-          border-radius: 11px;
-          background: #e2e8f0;
-          color: #334155;
-          font-size: 11px;
-          font-weight: 800;
+        .contact-info {
+          min-width: 0;
         }
 
         .contact-name {
-          font-size: 12px;
-          font-weight: 750;
+          font-size: 13px;
+          font-weight: 650;
         }
 
         .contact-address {
           margin-top: 2px;
-          color: #64748b;
-          font-size: 10px;
+          color: #667085;
+          font-size: 12px;
+          overflow: hidden;
+          text-overflow: ellipsis;
         }
 
-        textarea {
+        .composer-panel {
+          padding: 20px;
+        }
+
+        .textarea {
           width: 100%;
-          min-height: 190px;
+          min-height: 180px;
           resize: vertical;
-          padding: 15px;
-          border: 1px solid rgba(148, 163, 184, 0.3);
-          border-radius: 16px;
+          border: 1px solid #d0d5dd;
+          border-radius: 14px;
+          padding: 14px;
           outline: none;
-          background: rgba(248, 250, 252, 0.72);
-          color: #111827;
-          font-size: 13px;
+          font: inherit;
+          font-size: 14px;
           line-height: 1.6;
         }
 
-        textarea:focus,
-        input:focus {
-          border-color: #334155;
-          background: white;
-          box-shadow: 0 0 0 3px rgba(15, 23, 42, 0.06);
+        .textarea:focus {
+          border-color: #98a2b3;
+          box-shadow: 0 0 0 3px rgba(16, 24, 40, 0.06);
         }
 
-        .composer-bottom {
+        .composer-actions {
           display: flex;
           align-items: center;
           justify-content: space-between;
           gap: 10px;
-          margin-top: 10px;
-        }
-
-        .attach {
-          display: inline-flex;
-          align-items: center;
-          gap: 7px;
-          padding: 8px 11px;
-          border: 1px dashed #94a3b8;
-          border-radius: 11px;
-          color: #475569;
-          background: rgba(255, 255, 255, 0.5);
-          cursor: pointer;
-          font-size: 11px;
-        }
-
-        .attach input {
-          display: none;
-        }
-
-        .attachment {
-          margin-top: 10px;
-          padding: 9px 11px;
-          border-radius: 10px;
-          background: #f1f5f9;
-          color: #475569;
-          font-size: 10px;
-        }
-
-        .preview {
-          min-height: 150px;
-          padding: 15px;
-          border-radius: 16px;
-          background: #111827;
-          color: white;
-          white-space: pre-wrap;
-          word-break: break-word;
-          font-size: 12px;
-          line-height: 1.6;
-        }
-
-        .preview-empty {
-          color: #94a3b8;
-          font-style: italic;
-        }
-
-        .summary {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 7px;
           margin-top: 12px;
         }
 
-        .summary-pill {
-          padding: 6px 9px;
-          border-radius: 999px;
-          background: #f1f5f9;
-          color: #475569;
-          font-size: 10px;
-          font-weight: 700;
-        }
-
-        .schedule {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 12px;
-          padding: 13px;
-          border-radius: 14px;
-          background: #f8fafc;
-          border: 1px solid rgba(148, 163, 184, 0.2);
-        }
-
-        .schedule-info {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-        }
-
-        .toggle {
-          width: 42px;
-          height: 24px;
-          padding: 3px;
-          border: 0;
-          border-radius: 999px;
-          background: #cbd5e1;
+        .attachment-button {
+          border: 1px solid #d0d5dd;
+          background: #fff;
+          border-radius: 10px;
+          padding: 9px 11px;
           cursor: pointer;
+          font-size: 12px;
         }
 
-        .toggle.active {
-          background: #111827;
+        .attachment-input {
+          display: none;
         }
 
-        .toggle-dot {
-          display: block;
-          width: 18px;
-          height: 18px;
-          border-radius: 50%;
-          background: white;
-          transition: 0.2s ease;
+        .schedule-box {
+          margin-top: 18px;
+          border-top: 1px solid #eaecf0;
+          padding-top: 17px;
         }
 
-        .toggle.active .toggle-dot {
-          transform: translateX(18px);
+        .schedule-toggle {
+          display: flex;
+          align-items: center;
+          gap: 9px;
+          font-size: 13px;
+          font-weight: 650;
         }
 
-        .date-time {
+        .schedule-fields {
           display: grid;
           grid-template-columns: 1fr 1fr;
-          gap: 8px;
-          margin-top: 10px;
+          gap: 9px;
+          margin-top: 12px;
         }
 
-        input[type="date"],
-        input[type="time"] {
+        .schedule-fields input {
           width: 100%;
+          border: 1px solid #d0d5dd;
+          border-radius: 10px;
           padding: 10px;
-          border: 1px solid rgba(148, 163, 184, 0.3);
-          border-radius: 11px;
-          outline: none;
-          background: #f8fafc;
-          color: #1f2937;
-          font-size: 11px;
+          font: inherit;
+          font-size: 12px;
+        }
+
+        .preview-panel {
+          margin-top: 20px;
+          padding: 20px;
+        }
+
+        .preview-message {
+          border: 1px solid #eaecf0;
+          border-radius: 14px;
+          background: #fcfcfd;
+          padding: 14px;
+          white-space: pre-wrap;
+          word-break: break-word;
+          font-size: 13px;
+          line-height: 1.6;
+          min-height: 100px;
         }
 
         .send-button {
           width: 100%;
-          margin-top: 12px;
-          padding: 13px 15px;
-          border: 1px solid #111827;
-          border-radius: 13px;
+          margin-top: 14px;
+          border: 0;
+          border-radius: 12px;
           background: #111827;
-          color: white;
+          color: #fff;
+          padding: 13px 15px;
+          font-size: 13px;
+          font-weight: 700;
           cursor: pointer;
-          font-weight: 800;
-          transition: 0.2s ease;
         }
 
-        .send-button:hover:not(:disabled) {
-          transform: translateY(-1px);
+        .send-button:hover {
           background: #1f2937;
         }
 
-        .send-button:disabled {
-          opacity: 0.42;
-          cursor: not-allowed;
+        .send-meta {
+          display: flex;
+          justify-content: space-between;
+          gap: 12px;
+          margin-top: 10px;
+          color: #667085;
+          font-size: 11px;
         }
 
-        .info {
-          margin-top: 11px;
-          padding: 11px;
-          border-radius: 11px;
-          background: #f1f5f9;
-          color: #64748b;
-          font-size: 10px;
-          line-height: 1.55;
+        .notice {
+          position: fixed;
+          right: 22px;
+          bottom: 22px;
+          z-index: 100;
+          max-width: 390px;
+          border: 1px solid #d0d5dd;
+          background: #111827;
+          color: #fff;
+          border-radius: 13px;
+          padding: 13px 15px;
+          box-shadow: 0 18px 50px rgba(16, 24, 40, 0.2);
+          font-size: 13px;
+        }
+
+        .modal-backdrop {
+          position: fixed;
+          inset: 0;
+          z-index: 90;
+          display: grid;
+          place-items: center;
+          padding: 20px;
+          background: rgba(16, 24, 40, 0.42);
+          backdrop-filter: blur(5px);
+        }
+
+        .connect-modal {
+          width: min(440px, 100%);
+          border-radius: 20px;
+          background: #fff;
+          border: 1px solid #eaecf0;
+          box-shadow: 0 25px 80px rgba(16, 24, 40, 0.22);
+          padding: 24px;
+        }
+
+        .modal-icon {
+          width: 48px;
+          height: 48px;
+          display: grid;
+          place-items: center;
+          border-radius: 14px;
+          background: #f2f4f7;
+          font-size: 23px;
+          margin-bottom: 16px;
+        }
+
+        .modal-title {
+          margin: 0;
+          font-size: 19px;
+          font-weight: 750;
+        }
+
+        .modal-text {
+          margin: 8px 0 0;
+          color: #667085;
+          font-size: 13px;
+          line-height: 1.65;
+        }
+
+        .modal-actions {
+          display: flex;
+          justify-content: flex-end;
+          gap: 9px;
+          margin-top: 22px;
+        }
+
+        .modal-cancel,
+        .modal-connect {
+          border-radius: 10px;
+          padding: 10px 14px;
+          font-size: 12px;
+          font-weight: 700;
+          cursor: pointer;
+        }
+
+        .modal-cancel {
+          border: 1px solid #d0d5dd;
+          background: #fff;
+          color: #344054;
+        }
+
+        .modal-connect {
+          border: 0;
+          background: #111827;
+          color: #fff;
         }
 
         @media (max-width: 1050px) {
-          .workspace {
-            grid-template-columns: 1fr;
-          }
-
-          .app-grid {
-            grid-template-columns: repeat(4, minmax(0, 1fr));
-          }
-        }
-
-        @media (max-width: 700px) {
-          .bulk-page {
-            padding: 12px;
-          }
-
-          .topbar {
-            align-items: flex-start;
-            flex-direction: column;
-          }
-
-          .top-actions {
-            width: 100%;
-          }
-
-          .top-button {
-            flex: 1;
-          }
-
-          .hero {
-            padding: 20px;
-          }
-
-          .card {
-            padding: 16px;
-          }
-
-          .app-grid {
+          .apps-grid {
             grid-template-columns: repeat(2, minmax(0, 1fr));
           }
 
-          .date-time {
+          .main-grid {
+            grid-template-columns: 1fr;
+          }
+        }
+
+        @media (max-width: 650px) {
+          .bulk-shell {
+            padding: 18px;
+          }
+
+          .bulk-header {
+            flex-direction: column;
+          }
+
+          .bulk-title {
+            font-size: 26px;
+          }
+
+          .apps-grid {
+            grid-template-columns: 1fr;
+          }
+
+          .schedule-fields {
             grid-template-columns: 1fr;
           }
         }
       `}</style>
 
-      <div className="shell">
-        <header className="topbar">
-          <div className="brand">
-            <div className="logo">Z</div>
-
+      <div className="bulk-shell">
+        <div className="bulk-container">
+          <header className="bulk-header">
             <div>
-              <div className="brand-title">
-                ZUQEN Multi-Channel Messenger
-              </div>
+              <h1 className="bulk-title">Bulk Messenger</h1>
+              <p className="bulk-subtitle">
+                Connect your communication apps, select eligible contacts,
+                compose one message, and send or schedule it.
+              </p>
+            </div>
 
-              <div className="brand-subtitle">
-                Bulk communication workspace
+            <div className="connection-count">
+              <strong>{connectedPlatforms.length}</strong> connected
+              {" · "}
+              <strong>{selectedApps.length}</strong> selected
+            </div>
+          </header>
+
+          <section className="apps-panel">
+            <div className="section-head">
+              <div>
+                <h2 className="section-title">Connect & Select Apps</h2>
+                <p className="section-description">
+                  Only connected apps can be selected for messaging.
+                </p>
               </div>
             </div>
-          </div>
 
-          <div className="top-actions">
-            <button
-              type="button"
-              className="top-button"
-              onClick={clearEverything}
-            >
-              Clear
-            </button>
+            <div className="apps-grid">
+              {PLATFORMS.map((platform) => {
+                const isConnected = connectedApps.includes(platform.id);
+                const isSelected = selectedApps.includes(platform.id);
 
-            <button
-              type="button"
-              className="top-button"
-              onClick={() => {
-                window.location.href = "/";
-              }}
-            >
-              ← Back to ZUQEN
-            </button>
-          </div>
-        </header>
+                return (
+                  <button
+                    key={platform.id}
+                    type="button"
+                    className={`app-card ${
+                      isConnected ? "connected" : "not-connected"
+                    } ${isSelected ? "selected" : ""}`}
+                    onClick={() => handleAppClick(platform)}
+                  >
+                    <div className="app-top">
+                      <span className="app-icon">{platform.icon}</span>
 
-        <section className="hero">
-          <div className="eyebrow">
-            <span>●</span>
-            Multi-Channel Bulk Messaging
-          </div>
+                      <span
+                        className={`status-pill ${
+                          isConnected
+                            ? "status-connected"
+                            : "status-not-connected"
+                        }`}
+                      >
+                        {isConnected ? "● Connected" : "○ Not connected"}
+                      </span>
+                    </div>
 
-          <h1>Send Bulk to Eligible Contacts</h1>
+                    <div className="app-name">{platform.name}</div>
 
-          <p>
-            Connect your communication apps, select the apps you want
-            to use, choose eligible contacts from each selected app,
-            write one message, preview it, and prepare the campaign.
-          </p>
-        </section>
+                    <div className="app-description">
+                      {platform.description}
+                    </div>
 
-        <div className="workspace">
-          <div className="left">
-            <section className="card">
-              <div className="card-head">
-                <div>
-                  <div className="title-line">
-                    <span className="step">1</span>
-                    Select Communication Apps
-                  </div>
+                    <div className="app-action">
+                      {isConnected
+                        ? isSelected
+                          ? "Selected ✓"
+                          : "Click to select"
+                        : "Connect required →"}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
 
-                  <div className="subtitle">
-                    Choose the channels you want to use for this
-                    campaign.
-                  </div>
-                </div>
-
-                <div className="count-pill">
-                  {selectedApps.length} selected
-                </div>
+          <div className="main-grid">
+            <section className="contacts-panel">
+              <div className="contacts-head">
+                <h2 className="section-title">Eligible Contacts</h2>
+                <p className="section-description">
+                  Contacts are separated by app. No cross-app matching is used.
+                </p>
               </div>
 
-              <div className="app-grid">
-                {PLATFORMS.map((platform) => {
-                  const selected = selectedApps.includes(platform.id);
-
-                  return (
+              {selectedPlatforms.length > 0 ? (
+                <div className="app-tabs">
+                  {selectedPlatforms.map((platform) => (
                     <button
                       key={platform.id}
                       type="button"
-                      className={`app-card ${
-                        selected ? "selected" : ""
+                      className={`app-tab ${
+                        activeApp === platform.id ? "active" : ""
                       }`}
-                      onClick={() => toggleApp(platform.id)}
+                      onClick={() => setActiveApp(platform.id)}
                     >
-                      {selected && (
-                        <span className="check">✓</span>
-                      )}
-
-                      <div className="app-icon">
-                        {platform.icon}
-                      </div>
-
-                      <div className="app-name">
-                        {platform.name}
-                      </div>
-
-                      <div className="app-description">
-                        {platform.description}
-                      </div>
+                      <span>{platform.icon}</span>
+                      <span>{platform.name}</span>
                     </button>
-                  );
-                })}
-              </div>
-            </section>
-
-            <section className="card">
-              <div className="card-head">
-                <div>
-                  <div className="title-line">
-                    <span className="step">2</span>
-                    Eligible Contacts
-                  </div>
-
-                  <div className="subtitle">
-                    Select an app above to view contacts from that
-                    connected app.
-                  </div>
+                  ))}
                 </div>
-
-                <div className="count-pill">
-                  {totalSelectedContacts} selected
+              ) : (
+                <div className="app-tabs">
+                  <span
+                    style={{
+                      color: "#667085",
+                      fontSize: 12,
+                      padding: "9px 0",
+                    }}
+                  >
+                    Select a connected app above to view its contacts.
+                  </span>
                 </div>
-              </div>
+              )}
 
-              {selectedPlatformObjects.length > 0 ? (
-                <>
-                  <div className="contact-app-tabs">
-                    {selectedPlatformObjects.map((platform) => (
-                      <button
-                        key={platform.id}
-                        type="button"
-                        className={`contact-app-tab ${
-                          activeApp === platform.id
-                            ? "active"
-                            : ""
-                        }`}
-                        onClick={() =>
-                          selectAppForContacts(platform.id)
-                        }
-                      >
-                        <span>{platform.icon}</span>
-                        {platform.name}
-                      </button>
-                    ))}
-                  </div>
+              <div className="contact-area">
+                {activeApp ? (
+                  (() => {
+                    const contacts = contactsByApp[activeApp] ?? [];
+                    const activePlatform = PLATFORMS.find(
+                      (platform) => platform.id === activeApp
+                    );
 
-                  <div className="contact-list">
-                    {activeApp ? (
-                      <>
-                        <div className="contact-toolbar">
-                          <span className="count-pill">
-                            {activeSelectedContacts.length} selected
-                          </span>
-
-                          <div
-                            style={{
-                              display: "flex",
-                              gap: 12,
-                            }}
-                          >
-                            <button
-                              type="button"
-                              className="toolbar-button"
-                              onClick={selectAllActiveContacts}
-                            >
-                              {activeContacts.length > 0 &&
-                              activeSelectedContacts.length ===
-                                activeContacts.length
-                                ? "Deselect all"
-                                : "Select all"}
-                            </button>
-
-                            <button
-                              type="button"
-                              className="toolbar-button"
-                              onClick={
-                                clearSelectedContactsForActiveApp
-                              }
-                            >
-                              Clear
-                            </button>
-                          </div>
-                        </div>
-
-                        {activeContacts.length === 0 ? (
-                          <div className="empty-state">
+                    if (contacts.length === 0) {
+                      return (
+                        <div className="empty-contacts">
+                          <div>
                             <div className="empty-icon">
-                              {PLATFORMS.find(
-                                (platform) =>
-                                  platform.id === activeApp
-                              )?.icon ?? "◎"}
+                              {activePlatform?.icon ?? "👥"}
                             </div>
 
                             <div className="empty-title">
-                              No contacts available yet
+                              No eligible contacts available
                             </div>
 
-                            <div className="empty-text">
-                              Connect this communication app to
-                              ZUQEN. Once its official connection
-                              provides eligible contacts, they will
-                              appear here.
-                            </div>
+                            <p className="empty-text">
+                              ZUQEN has no contacts to display for this app
+                              yet. Once the official account connection and
+                              contact sync are completed, eligible contacts
+                              will appear here.
+                            </p>
                           </div>
-                        ) : (
-                          activeContacts.map((contact) => {
-                            const selected =
-                              activeSelectedContacts.includes(
-                                contact.id
-                              );
+                        </div>
+                      );
+                    }
 
-                            return (
-                              <div
-                                key={contact.id}
-                                className="contact-row"
-                                onClick={() =>
-                                  toggleContact(contact.id)
+                    return (
+                      <div className="contacts-list">
+                        {contacts.map((contact) => {
+                          const selected =
+                            selectedContactsByApp[activeApp]?.includes(
+                              contact.id
+                            ) ?? false;
+
+                          return (
+                            <label
+                              key={contact.id}
+                              className="contact-row"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={selected}
+                                onChange={() =>
+                                  handleContactToggle(
+                                    activeApp,
+                                    contact.id
+                                  )
                                 }
-                              >
-                                <div
-                                  className={`contact-checkbox ${
-                                    selected ? "selected" : ""
-                                  }`}
-                                >
-                                  {selected ? "✓" : ""}
+                              />
+
+                              <div className="contact-info">
+                                <div className="contact-name">
+                                  {contact.name}
                                 </div>
 
-                                <div className="contact-avatar">
-                                  {contact.name
-                                    .slice(0, 2)
-                                    .toUpperCase()}
-                                </div>
-
-                                <div>
-                                  <div className="contact-name">
-                                    {contact.name}
-                                  </div>
-
-                                  <div className="contact-address">
-                                    {contact.address}
-                                  </div>
+                                <div className="contact-address">
+                                  {contact.address}
                                 </div>
                               </div>
-                            );
-                          })
-                        )}
-                      </>
-                    ) : (
-                      <div className="empty-state">
-                        <div className="empty-icon">◎</div>
-
-                        <div className="empty-title">
-                          Select an app
-                        </div>
-
-                        <div className="empty-text">
-                          The contacts area will show the eligible
-                          contacts of the selected communication app.
-                        </div>
+                            </label>
+                          );
+                        })}
                       </div>
-                    )}
-                  </div>
-                </>
-              ) : (
-                <div className="contact-list">
-                  <div className="empty-state">
-                    <div className="empty-icon">👥</div>
-
-                    <div className="empty-title">
-                      No communication app selected
-                    </div>
-
-                    <div className="empty-text">
-                      Select one or more communication apps above.
-                      Their eligible-contact icons will appear here.
-                    </div>
-                  </div>
-                </div>
-              )}
-            </section>
-
-            <section className="card">
-              <div className="card-head">
-                <div>
-                  <div className="title-line">
-                    <span className="step">3</span>
-                    Compose Message
-                  </div>
-
-                  <div className="subtitle">
-                    Write the message for the selected recipients.
-                  </div>
-                </div>
-              </div>
-
-              <textarea
-                value={message}
-                onChange={(event) =>
-                  setMessage(event.target.value)
-                }
-                maxLength={5000}
-                placeholder="Write your message here..."
-              />
-
-              <div className="composer-bottom">
-                <label className="attach">
-                  📎 Attach media
-                  <input
-                    type="file"
-                    accept="image/*,video/*,.pdf"
-                    onChange={handleAttachment}
-                  />
-                </label>
-
-                <span className="subtitle">
-                  {message.length}/5000
-                </span>
-              </div>
-
-              {attachmentName && (
-                <div className="attachment">
-                  📎 {attachmentName}
-                </div>
-              )}
-            </section>
-          </div>
-
-          <div className="right">
-            <section className="card">
-              <div className="card-head">
-                <div>
-                  <div className="title-line">
-                    <span className="step">4</span>
-                    Preview
-                  </div>
-
-                  <div className="subtitle">
-                    Review your campaign before delivery.
-                  </div>
-                </div>
-              </div>
-
-              <div className="preview">
-                {message.trim() ? (
-                  message
+                    );
+                  })()
                 ) : (
-                  <span className="preview-empty">
-                    Your message preview will appear here.
-                  </span>
-                )}
-              </div>
+                  <div className="empty-contacts">
+                    <div>
+                      <div className="empty-icon">🔗</div>
 
-              <div className="summary">
-                <span className="summary-pill">
-                  {selectedApps.length} apps
-                </span>
+                      <div className="empty-title">
+                        Connect and select an app first
+                      </div>
 
-                <span className="summary-pill">
-                  {totalSelectedContacts} contacts
-                </span>
-
-                {attachmentName && (
-                  <span className="summary-pill">
-                    📎 Media
-                  </span>
+                      <p className="empty-text">
+                        Only apps that have completed their official
+                        connection can be selected and used here.
+                      </p>
+                    </div>
+                  </div>
                 )}
               </div>
             </section>
 
-            <section className="card">
-              <div className="card-head">
-                <div>
-                  <div className="title-line">
-                    <span className="step">5</span>
-                    Send or Schedule
-                  </div>
-
-                  <div className="subtitle">
-                    Choose when the prepared campaign should be
-                    delivered.
+            <div>
+              <section className="composer-panel">
+                <div className="section-head">
+                  <div>
+                    <h2 className="section-title">Compose Message</h2>
+                    <p className="section-description">
+                      Your message will be prepared for the selected
+                      connected apps.
+                    </p>
                   </div>
                 </div>
-              </div>
 
-              <div className="schedule">
-                <div className="schedule-info">
-                  <span>🕒</span>
+                <textarea
+                  className="textarea"
+                  value={message}
+                  onChange={(event) => setMessage(event.target.value)}
+                  placeholder="Write your message..."
+                />
 
+                <div className="composer-actions">
+                  <label className="attachment-button">
+                    📎 {attachmentName || "Attach file"}
+
+                    <input
+                      className="attachment-input"
+                      type="file"
+                      onChange={(event) => {
+                        const file = event.target.files?.[0];
+
+                        setAttachmentName(file?.name ?? "");
+                      }}
+                    />
+                  </label>
+
+                  <span
+                    style={{
+                      color: "#667085",
+                      fontSize: 11,
+                    }}
+                  >
+                    {message.length} characters
+                  </span>
+                </div>
+
+                <div className="schedule-box">
+                  <label className="schedule-toggle">
+                    <input
+                      type="checkbox"
+                      checked={scheduleEnabled}
+                      onChange={(event) =>
+                        setScheduleEnabled(event.target.checked)
+                      }
+                    />
+                    Schedule instead of sending now
+                  </label>
+
+                  {scheduleEnabled && (
+                    <div className="schedule-fields">
+                      <input
+                        type="date"
+                        value={scheduleDate}
+                        onChange={(event) =>
+                          setScheduleDate(event.target.value)
+                        }
+                      />
+
+                      <input
+                        type="time"
+                        value={scheduleTime}
+                        onChange={(event) =>
+                          setScheduleTime(event.target.value)
+                        }
+                      />
+                    </div>
+                  )}
+                </div>
+              </section>
+
+              <section className="preview-panel">
+                <div className="section-head">
                   <div>
-                    <div className="contact-name">
-                      Schedule delivery
-                    </div>
-
-                    <div className="subtitle">
-                      Send at a selected date and time
-                    </div>
+                    <h2 className="section-title">Preview</h2>
+                    <p className="section-description">
+                      Review the message before the real provider sending
+                      system is connected.
+                    </p>
                   </div>
+                </div>
+
+                <div className="preview-message">
+                  {message.trim() || "Your message preview will appear here."}
+                </div>
+
+                <div className="send-meta">
+                  <span>
+                    {selectedApps.length} app
+                    {selectedApps.length === 1 ? "" : "s"}
+                  </span>
+
+                  <span>
+                    {totalSelectedContacts} contact
+                    {totalSelectedContacts === 1 ? "" : "s"}
+                  </span>
                 </div>
 
                 <button
                   type="button"
-                  className={`toggle ${
-                    scheduleEnabled ? "active" : ""
-                  }`}
-                  onClick={() =>
-                    setScheduleEnabled((value) => !value)
-                  }
-                  aria-label="Toggle scheduled delivery"
+                  className="send-button"
+                  onClick={handleSend}
                 >
-                  <span className="toggle-dot" />
+                  {scheduleEnabled ? "Schedule Message" : "Send Message"}
                 </button>
-              </div>
-
-              {scheduleEnabled && (
-                <div className="date-time">
-                  <input
-                    type="date"
-                    value={scheduleDate}
-                    onChange={(event) =>
-                      setScheduleDate(event.target.value)
-                    }
-                  />
-
-                  <input
-                    type="time"
-                    value={scheduleTime}
-                    onChange={(event) =>
-                      setScheduleTime(event.target.value)
-                    }
-                  />
-                </div>
-              )}
-
-              <button
-                type="button"
-                className="send-button"
-                disabled={!canContinue}
-                onClick={() => {
-                  if (!canContinue) return;
-
-                  alert(
-                    scheduleEnabled
-                      ? "Campaign ready for scheduling."
-                      : "Campaign ready for delivery."
-                  );
-                }}
-              >
-                {scheduleEnabled
-                  ? "🕒 Schedule Campaign"
-                  : "📤 Send Campaign"}
-              </button>
-
-              <div className="info">
-                Actual delivery will be connected later through the
-                official APIs of the selected communication platforms.
-                This UI does not send messages by itself.
-              </div>
-            </section>
+              </section>
+            </div>
           </div>
         </div>
       </div>
+
+      {connectModalApp && (
+        <div
+          className="modal-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setConnectModalApp(null);
+            }
+          }}
+        >
+          <div className="connect-modal">
+            <div className="modal-icon">{connectModalApp.icon}</div>
+
+            <h2 className="modal-title">
+              First connect {connectModalApp.name}
+            </h2>
+
+            <p className="modal-text">
+              You selected {connectModalApp.name}, but this account is not
+              connected to ZUQEN yet. Connect it through the official
+              authorization system before selecting contacts or sending
+              messages.
+            </p>
+
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="modal-cancel"
+                onClick={() => setConnectModalApp(null)}
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                className="modal-connect"
+                onClick={() => handleConnect(connectModalApp)}
+              >
+                Connect {connectModalApp.name}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {notice && <div className="notice">{notice}</div>}
     </main>
   );
 }
