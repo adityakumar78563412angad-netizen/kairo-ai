@@ -2198,7 +2198,40 @@ export default function HomePage() {
                   <span>{signingOut ? "Signing out..." : "Sign out"}</span>
                 </button>
               )}
+<div
+  style={{
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: "8px",
+    marginTop: "10px",
+    fontSize: "9px",
+  }}
+>
+  <a
+    href="/privacy"
+    style={{
+      color: "var(--muted-2)",
+      textDecoration: "none",
+    }}
+  >
+    Privacy Policy
+  </a>
 
+  <span style={{ color: "var(--muted-2)", opacity: 0.5 }}>
+    |
+  </span>
+
+  <a
+    href="/terms"
+    style={{
+      color: "var(--muted-2)",
+      textDecoration: "none",
+    }}
+  >
+    Terms
+  </a>
+</div>
               <button onClick={toggleTheme}>
                 <Icon name={lightMode ? "moon" : "sun"} size={15} />
                 <span>{lightMode ? "Switch to dark theme" : "Switch to light theme"}</span>
