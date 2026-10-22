@@ -572,7 +572,7 @@ function FlappyBirdGame({
       velocity = -430;
     };
 
-    const onKeyDown = (event: KeyboardEvent) => {
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.code === "Space" || event.code === "ArrowUp") {
         event.preventDefault();
         flap();
