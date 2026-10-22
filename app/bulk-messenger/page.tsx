@@ -158,21 +158,18 @@ export default function BulkMessengerPage() {
       return [...current, platformId];
     });
   }
+function handleConnect(platform: Platform) {
+  setConnectModalApp(null);
 
-  function handleConnect(platform: Platform) {
-    /*
-     * IMPORTANT:
-     * This UI does NOT fake a connection.
-     *
-     * The real OAuth/API connection for each platform will be wired here.
-     * Until then, we intentionally do not mark the platform as connected.
-     */
-    setConnectModalApp(null);
-
-    showNotice(
-      `${platform.name} connection will be completed through its official authorization flow.`
-    );
+  if (platform.id === "email") {
+    window.location.href = "/api/connections/google/connect";
+    return;
   }
+
+  showNotice(
+    `${platform.name} connection will be completed through its official authorization flow.`
+  );
+}
 
   function handleContactToggle(appId: string, contactId: string) {
     if (!connectedApps.includes(appId)) {
