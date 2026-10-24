@@ -13,6 +13,7 @@ type Contact = {
   id: string;
   name: string;
   address: string;
+  source?: "google-contact" | "gmail";
 };
 
 type ConnectionResponse = {
@@ -44,7 +45,7 @@ const PLATFORMS: Platform[] = [
     id: "email",
     name: "Email",
     icon: "✉️",
-    description: "Email",
+    description: "Gmail / Email",
   },
   {
     id: "instagram",
@@ -222,8 +223,16 @@ export default function BulkMessengerPage() {
         [appId]: true,
       }));
 
+      /*
+       * Email recipients come from TWO real Google sources:
+       *
+       * 1. Google Contacts
+       * 2. Gmail message headers (From / To / Cc)
+       *
+       * The backend combines and deduplicates them.
+       */
       const response = await fetch(
-        "/api/connections/google/contacts",
+        "/api/connections/google/email-recipients",
         {
           method: "GET",
           cache: "no-store",
@@ -235,14 +244,17 @@ export default function BulkMessengerPage() {
           id: string;
           name: string;
           email: string;
-          source?: string;
+          source?: "google-contact" | "gmail";
         }>;
+        googleContactsCount?: number;
+        gmailContactsCount?: number;
+        totalContacts?: number;
         error?: string;
       } = await response.json();
 
       if (!response.ok) {
         throw new Error(
-          result.error ?? "Unable to load Google contacts."
+          result.error ?? "Unable to load email contacts."
         );
       }
 
@@ -253,6 +265,7 @@ export default function BulkMessengerPage() {
               id: contact.id,
               name: contact.name || contact.email,
               address: contact.email,
+              source: contact.source,
             }))
         : [];
 
@@ -266,12 +279,12 @@ export default function BulkMessengerPage() {
         [appId]: true,
       }));
     } catch (error) {
-      console.error("Unable to load contacts:", error);
+      console.error("Unable to load email contacts:", error);
 
       showNotice(
         error instanceof Error
           ? error.message
-          : "Unable to load contacts."
+          : "Unable to load email contacts."
       );
     } finally {
       setContactsLoadingByApp((current) => ({
@@ -821,7 +834,7 @@ export default function BulkMessengerPage() {
         }
 
         .empty-text {
-          max-width: 420px;
+          max-width: 480px;
           margin: 7px auto 0;
           color: #667085;
           font-size: 13px;
@@ -840,15 +853,24 @@ export default function BulkMessengerPage() {
           padding: 12px;
           border: 1px solid #eaecf0;
           border-radius: 13px;
+          cursor: pointer;
+          background: #fff;
+        }
+
+        .contact-row:hover {
+          border-color: #c7ccd5;
+          background: #fcfcfd;
         }
 
         .contact-row input {
           width: 17px;
           height: 17px;
+          flex: 0 0 auto;
         }
 
         .contact-info {
           min-width: 0;
+          flex: 1;
         }
 
         .contact-name {
@@ -862,6 +884,17 @@ export default function BulkMessengerPage() {
           font-size: 12px;
           overflow: hidden;
           text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .contact-source {
+          flex: 0 0 auto;
+          border-radius: 999px;
+          padding: 5px 8px;
+          background: #f2f4f7;
+          color: #475467;
+          font-size: 10px;
+          font-weight: 700;
         }
 
         .composer-panel {
@@ -1097,6 +1130,10 @@ export default function BulkMessengerPage() {
           .schedule-fields {
             grid-template-columns: 1fr;
           }
+
+          .contact-source {
+            display: none;
+          }
         }
       `}</style>
 
@@ -1107,8 +1144,8 @@ export default function BulkMessengerPage() {
               <h1 className="bulk-title">Bulk Messenger</h1>
 
               <p className="bulk-subtitle">
-                Connect your communication apps, select eligible contacts,
-                compose one message, and send or schedule it.
+                Connect your communication apps, select eligible
+                contacts, compose one message, and send or schedule it.
               </p>
             </div>
 
@@ -1229,8 +1266,9 @@ export default function BulkMessengerPage() {
                 </h2>
 
                 <p className="section-description">
-                  Contacts are separated by app. No cross-app matching
-                  is used.
+                  Contacts are separated by app. For Email,
+                  ZUQEN combines Google Contacts with real Gmail
+                  email interactions. No cross-app matching is used.
                 </p>
               </div>
 
@@ -1291,12 +1329,14 @@ export default function BulkMessengerPage() {
                             </div>
 
                             <div className="empty-title">
-                              Loading eligible contacts...
+                              Loading email contacts...
                             </div>
 
                             <p className="empty-text">
-                              ZUQEN is securely loading the contacts
-                              available through the connected account.
+                              ZUQEN is securely loading real
+                              Google Contacts and Gmail email
+                              interactions available through
+                              your connected account.
                             </p>
                           </div>
                         </div>
@@ -1312,14 +1352,16 @@ export default function BulkMessengerPage() {
                             </div>
 
                             <div className="empty-title">
-                              No eligible contacts available
+                              No email contacts available
                             </div>
 
                             <p className="empty-text">
-                              No contacts with a usable email address
-                              are available from this connected account.
-                              You can reconnect Google if you recently
-                              added the Contacts permission.
+                              No usable email addresses were
+                              found in Google Contacts or Gmail
+                              message headers for this account.
+                              Reconnect Google after granting
+                              the required Gmail permission if
+                              necessary.
                             </p>
                           </div>
                         </div>
@@ -1359,6 +1401,15 @@ export default function BulkMessengerPage() {
                                   {contact.address}
                                 </div>
                               </div>
+
+                              {activeApp === "email" && (
+                                <span className="contact-source">
+                                  {contact.source ===
+                                  "google-contact"
+                                    ? "Google Contact"
+                                    : "Gmail"}
+                                </span>
+                              )}
                             </label>
                           );
                         })}
@@ -1377,8 +1428,9 @@ export default function BulkMessengerPage() {
                       </div>
 
                       <p className="empty-text">
-                        Only apps that have completed their official
-                        connection can be selected and used here.
+                        Only apps that have completed their
+                        official connection can be selected and
+                        used here.
                       </p>
                     </div>
                   </div>
@@ -1395,8 +1447,8 @@ export default function BulkMessengerPage() {
                     </h2>
 
                     <p className="section-description">
-                      Your message will be prepared for the selected
-                      connected apps.
+                      Your message will be prepared for the
+                      selected connected apps.
                     </p>
                   </div>
                 </div>
@@ -1488,8 +1540,8 @@ export default function BulkMessengerPage() {
                     </h2>
 
                     <p className="section-description">
-                      Review the message before the real provider
-                      sending system is connected.
+                      Review the message before the real
+                      provider sending system is connected.
                     </p>
                   </div>
                 </div>
