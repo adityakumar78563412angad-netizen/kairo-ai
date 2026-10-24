@@ -85,7 +85,18 @@ export default function BulkMessengerPage() {
 
   const [connectionsLoading, setConnectionsLoading] = useState(true);
 
-  const [contactsByApp] = useState<Record<string, Contact[]>>({});
+  const [contactsByApp, setContactsByApp] = useState<
+    Record<string, Contact[]>
+  >({});
+
+  const [contactsLoadingByApp, setContactsLoadingByApp] = useState<
+    Record<string, boolean>
+  >({});
+
+  const [contactsLoadedByApp, setContactsLoadedByApp] = useState<
+    Record<string, boolean>
+  >({});
+
   const [selectedContactsByApp, setSelectedContactsByApp] = useState<
     Record<string, string[]>
   >({});
@@ -97,29 +108,19 @@ export default function BulkMessengerPage() {
   const [scheduleDate, setScheduleDate] = useState("");
   const [scheduleTime, setScheduleTime] = useState("");
 
-  const [connectModalApp, setConnectModalApp] = useState<Platform | null>(
-    null
-  );
+  const [connectModalApp, setConnectModalApp] =
+    useState<Platform | null>(null);
 
   const [notice, setNotice] = useState<string | null>(null);
 
-  /*
-   * Provider IDs used by the backend are not always identical
-   * to the IDs used by the frontend.
-   *
-   * Google OAuth represents the Email/Gmail connection,
-   * so google -> email.
-   */
   const providerToPlatform: Record<string, string> = {
     google: "email",
   };
 
-  /*
-   * Load real connections from Supabase through the server API.
-   *
-   * No connection is marked manually.
-   * No fake/demo connection is created here.
-   */
+  const platformToProvider: Record<string, string> = {
+    email: "google",
+  };
+
   useEffect(() => {
     let cancelled = false;
 
@@ -137,7 +138,6 @@ export default function BulkMessengerPage() {
             if (!cancelled) {
               setConnectedApps([]);
             }
-
             return;
           }
 
@@ -187,15 +187,204 @@ export default function BulkMessengerPage() {
     };
   }, []);
 
+  function showNotice(text: string) {
+    setNotice(text);
+
+    window.setTimeout(() => {
+      setNotice(null);
+    }, 3500);
+  }
+
+  async function loadContactsForApp(appId: string) {
+    if (!connectedApps.includes(appId)) {
+      return;
+    }
+
+    if (contactsLoadingByApp[appId]) {
+      return;
+    }
+
+    if (contactsLoadedByApp[appId]) {
+      return;
+    }
+
+    if (appId !== "email") {
+      setContactsLoadedByApp((current) => ({
+        ...current,
+        [appId]: true,
+      }));
+      return;
+    }
+
+    try {
+      setContactsLoadingByApp((current) => ({
+        ...current,
+        [appId]: true,
+      }));
+
+      const response = await fetch(
+        "/api/connections/google/contacts",
+        {
+          method: "GET",
+          cache: "no-store",
+        }
+      );
+
+      const result: {
+        contacts?: Array<{
+          id: string;
+          name: string;
+          email: string;
+          source?: string;
+        }>;
+        error?: string;
+      } = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          result.error ?? "Unable to load Google contacts."
+        );
+      }
+
+      const contacts: Contact[] = Array.isArray(result.contacts)
+        ? result.contacts
+            .filter((contact) => contact.email?.trim())
+            .map((contact) => ({
+              id: contact.id,
+              name: contact.name || contact.email,
+              address: contact.email,
+            }))
+        : [];
+
+      setContactsByApp((current) => ({
+        ...current,
+        [appId]: contacts,
+      }));
+
+      setContactsLoadedByApp((current) => ({
+        ...current,
+        [appId]: true,
+      }));
+    } catch (error) {
+      console.error("Unable to load contacts:", error);
+
+      showNotice(
+        error instanceof Error
+          ? error.message
+          : "Unable to load contacts."
+      );
+    } finally {
+      setContactsLoadingByApp((current) => ({
+        ...current,
+        [appId]: false,
+      }));
+    }
+  }
+
+  useEffect(() => {
+    if (!activeApp) {
+      return;
+    }
+
+    loadContactsForApp(activeApp);
+  }, [activeApp, connectedApps]);
+
+  async function handleDisconnect(platform: Platform) {
+    const provider = platformToProvider[platform.id];
+
+    if (!provider) {
+      showNotice(
+        `${platform.name} disconnect is not available yet.`
+      );
+      return;
+    }
+
+    try {
+      const response = await fetch(
+        `/api/connections/${provider}/disconnect`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      const result: {
+        error?: string;
+        warning?: string;
+      } = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          result.error ?? `Unable to disconnect ${platform.name}.`
+        );
+      }
+
+      setConnectedApps((current) =>
+        current.filter((id) => id !== platform.id)
+      );
+
+      setSelectedApps((current) =>
+        current.filter((id) => id !== platform.id)
+      );
+
+      setSelectedContactsByApp((current) => {
+        const next = { ...current };
+        delete next[platform.id];
+        return next;
+      });
+
+      setContactsByApp((current) => {
+        const next = { ...current };
+        delete next[platform.id];
+        return next;
+      });
+
+      setContactsLoadedByApp((current) => {
+        const next = { ...current };
+        delete next[platform.id];
+        return next;
+      });
+
+      setContactsLoadingByApp((current) => {
+        const next = { ...current };
+        delete next[platform.id];
+        return next;
+      });
+
+      setActiveApp((current) =>
+        current === platform.id ? null : current
+      );
+
+      showNotice(
+        result.warning ??
+          `${platform.name} has been disconnected from ZUQEN.`
+      );
+    } catch (error) {
+      console.error("Disconnect error:", error);
+
+      showNotice(
+        error instanceof Error
+          ? error.message
+          : `Unable to disconnect ${platform.name}.`
+      );
+    }
+  }
+
   const selectedPlatforms = useMemo(
     () =>
-      PLATFORMS.filter((platform) => selectedApps.includes(platform.id)),
+      PLATFORMS.filter((platform) =>
+        selectedApps.includes(platform.id)
+      ),
     [selectedApps]
   );
 
   const connectedPlatforms = useMemo(
     () =>
-      PLATFORMS.filter((platform) => connectedApps.includes(platform.id)),
+      PLATFORMS.filter((platform) =>
+        connectedApps.includes(platform.id)
+      ),
     [connectedApps]
   );
 
@@ -205,14 +394,6 @@ export default function BulkMessengerPage() {
       0
     );
   }, [selectedContactsByApp]);
-
-  function showNotice(text: string) {
-    setNotice(text);
-
-    window.setTimeout(() => {
-      setNotice(null);
-    }, 3500);
-  }
 
   function handleAppClick(platform: Platform) {
     const isConnected = connectedApps.includes(platform.id);
@@ -242,7 +423,9 @@ export default function BulkMessengerPage() {
       const alreadySelected = current.includes(platformId);
 
       if (alreadySelected) {
-        const next = current.filter((id) => id !== platformId);
+        const next = current.filter(
+          (id) => id !== platformId
+        );
 
         if (activeApp === platformId) {
           setActiveApp(next[0] ?? null);
@@ -262,20 +445,12 @@ export default function BulkMessengerPage() {
   function handleConnect(platform: Platform) {
     setConnectModalApp(null);
 
-    /*
-     * Email currently uses the real Google OAuth flow.
-     */
     if (platform.id === "email") {
-      window.location.href = "/api/connections/google/connect";
+      window.location.href =
+        "/api/connections/google/connect";
       return;
     }
 
-    /*
-     * Other providers will use their official authorization
-     * flows when their production integrations are added.
-     *
-     * No fake connection is created.
-     */
     showNotice(
       `${platform.name} connection will be completed through its official authorization flow.`
     );
@@ -327,7 +502,9 @@ export default function BulkMessengerPage() {
     }
 
     if (totalSelectedContacts === 0) {
-      showNotice("Select at least one eligible contact first.");
+      showNotice(
+        "Select at least one eligible contact first."
+      );
       return;
     }
 
@@ -338,17 +515,13 @@ export default function BulkMessengerPage() {
 
     if (scheduleEnabled) {
       if (!scheduleDate || !scheduleTime) {
-        showNotice("Choose a schedule date and time first.");
+        showNotice(
+          "Choose a schedule date and time first."
+        );
         return;
       }
     }
 
-    /*
-     * Real provider sending will be connected through
-     * the production backend/provider adapters.
-     *
-     * No fake send is performed here.
-     */
     showNotice(
       scheduleEnabled
         ? "Schedule request is ready for the real sending system."
@@ -552,9 +725,27 @@ export default function BulkMessengerPage() {
           color: #027a48;
         }
 
+        .disconnect-button {
+          margin-top: 10px;
+          border: 1px solid #f04438;
+          background: #fff;
+          color: #b42318;
+          border-radius: 9px;
+          padding: 7px 10px;
+          font-size: 11px;
+          font-weight: 700;
+          cursor: pointer;
+        }
+
+        .disconnect-button:hover {
+          background: #fef3f2;
+        }
+
         .main-grid {
           display: grid;
-          grid-template-columns: minmax(0, 1.35fr) minmax(340px, 0.65fr);
+          grid-template-columns:
+            minmax(0, 1.35fr)
+            minmax(340px, 0.65fr);
           gap: 20px;
           align-items: start;
         }
@@ -600,7 +791,8 @@ export default function BulkMessengerPage() {
           padding: 20px 22px 24px;
         }
 
-        .empty-contacts {
+        .empty-contacts,
+        .contacts-loading {
           min-height: 300px;
           display: flex;
           align-items: center;
@@ -957,15 +1149,25 @@ export default function BulkMessengerPage() {
                 );
 
                 return (
-                  <button
+                  <div
                     key={platform.id}
-                    type="button"
                     className={`app-card ${
                       isConnected
                         ? "connected"
                         : "not-connected"
                     } ${isSelected ? "selected" : ""}`}
+                    role="button"
+                    tabIndex={0}
                     onClick={() => handleAppClick(platform)}
+                    onKeyDown={(event) => {
+                      if (
+                        event.key === "Enter" ||
+                        event.key === " "
+                      ) {
+                        event.preventDefault();
+                        handleAppClick(platform);
+                      }
+                    }}
                   >
                     <div className="app-top">
                       <span className="app-icon">
@@ -1000,7 +1202,20 @@ export default function BulkMessengerPage() {
                           : "Click to select"
                         : "Connect required →"}
                     </div>
-                  </button>
+
+                    {isConnected && (
+                      <button
+                        type="button"
+                        className="disconnect-button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          handleDisconnect(platform);
+                        }}
+                      >
+                        Disconnect
+                      </button>
+                    )}
+                  </div>
                 );
               })}
             </div>
@@ -1065,6 +1280,29 @@ export default function BulkMessengerPage() {
                         platform.id === activeApp
                     );
 
+                    if (
+                      contactsLoadingByApp[activeApp]
+                    ) {
+                      return (
+                        <div className="contacts-loading">
+                          <div>
+                            <div className="empty-icon">
+                              {activePlatform?.icon ?? "👥"}
+                            </div>
+
+                            <div className="empty-title">
+                              Loading eligible contacts...
+                            </div>
+
+                            <p className="empty-text">
+                              ZUQEN is securely loading the contacts
+                              available through the connected account.
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    }
+
                     if (contacts.length === 0) {
                       return (
                         <div className="empty-contacts">
@@ -1078,11 +1316,10 @@ export default function BulkMessengerPage() {
                             </div>
 
                             <p className="empty-text">
-                              ZUQEN has no contacts to display for
-                              this app yet. Once the official account
-                              connection and contact sync are
-                              completed, eligible contacts will
-                              appear here.
+                              No contacts with a usable email address
+                              are available from this connected account.
+                              You can reconnect Google if you recently
+                              added the Contacts permission.
                             </p>
                           </div>
                         </div>
