@@ -28,6 +28,21 @@ type ConnectionResponse = {
   updated_at?: string;
 };
 
+type SendStatus =
+  | "pending"
+  | "sending"
+  | "sent"
+  | "failed";
+
+type RecipientResult = {
+  email: string;
+  name?: string;
+  status: "sent" | "failed";
+  messageId?: string;
+  threadId?: string;
+  error?: string;
+};
+
 const PLATFORMS: Platform[] = [
   {
     id: "whatsapp",
@@ -80,39 +95,61 @@ const PLATFORMS: Platform[] = [
 ];
 
 export default function BulkMessengerPage() {
-  const [connectedApps, setConnectedApps] = useState<string[]>([]);
-  const [selectedApps, setSelectedApps] = useState<string[]>([]);
-  const [activeApp, setActiveApp] = useState<string | null>(null);
+  const [connectedApps, setConnectedApps] = useState<string[]>(
+    []
+  );
 
-  const [connectionsLoading, setConnectionsLoading] = useState(true);
+  const [selectedApps, setSelectedApps] = useState<string[]>(
+    []
+  );
+
+  const [activeApp, setActiveApp] = useState<string | null>(
+    null
+  );
+
+  const [connectionsLoading, setConnectionsLoading] =
+    useState(true);
 
   const [contactsByApp, setContactsByApp] = useState<
     Record<string, Contact[]>
   >({});
 
-  const [contactsLoadingByApp, setContactsLoadingByApp] = useState<
-    Record<string, boolean>
-  >({});
+  const [contactsLoadingByApp, setContactsLoadingByApp] =
+    useState<Record<string, boolean>>({});
 
-  const [contactsLoadedByApp, setContactsLoadedByApp] = useState<
-    Record<string, boolean>
-  >({});
+  const [contactsLoadedByApp, setContactsLoadedByApp] =
+    useState<Record<string, boolean>>({});
 
-  const [selectedContactsByApp, setSelectedContactsByApp] = useState<
-    Record<string, string[]>
-  >({});
+  const [selectedContactsByApp, setSelectedContactsByApp] =
+    useState<Record<string, string[]>>({});
 
   const [message, setMessage] = useState("");
-  const [attachmentName, setAttachmentName] = useState("");
+  const [subject, setSubject] = useState("");
 
-  const [scheduleEnabled, setScheduleEnabled] = useState(false);
+  const [attachmentName, setAttachmentName] =
+    useState("");
+
+  const [scheduleEnabled, setScheduleEnabled] =
+    useState(false);
+
   const [scheduleDate, setScheduleDate] = useState("");
   const [scheduleTime, setScheduleTime] = useState("");
 
   const [connectModalApp, setConnectModalApp] =
     useState<Platform | null>(null);
 
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(
+    null
+  );
+
+  const [sending, setSending] = useState(false);
+
+  const [sendStatusByContact, setSendStatusByContact] =
+    useState<Record<string, SendStatus>>({});
+
+  const [sendResults, setSendResults] = useState<
+    RecipientResult[]
+  >([]);
 
   const providerToPlatform: Record<string, string> = {
     google: "email",
@@ -129,20 +166,26 @@ export default function BulkMessengerPage() {
       try {
         setConnectionsLoading(true);
 
-        const response = await fetch("/api/connections", {
-          method: "GET",
-          cache: "no-store",
-        });
+        const response = await fetch(
+          "/api/connections",
+          {
+            method: "GET",
+            cache: "no-store",
+          }
+        );
 
         if (!response.ok) {
           if (response.status === 401) {
             if (!cancelled) {
               setConnectedApps([]);
             }
+
             return;
           }
 
-          throw new Error("Failed to load connected accounts.");
+          throw new Error(
+            "Failed to load connected accounts."
+          );
         }
 
         const result: {
@@ -153,23 +196,37 @@ export default function BulkMessengerPage() {
           return;
         }
 
-        const realConnectedApps = Array.isArray(result.connections)
+        const realConnectedApps = Array.isArray(
+          result.connections
+        )
           ? result.connections
               .filter(
-                (connection) => connection.status === "connected"
+                (connection) =>
+                  connection.status === "connected"
               )
               .map((connection) => {
-                return providerToPlatform[connection.provider] ?? null;
+                return (
+                  providerToPlatform[
+                    connection.provider
+                  ] ?? null
+                );
               })
               .filter(
-                (platformId: string | null): platformId is string =>
+                (
+                  platformId: string | null
+                ): platformId is string =>
                   platformId !== null
               )
           : [];
 
-        setConnectedApps([...new Set(realConnectedApps)]);
+        setConnectedApps([
+          ...new Set(realConnectedApps),
+        ]);
       } catch (error) {
-        console.error("Unable to load connected apps:", error);
+        console.error(
+          "Unable to load connected apps:",
+          error
+        );
 
         if (!cancelled) {
           setConnectedApps([]);
@@ -193,10 +250,12 @@ export default function BulkMessengerPage() {
 
     window.setTimeout(() => {
       setNotice(null);
-    }, 3500);
+    }, 4500);
   }
 
-  async function loadContactsForApp(appId: string) {
+  async function loadContactsForApp(
+    appId: string
+  ) {
     if (!connectedApps.includes(appId)) {
       return;
     }
@@ -214,6 +273,7 @@ export default function BulkMessengerPage() {
         ...current,
         [appId]: true,
       }));
+
       return;
     }
 
@@ -223,14 +283,6 @@ export default function BulkMessengerPage() {
         [appId]: true,
       }));
 
-      /*
-       * Email recipients come from TWO real Google sources:
-       *
-       * 1. Google Contacts
-       * 2. Gmail message headers (From / To / Cc)
-       *
-       * The backend combines and deduplicates them.
-       */
       const response = await fetch(
         "/api/connections/google/email-recipients",
         {
@@ -244,7 +296,9 @@ export default function BulkMessengerPage() {
           id: string;
           name: string;
           email: string;
-          source?: "google-contact" | "gmail";
+          source?:
+            | "google-contact"
+            | "gmail";
         }>;
         googleContactsCount?: number;
         gmailContactsCount?: number;
@@ -254,20 +308,27 @@ export default function BulkMessengerPage() {
 
       if (!response.ok) {
         throw new Error(
-          result.error ?? "Unable to load email contacts."
+          result.error ??
+            "Unable to load email contacts."
         );
       }
 
-      const contacts: Contact[] = Array.isArray(result.contacts)
-        ? result.contacts
-            .filter((contact) => contact.email?.trim())
-            .map((contact) => ({
-              id: contact.id,
-              name: contact.name || contact.email,
-              address: contact.email,
-              source: contact.source,
-            }))
-        : [];
+      const contacts: Contact[] =
+        Array.isArray(result.contacts)
+          ? result.contacts
+              .filter(
+                (contact) =>
+                  contact.email?.trim()
+              )
+              .map((contact) => ({
+                id: contact.id,
+                name:
+                  contact.name ||
+                  contact.email,
+                address: contact.email,
+                source: contact.source,
+              }))
+          : [];
 
       setContactsByApp((current) => ({
         ...current,
@@ -279,7 +340,10 @@ export default function BulkMessengerPage() {
         [appId]: true,
       }));
     } catch (error) {
-      console.error("Unable to load email contacts:", error);
+      console.error(
+        "Unable to load email contacts:",
+        error
+      );
 
       showNotice(
         error instanceof Error
@@ -302,13 +366,17 @@ export default function BulkMessengerPage() {
     loadContactsForApp(activeApp);
   }, [activeApp, connectedApps]);
 
-  async function handleDisconnect(platform: Platform) {
-    const provider = platformToProvider[platform.id];
+  async function handleDisconnect(
+    platform: Platform
+  ) {
+    const provider =
+      platformToProvider[platform.id];
 
     if (!provider) {
       showNotice(
         `${platform.name} disconnect is not available yet.`
       );
+
       return;
     }
 
@@ -318,7 +386,8 @@ export default function BulkMessengerPage() {
         {
           method: "POST",
           headers: {
-            "Content-Type": "application/json",
+            "Content-Type":
+              "application/json",
           },
         }
       );
@@ -330,52 +399,73 @@ export default function BulkMessengerPage() {
 
       if (!response.ok) {
         throw new Error(
-          result.error ?? `Unable to disconnect ${platform.name}.`
+          result.error ??
+            `Unable to disconnect ${platform.name}.`
         );
       }
 
       setConnectedApps((current) =>
-        current.filter((id) => id !== platform.id)
+        current.filter(
+          (id) => id !== platform.id
+        )
       );
 
       setSelectedApps((current) =>
-        current.filter((id) => id !== platform.id)
+        current.filter(
+          (id) => id !== platform.id
+        )
       );
 
       setSelectedContactsByApp((current) => {
         const next = { ...current };
+
         delete next[platform.id];
+
         return next;
       });
 
       setContactsByApp((current) => {
         const next = { ...current };
+
         delete next[platform.id];
+
         return next;
       });
 
       setContactsLoadedByApp((current) => {
         const next = { ...current };
+
         delete next[platform.id];
+
         return next;
       });
 
       setContactsLoadingByApp((current) => {
         const next = { ...current };
+
         delete next[platform.id];
+
         return next;
       });
 
       setActiveApp((current) =>
-        current === platform.id ? null : current
+        current === platform.id
+          ? null
+          : current
       );
+
+      setSendResults([]);
+      setSendStatusByContact({});
 
       showNotice(
         result.warning ??
           `${platform.name} has been disconnected from ZUQEN.`
       );
     } catch (error) {
-      console.error("Disconnect error:", error);
+      console.error(
+        "Disconnect error:",
+        error
+      );
 
       showNotice(
         error instanceof Error
@@ -402,27 +492,60 @@ export default function BulkMessengerPage() {
   );
 
   const totalSelectedContacts = useMemo(() => {
-    return Object.values(selectedContactsByApp).reduce(
-      (total, contacts) => total + contacts.length,
+    return Object.values(
+      selectedContactsByApp
+    ).reduce(
+      (total, contacts) =>
+        total + contacts.length,
       0
     );
   }, [selectedContactsByApp]);
 
-  function handleAppClick(platform: Platform) {
-    const isConnected = connectedApps.includes(platform.id);
+  const selectedEmailContacts = useMemo(() => {
+    const selectedIds =
+      selectedContactsByApp.email ?? [];
+
+    const contacts =
+      contactsByApp.email ?? [];
+
+    return contacts.filter((contact) =>
+      selectedIds.includes(contact.id)
+    );
+  }, [
+    selectedContactsByApp,
+    contactsByApp,
+  ]);
+
+  const sentCount = sendResults.filter(
+    (result) => result.status === "sent"
+  ).length;
+
+  const failedCount = sendResults.filter(
+    (result) => result.status === "failed"
+  ).length;
+
+  function handleAppClick(
+    platform: Platform
+  ) {
+    const isConnected =
+      connectedApps.includes(platform.id);
 
     if (!isConnected) {
       setConnectModalApp(platform);
+
       return;
     }
 
     toggleSelectedApp(platform.id);
   }
 
-  function toggleSelectedApp(platformId: string) {
+  function toggleSelectedApp(
+    platformId: string
+  ) {
     if (!connectedApps.includes(platformId)) {
       const platform = PLATFORMS.find(
-        (item) => item.id === platformId
+        (item) =>
+          item.id === platformId
       );
 
       if (platform) {
@@ -433,7 +556,8 @@ export default function BulkMessengerPage() {
     }
 
     setSelectedApps((current) => {
-      const alreadySelected = current.includes(platformId);
+      const alreadySelected =
+        current.includes(platformId);
 
       if (alreadySelected) {
         const next = current.filter(
@@ -441,7 +565,9 @@ export default function BulkMessengerPage() {
         );
 
         if (activeApp === platformId) {
-          setActiveApp(next[0] ?? null);
+          setActiveApp(
+            next[0] ?? null
+          );
         }
 
         return next;
@@ -453,14 +579,20 @@ export default function BulkMessengerPage() {
 
       return [...current, platformId];
     });
+
+    setSendResults([]);
+    setSendStatusByContact({});
   }
 
-  function handleConnect(platform: Platform) {
+  function handleConnect(
+    platform: Platform
+  ) {
     setConnectModalApp(null);
 
     if (platform.id === "email") {
       window.location.href =
         "/api/connections/google/connect";
+
       return;
     }
 
@@ -474,37 +606,64 @@ export default function BulkMessengerPage() {
     contactId: string
   ) {
     if (!connectedApps.includes(appId)) {
-      showNotice("Connect this app first.");
+      showNotice(
+        "Connect this app first."
+      );
+
       return;
     }
 
-    setSelectedContactsByApp((current) => {
-      const existing = current[appId] ?? [];
+    setSelectedContactsByApp(
+      (current) => {
+        const existing =
+          current[appId] ?? [];
 
-      const next = existing.includes(contactId)
-        ? existing.filter((id) => id !== contactId)
-        : [...existing, contactId];
+        const next = existing.includes(
+          contactId
+        )
+          ? existing.filter(
+              (id) => id !== contactId
+            )
+          : [
+              ...existing,
+              contactId,
+            ];
 
-      return {
-        ...current,
-        [appId]: next,
-      };
-    });
+        return {
+          ...current,
+          [appId]: next,
+        };
+      }
+    );
+
+    setSendResults([]);
+    setSendStatusByContact({});
   }
 
-  function handleSend() {
-    if (selectedApps.length === 0) {
-      showNotice("Select at least one connected app first.");
+  async function handleSend() {
+    if (sending) {
       return;
     }
 
-    const disconnectedSelectedApp = selectedApps.find(
-      (appId) => !connectedApps.includes(appId)
-    );
+    if (selectedApps.length === 0) {
+      showNotice(
+        "Select at least one connected app first."
+      );
+
+      return;
+    }
+
+    const disconnectedSelectedApp =
+      selectedApps.find(
+        (appId) =>
+          !connectedApps.includes(appId)
+      );
 
     if (disconnectedSelectedApp) {
       const platform = PLATFORMS.find(
-        (item) => item.id === disconnectedSelectedApp
+        (item) =>
+          item.id ===
+          disconnectedSelectedApp
       );
 
       showNotice(
@@ -514,32 +673,294 @@ export default function BulkMessengerPage() {
       return;
     }
 
-    if (totalSelectedContacts === 0) {
+    if (selectedApps.length > 1) {
       showNotice(
-        "Select at least one eligible contact first."
+        "Real sending is currently enabled for Gmail only. Deselect the other apps and send the Email campaign."
       );
+
+      return;
+    }
+
+    if (!selectedApps.includes("email")) {
+      showNotice(
+        "Real sending is currently enabled for Gmail only."
+      );
+
+      return;
+    }
+
+    if (selectedEmailContacts.length === 0) {
+      showNotice(
+        "Select at least one eligible email contact first."
+      );
+
+      return;
+    }
+
+    if (selectedEmailContacts.length > 50) {
+      showNotice(
+        "For now, one Gmail send action supports up to 50 recipients."
+      );
+
+      return;
+    }
+
+    if (!subject.trim()) {
+      showNotice(
+        "Enter an email subject first."
+      );
+
       return;
     }
 
     if (!message.trim()) {
-      showNotice("Write a message first.");
+      showNotice(
+        "Write a message first."
+      );
+
+      return;
+    }
+
+    if (attachmentName) {
+      showNotice(
+        "Attachment sending is not enabled yet. Remove the attachment and send the text-only email."
+      );
+
       return;
     }
 
     if (scheduleEnabled) {
-      if (!scheduleDate || !scheduleTime) {
-        showNotice(
-          "Choose a schedule date and time first."
-        );
-        return;
-      }
+      showNotice(
+        "Scheduled sending is not connected yet. Turn off scheduling to send immediately."
+      );
+
+      return;
     }
 
-    showNotice(
-      scheduleEnabled
-        ? "Schedule request is ready for the real sending system."
-        : "Send request is ready for the real sending system."
+    const initialStatuses: Record<
+      string,
+      SendStatus
+    > = {};
+
+    for (const contact of selectedEmailContacts) {
+      initialStatuses[
+        contact.id
+      ] = "pending";
+    }
+
+    setSendStatusByContact(
+      initialStatuses
     );
+
+    setSendResults([]);
+    setSending(true);
+
+    for (const contact of selectedEmailContacts) {
+      setSendStatusByContact(
+        (current) => ({
+          ...current,
+          [contact.id]:
+            "sending",
+        })
+      );
+    }
+
+    try {
+      const response = await fetch(
+        "/api/bulk-messenger/email/send",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type":
+              "application/json",
+          },
+          body: JSON.stringify({
+            subject:
+              subject.trim(),
+            message:
+              message.trim(),
+            recipients:
+              selectedEmailContacts.map(
+                (contact) => ({
+                  id: contact.id,
+                  name: contact.name,
+                  email: contact.address,
+                })
+              ),
+          }),
+        }
+      );
+
+      const result: {
+        error?: string;
+        requiresReconnect?: boolean;
+        results?: RecipientResult[];
+        summary?: {
+          sent: number;
+          failed: number;
+          total: number;
+        };
+      } = await response.json();
+
+      if (!response.ok) {
+        if (
+          result.requiresReconnect
+        ) {
+          showNotice(
+            result.error ??
+              "Reconnect Google to continue."
+          );
+        } else {
+          showNotice(
+            result.error ??
+              "Gmail could not send the messages."
+          );
+        }
+
+        setSendStatusByContact(
+          (current) => {
+            const next = {
+              ...current,
+            };
+
+            for (const contact of selectedEmailContacts) {
+              next[contact.id] =
+                "failed";
+            }
+
+            return next;
+          }
+        );
+
+        return;
+      }
+
+      const results =
+        Array.isArray(result.results)
+          ? result.results
+          : [];
+
+      setSendResults(results);
+
+      setSendStatusByContact(
+        (current) => {
+          const next = {
+            ...current,
+          };
+
+          for (const contact of selectedEmailContacts) {
+            const resultForContact =
+              results.find(
+                (result) =>
+                  result.email.toLowerCase() ===
+                  contact.address.toLowerCase()
+              );
+
+            next[contact.id] =
+              resultForContact?.status ===
+              "sent"
+                ? "sent"
+                : "failed";
+          }
+
+          return next;
+        }
+      );
+
+      const sent =
+        result.summary?.sent ??
+        results.filter(
+          (item) =>
+            item.status === "sent"
+        ).length;
+
+      const failed =
+        result.summary?.failed ??
+        results.filter(
+          (item) =>
+            item.status === "failed"
+        ).length;
+
+      if (failed === 0) {
+        showNotice(
+          `${sent} email${sent === 1 ? "" : "s"} accepted by Gmail successfully.`
+        );
+      } else {
+        showNotice(
+          `${sent} sent, ${failed} failed. Check the status list below.`
+        );
+      }
+    } catch (error) {
+      console.error(
+        "Bulk email sending error:",
+        error
+      );
+
+      setSendStatusByContact(
+        (current) => {
+          const next = {
+            ...current,
+          };
+
+          for (const contact of selectedEmailContacts) {
+            next[contact.id] =
+              "failed";
+          }
+
+          return next;
+        }
+      );
+
+      showNotice(
+        error instanceof Error
+          ? error.message
+          : "Network error while sending email."
+      );
+    } finally {
+      setSending(false);
+    }
+  }
+
+  function getStatusLabel(
+    status?: SendStatus
+  ) {
+    switch (status) {
+      case "pending":
+        return "Pending";
+
+      case "sending":
+        return "Sending...";
+
+      case "sent":
+        return "Sent";
+
+      case "failed":
+        return "Failed";
+
+      default:
+        return null;
+    }
+  }
+
+  function getStatusClass(
+    status?: SendStatus
+  ) {
+    switch (status) {
+      case "pending":
+        return "result-pending";
+
+      case "sending":
+        return "result-sending";
+
+      case "sent":
+        return "result-sent";
+
+      case "failed":
+        return "result-failed";
+
+      default:
+        return "";
+    }
   }
 
   return (
@@ -603,7 +1024,8 @@ export default function BulkMessengerPage() {
         .apps-panel,
         .contacts-panel,
         .composer-panel,
-        .preview-panel {
+        .preview-panel,
+        .status-panel {
           background: rgba(255, 255, 255, 0.88);
           border: 1px solid #e4e7ec;
           border-radius: 20px;
@@ -901,6 +1323,30 @@ export default function BulkMessengerPage() {
           padding: 20px;
         }
 
+        .field-label {
+          display: block;
+          margin-bottom: 7px;
+          color: #344054;
+          font-size: 12px;
+          font-weight: 700;
+        }
+
+        .subject-input {
+          width: 100%;
+          border: 1px solid #d0d5dd;
+          border-radius: 12px;
+          padding: 12px 13px;
+          outline: none;
+          font: inherit;
+          font-size: 13px;
+          margin-bottom: 12px;
+        }
+
+        .subject-input:focus {
+          border-color: #98a2b3;
+          box-shadow: 0 0 0 3px rgba(16, 24, 40, 0.06);
+        }
+
         .textarea {
           width: 100%;
           min-height: 180px;
@@ -970,7 +1416,8 @@ export default function BulkMessengerPage() {
           font-size: 12px;
         }
 
-        .preview-panel {
+        .preview-panel,
+        .status-panel {
           margin-top: 20px;
           padding: 20px;
         }
@@ -985,6 +1432,29 @@ export default function BulkMessengerPage() {
           font-size: 13px;
           line-height: 1.6;
           min-height: 100px;
+        }
+
+        .preview-subject {
+          border: 1px solid #eaecf0;
+          border-radius: 12px;
+          background: #fcfcfd;
+          padding: 11px 13px;
+          margin-bottom: 9px;
+          font-size: 13px;
+        }
+
+        .preview-subject strong {
+          color: #667085;
+          margin-right: 6px;
+        }
+
+        .send-meta {
+          display: flex;
+          justify-content: space-between;
+          gap: 12px;
+          margin-top: 10px;
+          color: #667085;
+          font-size: 11px;
         }
 
         .send-button {
@@ -1004,13 +1474,117 @@ export default function BulkMessengerPage() {
           background: #1f2937;
         }
 
-        .send-meta {
+        .send-button:disabled {
+          cursor: not-allowed;
+          opacity: 0.6;
+        }
+
+        .result-summary {
           display: flex;
-          justify-content: space-between;
-          gap: 12px;
-          margin-top: 10px;
+          flex-wrap: wrap;
+          gap: 8px;
+          margin-bottom: 14px;
+        }
+
+        .summary-pill {
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          padding: 7px 10px;
+          border-radius: 999px;
+          font-size: 11px;
+          font-weight: 700;
+        }
+
+        .summary-sent {
+          background: #ecfdf3;
+          color: #027a48;
+        }
+
+        .summary-failed {
+          background: #fef3f2;
+          color: #b42318;
+        }
+
+        .summary-total {
+          background: #f2f4f7;
+          color: #475467;
+        }
+
+        .result-list {
+          display: grid;
+          gap: 8px;
+        }
+
+        .result-row {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          border: 1px solid #eaecf0;
+          border-radius: 12px;
+          padding: 10px 12px;
+          background: #fff;
+        }
+
+        .result-info {
+          min-width: 0;
+          flex: 1;
+        }
+
+        .result-name {
+          font-size: 12px;
+          font-weight: 700;
+        }
+
+        .result-email {
+          margin-top: 2px;
           color: #667085;
           font-size: 11px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .result-status {
+          flex: 0 0 auto;
+          border-radius: 999px;
+          padding: 5px 8px;
+          font-size: 10px;
+          font-weight: 800;
+        }
+
+        .result-pending {
+          background: #f2f4f7;
+          color: #475467;
+        }
+
+        .result-sending {
+          background: #eff8ff;
+          color: #175cd3;
+        }
+
+        .result-sent {
+          background: #ecfdf3;
+          color: #027a48;
+        }
+
+        .result-failed {
+          background: #fef3f2;
+          color: #b42318;
+        }
+
+        .result-error {
+          margin-top: 4px;
+          color: #b42318;
+          font-size: 10px;
+          line-height: 1.4;
+        }
+
+        .result-message-id {
+          margin-top: 4px;
+          color: #667085;
+          font-size: 9px;
+          word-break: break-all;
         }
 
         .notice {
@@ -1134,6 +1708,10 @@ export default function BulkMessengerPage() {
           .contact-source {
             display: none;
           }
+
+          .result-row {
+            align-items: flex-start;
+          }
         }
       `}</style>
 
@@ -1141,22 +1719,33 @@ export default function BulkMessengerPage() {
         <div className="bulk-container">
           <header className="bulk-header">
             <div>
-              <h1 className="bulk-title">Bulk Messenger</h1>
+              <h1 className="bulk-title">
+                Bulk Messenger
+              </h1>
 
               <p className="bulk-subtitle">
-                Connect your communication apps, select eligible
-                contacts, compose one message, and send or schedule it.
+                Connect your communication apps,
+                select eligible contacts, compose one
+                message, and send or schedule it.
               </p>
             </div>
 
             <div className="connection-count">
               {connectionsLoading ? (
-                <strong>Checking connections...</strong>
+                <strong>
+                  Checking connections...
+                </strong>
               ) : (
                 <>
-                  <strong>{connectedPlatforms.length}</strong> connected
+                  <strong>
+                    {connectedPlatforms.length}
+                  </strong>{" "}
+                  connected
                   {" · "}
-                  <strong>{selectedApps.length}</strong> selected
+                  <strong>
+                    {selectedApps.length}
+                  </strong>{" "}
+                  selected
                 </>
               )}
             </div>
@@ -1170,20 +1759,23 @@ export default function BulkMessengerPage() {
                 </h2>
 
                 <p className="section-description">
-                  Only connected apps can be selected for messaging.
+                  Only connected apps can be selected
+                  for messaging.
                 </p>
               </div>
             </div>
 
             <div className="apps-grid">
               {PLATFORMS.map((platform) => {
-                const isConnected = connectedApps.includes(
-                  platform.id
-                );
+                const isConnected =
+                  connectedApps.includes(
+                    platform.id
+                  );
 
-                const isSelected = selectedApps.includes(
-                  platform.id
-                );
+                const isSelected =
+                  selectedApps.includes(
+                    platform.id
+                  );
 
                 return (
                   <div
@@ -1192,17 +1784,30 @@ export default function BulkMessengerPage() {
                       isConnected
                         ? "connected"
                         : "not-connected"
-                    } ${isSelected ? "selected" : ""}`}
+                    } ${
+                      isSelected
+                        ? "selected"
+                        : ""
+                    }`}
                     role="button"
                     tabIndex={0}
-                    onClick={() => handleAppClick(platform)}
+                    onClick={() =>
+                      handleAppClick(
+                        platform
+                      )
+                    }
                     onKeyDown={(event) => {
                       if (
-                        event.key === "Enter" ||
-                        event.key === " "
+                        event.key ===
+                          "Enter" ||
+                        event.key ===
+                          " "
                       ) {
                         event.preventDefault();
-                        handleAppClick(platform);
+
+                        handleAppClick(
+                          platform
+                        );
                       }
                     }}
                   >
@@ -1246,7 +1851,10 @@ export default function BulkMessengerPage() {
                         className="disconnect-button"
                         onClick={(event) => {
                           event.stopPropagation();
-                          handleDisconnect(platform);
+
+                          handleDisconnect(
+                            platform
+                          );
                         }}
                       >
                         Disconnect
@@ -1266,31 +1874,43 @@ export default function BulkMessengerPage() {
                 </h2>
 
                 <p className="section-description">
-                  Contacts are separated by app. For Email,
-                  ZUQEN combines Google Contacts with real Gmail
-                  email interactions. No cross-app matching is used.
+                  Contacts are separated by app.
+                  For Email, ZUQEN combines Google
+                  Contacts with real Gmail email
+                  interactions. No cross-app matching
+                  is used.
                 </p>
               </div>
 
               {selectedPlatforms.length > 0 ? (
                 <div className="app-tabs">
-                  {selectedPlatforms.map((platform) => (
-                    <button
-                      key={platform.id}
-                      type="button"
-                      className={`app-tab ${
-                        activeApp === platform.id
-                          ? "active"
-                          : ""
-                      }`}
-                      onClick={() =>
-                        setActiveApp(platform.id)
-                      }
-                    >
-                      <span>{platform.icon}</span>
-                      <span>{platform.name}</span>
-                    </button>
-                  ))}
+                  {selectedPlatforms.map(
+                    (platform) => (
+                      <button
+                        key={platform.id}
+                        type="button"
+                        className={`app-tab ${
+                          activeApp ===
+                          platform.id
+                            ? "active"
+                            : ""
+                        }`}
+                        onClick={() =>
+                          setActiveApp(
+                            platform.id
+                          )
+                        }
+                      >
+                        <span>
+                          {platform.icon}
+                        </span>
+
+                        <span>
+                          {platform.name}
+                        </span>
+                      </button>
+                    )
+                  )}
                 </div>
               ) : (
                 <div className="app-tabs">
@@ -1298,11 +1918,12 @@ export default function BulkMessengerPage() {
                     style={{
                       color: "#667085",
                       fontSize: 12,
-                      padding: "9px 0",
+                      padding:
+                        "9px 0",
                     }}
                   >
-                    Select a connected app above to view its
-                    contacts.
+                    Select a connected app above
+                    to view its contacts.
                   </span>
                 </div>
               )}
@@ -1311,31 +1932,41 @@ export default function BulkMessengerPage() {
                 {activeApp ? (
                   (() => {
                     const contacts =
-                      contactsByApp[activeApp] ?? [];
+                      contactsByApp[
+                        activeApp
+                      ] ?? [];
 
-                    const activePlatform = PLATFORMS.find(
-                      (platform) =>
-                        platform.id === activeApp
-                    );
+                    const activePlatform =
+                      PLATFORMS.find(
+                        (platform) =>
+                          platform.id ===
+                          activeApp
+                      );
 
                     if (
-                      contactsLoadingByApp[activeApp]
+                      contactsLoadingByApp[
+                        activeApp
+                      ]
                     ) {
                       return (
                         <div className="contacts-loading">
                           <div>
                             <div className="empty-icon">
-                              {activePlatform?.icon ?? "👥"}
+                              {activePlatform?.icon ??
+                                "👥"}
                             </div>
 
                             <div className="empty-title">
-                              Loading email contacts...
+                              Loading email
+                              contacts...
                             </div>
 
                             <p className="empty-text">
-                              ZUQEN is securely loading real
-                              Google Contacts and Gmail email
-                              interactions available through
+                              ZUQEN is securely
+                              loading real Google
+                              Contacts and Gmail
+                              email interactions
+                              available through
                               your connected account.
                             </p>
                           </div>
@@ -1343,24 +1974,32 @@ export default function BulkMessengerPage() {
                       );
                     }
 
-                    if (contacts.length === 0) {
+                    if (
+                      contacts.length ===
+                      0
+                    ) {
                       return (
                         <div className="empty-contacts">
                           <div>
                             <div className="empty-icon">
-                              {activePlatform?.icon ?? "👥"}
+                              {activePlatform?.icon ??
+                                "👥"}
                             </div>
 
                             <div className="empty-title">
-                              No email contacts available
+                              No email contacts
+                              available
                             </div>
 
                             <p className="empty-text">
-                              No usable email addresses were
-                              found in Google Contacts or Gmail
-                              message headers for this account.
-                              Reconnect Google after granting
-                              the required Gmail permission if
+                              No usable email
+                              addresses were found
+                              in Google Contacts or
+                              Gmail message headers
+                              for this account.
+                              Reconnect Google after
+                              granting the required
+                              Gmail permission if
                               necessary.
                             </p>
                           </div>
@@ -1370,49 +2009,82 @@ export default function BulkMessengerPage() {
 
                     return (
                       <div className="contacts-list">
-                        {contacts.map((contact) => {
-                          const selected =
-                            selectedContactsByApp[
-                              activeApp
-                            ]?.includes(contact.id) ?? false;
+                        {contacts.map(
+                          (contact) => {
+                            const selected =
+                              selectedContactsByApp[
+                                activeApp
+                              ]?.includes(
+                                contact.id
+                              ) ?? false;
 
-                          return (
-                            <label
-                              key={contact.id}
-                              className="contact-row"
-                            >
-                              <input
-                                type="checkbox"
-                                checked={selected}
-                                onChange={() =>
-                                  handleContactToggle(
-                                    activeApp,
-                                    contact.id
-                                  )
+                            const sendStatus =
+                              sendStatusByContact[
+                                contact.id
+                              ];
+
+                            return (
+                              <label
+                                key={
+                                  contact.id
                                 }
-                              />
+                                className="contact-row"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={
+                                    selected
+                                  }
+                                  disabled={
+                                    sending
+                                  }
+                                  onChange={() =>
+                                    handleContactToggle(
+                                      activeApp,
+                                      contact.id
+                                    )
+                                  }
+                                />
 
-                              <div className="contact-info">
-                                <div className="contact-name">
-                                  {contact.name}
+                                <div className="contact-info">
+                                  <div className="contact-name">
+                                    {
+                                      contact.name
+                                    }
+                                  </div>
+
+                                  <div className="contact-address">
+                                    {
+                                      contact.address
+                                    }
+                                  </div>
                                 </div>
 
-                                <div className="contact-address">
-                                  {contact.address}
-                                </div>
-                              </div>
+                                {activeApp ===
+                                  "email" && (
+                                  <span className="contact-source">
+                                    {contact.source ===
+                                    "google-contact"
+                                      ? "Google Contact"
+                                      : "Gmail"}
+                                  </span>
+                                )}
 
-                              {activeApp === "email" && (
-                                <span className="contact-source">
-                                  {contact.source ===
-                                  "google-contact"
-                                    ? "Google Contact"
-                                    : "Gmail"}
-                                </span>
-                              )}
-                            </label>
-                          );
-                        })}
+                                {sendStatus && (
+                                  <span
+                                    className={`result-status ${getStatusClass(
+                                      sendStatus
+                                    )}`}
+                                  >
+                                    {getStatusLabel(
+                                      sendStatus
+                                    )}
+                                  </span>
+                                )}
+                              </label>
+                            );
+                          }
+                        )}
                       </div>
                     );
                   })()
@@ -1424,13 +2096,15 @@ export default function BulkMessengerPage() {
                       </div>
 
                       <div className="empty-title">
-                        Connect and select an app first
+                        Connect and select an
+                        app first
                       </div>
 
                       <p className="empty-text">
-                        Only apps that have completed their
-                        official connection can be selected and
-                        used here.
+                        Only apps that have
+                        completed their official
+                        connection can be selected
+                        and used here.
                       </p>
                     </div>
                   </div>
@@ -1447,17 +2121,42 @@ export default function BulkMessengerPage() {
                     </h2>
 
                     <p className="section-description">
-                      Your message will be prepared for the
-                      selected connected apps.
+                      Gmail sending is live.
+                      Other channels remain ready
+                      for their official API
+                      integrations.
                     </p>
                   </div>
                 </div>
 
+                <label className="field-label">
+                  Subject
+                </label>
+
+                <input
+                  className="subject-input"
+                  value={subject}
+                  disabled={sending}
+                  onChange={(event) =>
+                    setSubject(
+                      event.target.value
+                    )
+                  }
+                  placeholder="Enter email subject..."
+                />
+
+                <label className="field-label">
+                  Message
+                </label>
+
                 <textarea
                   className="textarea"
                   value={message}
+                  disabled={sending}
                   onChange={(event) =>
-                    setMessage(event.target.value)
+                    setMessage(
+                      event.target.value
+                    )
                   }
                   placeholder="Write your message..."
                 />
@@ -1465,14 +2164,17 @@ export default function BulkMessengerPage() {
                 <div className="composer-actions">
                   <label className="attachment-button">
                     📎{" "}
-                    {attachmentName || "Attach file"}
+                    {attachmentName ||
+                      "Attach file"}
 
                     <input
                       className="attachment-input"
                       type="file"
+                      disabled={sending}
                       onChange={(event) => {
                         const file =
-                          event.target.files?.[0];
+                          event.target
+                            .files?.[0];
 
                         setAttachmentName(
                           file?.name ?? ""
@@ -1495,15 +2197,20 @@ export default function BulkMessengerPage() {
                   <label className="schedule-toggle">
                     <input
                       type="checkbox"
-                      checked={scheduleEnabled}
+                      checked={
+                        scheduleEnabled
+                      }
+                      disabled={sending}
                       onChange={(event) =>
                         setScheduleEnabled(
-                          event.target.checked
+                          event.target
+                            .checked
                         )
                       }
                     />
 
-                    Schedule instead of sending now
+                    Schedule instead of
+                    sending now
                   </label>
 
                   {scheduleEnabled && (
@@ -1511,9 +2218,11 @@ export default function BulkMessengerPage() {
                       <input
                         type="date"
                         value={scheduleDate}
+                        disabled={sending}
                         onChange={(event) =>
                           setScheduleDate(
-                            event.target.value
+                            event.target
+                              .value
                           )
                         }
                       />
@@ -1521,9 +2230,11 @@ export default function BulkMessengerPage() {
                       <input
                         type="time"
                         value={scheduleTime}
+                        disabled={sending}
                         onChange={(event) =>
                           setScheduleTime(
-                            event.target.value
+                            event.target
+                              .value
                           )
                         }
                       />
@@ -1540,10 +2251,19 @@ export default function BulkMessengerPage() {
                     </h2>
 
                     <p className="section-description">
-                      Review the message before the real
-                      provider sending system is connected.
+                      Review the message before
+                      Gmail receives the send request.
                     </p>
                   </div>
+                </div>
+
+                <div className="preview-subject">
+                  <strong>
+                    Subject:
+                  </strong>
+
+                  {subject.trim() ||
+                    "Your subject will appear here."}
                 </div>
 
                 <div className="preview-message">
@@ -1554,14 +2274,16 @@ export default function BulkMessengerPage() {
                 <div className="send-meta">
                   <span>
                     {selectedApps.length} app
-                    {selectedApps.length === 1
+                    {selectedApps.length ===
+                    1
                       ? ""
                       : "s"}
                   </span>
 
                   <span>
                     {totalSelectedContacts} contact
-                    {totalSelectedContacts === 1
+                    {totalSelectedContacts ===
+                    1
                       ? ""
                       : "s"}
                   </span>
@@ -1570,13 +2292,101 @@ export default function BulkMessengerPage() {
                 <button
                   type="button"
                   className="send-button"
+                  disabled={sending}
                   onClick={handleSend}
                 >
-                  {scheduleEnabled
-                    ? "Schedule Message"
-                    : "Send Message"}
+                  {sending
+                    ? "Sending..."
+                    : scheduleEnabled
+                      ? "Schedule Message"
+                      : "Send Message"}
                 </button>
               </section>
+
+              {sendResults.length > 0 && (
+                <section className="status-panel">
+                  <div className="section-head">
+                    <div>
+                      <h2 className="section-title">
+                        Send Status
+                      </h2>
+
+                      <p className="section-description">
+                        Gmail accepted or rejected each
+                        message individually.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="result-summary">
+                    <span className="summary-pill summary-sent">
+                      ✓ {sentCount} Sent
+                    </span>
+
+                    <span className="summary-pill summary-failed">
+                      ✕ {failedCount} Failed
+                    </span>
+
+                    <span className="summary-pill summary-total">
+                      {sendResults.length} Total
+                    </span>
+                  </div>
+
+                  <div className="result-list">
+                    {sendResults.map(
+                      (result) => (
+                        <div
+                          key={
+                            result.email
+                          }
+                          className="result-row"
+                        >
+                          <div className="result-info">
+                            <div className="result-name">
+                              {result.name ||
+                                result.email}
+                            </div>
+
+                            <div className="result-email">
+                              {
+                                result.email
+                              }
+                            </div>
+
+                            {result.error && (
+                              <div className="result-error">
+                                {
+                                  result.error
+                                }
+                              </div>
+                            )}
+
+                            {result.messageId && (
+                              <div className="result-message-id">
+                                Gmail message ID:{" "}
+                                {
+                                  result.messageId
+                                }
+                              </div>
+                            )}
+                          </div>
+
+                          <span
+                            className={`result-status ${getStatusClass(
+                              result.status
+                            )}`}
+                          >
+                            {result.status ===
+                            "sent"
+                              ? "Sent"
+                              : "Failed"}
+                          </span>
+                        </div>
+                      )
+                    )}
+                  </div>
+                </section>
+              )}
             </div>
           </div>
         </div>
@@ -1587,7 +2397,8 @@ export default function BulkMessengerPage() {
           className="modal-backdrop"
           onMouseDown={(event) => {
             if (
-              event.target === event.currentTarget
+              event.target ===
+              event.currentTarget
             ) {
               setConnectModalApp(null);
             }
@@ -1599,14 +2410,17 @@ export default function BulkMessengerPage() {
             </div>
 
             <h2 className="modal-title">
-              First connect {connectModalApp.name}
+              First connect{" "}
+              {connectModalApp.name}
             </h2>
 
             <p className="modal-text">
-              You selected {connectModalApp.name}, but this
-              account is not connected to ZUQEN yet. Connect it
-              through the official authorization system before
-              selecting contacts or sending messages.
+              You selected{" "}
+              {connectModalApp.name}, but this
+              account is not connected to ZUQEN yet.
+              Connect it through the official
+              authorization system before selecting
+              contacts or sending messages.
             </p>
 
             <div className="modal-actions">
@@ -1614,7 +2428,9 @@ export default function BulkMessengerPage() {
                 type="button"
                 className="modal-cancel"
                 onClick={() =>
-                  setConnectModalApp(null)
+                  setConnectModalApp(
+                    null
+                  )
                 }
               >
                 Cancel
@@ -1624,10 +2440,13 @@ export default function BulkMessengerPage() {
                 type="button"
                 className="modal-connect"
                 onClick={() =>
-                  handleConnect(connectModalApp)
+                  handleConnect(
+                    connectModalApp
+                  )
                 }
               >
-                Connect {connectModalApp.name}
+                Connect{" "}
+                {connectModalApp.name}
               </button>
             </div>
           </div>
