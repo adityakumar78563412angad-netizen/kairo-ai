@@ -4,6 +4,19 @@ import { createServerSupabaseClient } from "@/lib/supabase-server";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+type GoogleConnection = {
+  id: string;
+  provider: string;
+  provider_account_id: string | null;
+  account_name: string | null;
+  account_email: string | null;
+  access_token: string | null;
+  refresh_token: string | null;
+  token_expires_at: string | null;
+  scopes: string[] | null;
+  status: string;
+};
+
 type GoogleEmailAddress = {
   value?: string;
   type?: string;
@@ -65,29 +78,17 @@ export async function GET() {
       );
     }
 
-    const { data: connection, error: connectionError } =
-      await supabase
-        .from("connected_accounts")
-        .select(
-          [
-            "id",
-            "provider",
-            "provider_account_id",
-            "account_name",
-            "account_email",
-            "access_token",
-            "refresh_token",
-            "token_expires_at",
-            "scopes",
-            "status",
-          ].join(", ")
-        )
-        .eq("user_id", user.id)
-        .eq("provider", "google")
-        .eq("status", "connected")
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+    const { data, error: connectionError } = await supabase
+      .from("connected_accounts")
+      .select(
+        "id, provider, provider_account_id, account_name, account_email, access_token, refresh_token, token_expires_at, scopes, status"
+      )
+      .eq("user_id", user.id)
+      .eq("provider", "google")
+      .eq("status", "connected")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
     if (connectionError) {
       console.error(
@@ -102,6 +103,9 @@ export async function GET() {
         { status: 500 }
       );
     }
+
+    const connection =
+      data as GoogleConnection | null;
 
     if (!connection) {
       return NextResponse.json(
@@ -123,9 +127,12 @@ export async function GET() {
 
     let accessToken = connection.access_token;
 
-    const tokenExpiresAt = connection.token_expires_at
-      ? new Date(connection.token_expires_at).getTime()
-      : 0;
+    const tokenExpiresAt =
+      connection.token_expires_at
+        ? new Date(
+            connection.token_expires_at
+          ).getTime()
+        : 0;
 
     const shouldRefresh =
       tokenExpiresAt > 0 &&
@@ -136,14 +143,17 @@ export async function GET() {
         return NextResponse.json(
           {
             error:
-              "Google authorization has expired and no refresh token is available. Please reconnect Google.",
+              "Google authorization has expired and no refresh token is available. Please reconnect your Google account.",
           },
           { status: 401 }
         );
       }
 
-      const clientId = process.env.GOOGLE_CLIENT_ID;
-      const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+      const clientId =
+        process.env.GOOGLE_CLIENT_ID;
+
+      const clientSecret =
+        process.env.GOOGLE_CLIENT_SECRET;
 
       if (!clientId || !clientSecret) {
         console.error(
@@ -170,7 +180,8 @@ export async function GET() {
           body: new URLSearchParams({
             client_id: clientId,
             client_secret: clientSecret,
-            refresh_token: connection.refresh_token,
+            refresh_token:
+              connection.refresh_token,
             grant_type: "refresh_token",
           }),
           cache: "no-store",
@@ -198,11 +209,13 @@ export async function GET() {
         );
       }
 
-      accessToken = refreshData.access_token;
+      accessToken =
+        refreshData.access_token;
 
       const newExpiresAt = new Date(
         Date.now() +
-          (refreshData.expires_in ?? 3600) * 1000
+          (refreshData.expires_in ?? 3600) *
+            1000
       ).toISOString();
 
       const { error: updateTokenError } =
@@ -211,7 +224,8 @@ export async function GET() {
           .update({
             access_token: accessToken,
             token_expires_at: newExpiresAt,
-            updated_at: new Date().toISOString(),
+            updated_at:
+              new Date().toISOString(),
           })
           .eq("id", connection.id)
           .eq("user_id", user.id);
@@ -228,8 +242,11 @@ export async function GET() {
 
     let nextPageToken: string | undefined;
 
-    let totalPeopleReported: number | null = null;
+    let totalPeopleReported: number | null =
+      null;
+
     let pagesLoaded = 0;
+
     let peopleReceived = 0;
 
     do {
@@ -242,8 +259,6 @@ export async function GET() {
         "names,emailAddresses"
       );
 
-      // Google supports pagination. 500 is safely within
-      // the documented range for this endpoint.
       peopleUrl.searchParams.set(
         "pageSize",
         "500"
@@ -296,7 +311,8 @@ export async function GET() {
       const pageConnections =
         peopleData.connections ?? [];
 
-      peopleReceived += pageConnections.length;
+      peopleReceived +=
+        pageConnections.length;
 
       if (
         typeof peopleData.totalPeople ===
