@@ -43,15 +43,16 @@ export async function GET(request: Request) {
     googleAuthUrl.searchParams.set("redirect_uri", redirectUri);
     googleAuthUrl.searchParams.set("response_type", "code");
 
-    googleAuthUrl.searchParams.set(
-      "scope",
-      [
-        "openid",
-        "email",
-        "profile",
-        "https://www.googleapis.com/auth/gmail.send",
-      ].join(" ")
-    );
+  googleAuthUrl.searchParams.set(
+  "scope",
+  [
+    "openid",
+    "email",
+    "profile",
+    "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/contacts.readonly",
+  ].join(" ")
+);
 
     googleAuthUrl.searchParams.set("access_type", "offline");
     googleAuthUrl.searchParams.set("prompt", "consent");
