@@ -4,27 +4,47 @@ import { createServerSupabaseClient } from "@/lib/supabase-server";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+type GoogleEmailAddress = {
+  value?: string;
+  type?: string;
+};
+
+type GoogleName = {
+  displayName?: string;
+};
+
 type GooglePerson = {
   resourceName?: string;
-  names?: Array<{
-    displayName?: string;
-  }>;
-  emailAddresses?: Array<{
-    value?: string;
-    type?: string;
-  }>;
+  names?: GoogleName[];
+  emailAddresses?: GoogleEmailAddress[];
 };
 
 type GooglePeopleResponse = {
   connections?: GooglePerson[];
   nextPageToken?: string;
   totalPeople?: number;
+  totalItems?: number;
+  error?: {
+    code?: number;
+    message?: string;
+    status?: string;
+  };
 };
 
 type GoogleTokenResponse = {
   access_token?: string;
   expires_in?: number;
   token_type?: string;
+  scope?: string;
+  error?: string;
+  error_description?: string;
+};
+
+type ZUQENContact = {
+  id: string;
+  name: string;
+  email: string;
+  source: "google";
 };
 
 export async function GET() {
@@ -45,20 +65,35 @@ export async function GET() {
       );
     }
 
-    const { data: connection, error: connectionError } = await supabase
-      .from("connected_accounts")
-      .select(
-        "id, provider, provider_account_id, account_name, account_email, access_token, refresh_token, token_expires_at, scopes, status"
-      )
-      .eq("user_id", user.id)
-      .eq("provider", "google")
-      .eq("status", "connected")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const { data: connection, error: connectionError } =
+      await supabase
+        .from("connected_accounts")
+        .select(
+          [
+            "id",
+            "provider",
+            "provider_account_id",
+            "account_name",
+            "account_email",
+            "access_token",
+            "refresh_token",
+            "token_expires_at",
+            "scopes",
+            "status",
+          ].join(", ")
+        )
+        .eq("user_id", user.id)
+        .eq("provider", "google")
+        .eq("status", "connected")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
     if (connectionError) {
-      console.error("Failed to load Google connection:", connectionError);
+      console.error(
+        "Failed to load Google connection:",
+        connectionError
+      );
 
       return NextResponse.json(
         {
@@ -93,7 +128,8 @@ export async function GET() {
       : 0;
 
     const shouldRefresh =
-      tokenExpiresAt > 0 && tokenExpiresAt <= Date.now() + 60_000;
+      tokenExpiresAt > 0 &&
+      tokenExpiresAt <= Date.now() + 60_000;
 
     if (shouldRefresh) {
       if (!connection.refresh_token) {
@@ -110,11 +146,14 @@ export async function GET() {
       const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
 
       if (!clientId || !clientSecret) {
-        console.error("Google OAuth credentials are missing.");
+        console.error(
+          "Google OAuth credentials are missing."
+        );
 
         return NextResponse.json(
           {
-            error: "Google OAuth is not configured on the server.",
+            error:
+              "Google OAuth is not configured on the server.",
           },
           { status: 500 }
         );
@@ -125,7 +164,8 @@ export async function GET() {
         {
           method: "POST",
           headers: {
-            "Content-Type": "application/x-www-form-urlencoded",
+            "Content-Type":
+              "application/x-www-form-urlencoded",
           },
           body: new URLSearchParams({
             client_id: clientId,
@@ -140,7 +180,10 @@ export async function GET() {
       const refreshData =
         (await refreshResponse.json()) as GoogleTokenResponse;
 
-      if (!refreshResponse.ok || !refreshData.access_token) {
+      if (
+        !refreshResponse.ok ||
+        !refreshData.access_token
+      ) {
         console.error(
           "Google access token refresh failed:",
           refreshData
@@ -158,18 +201,20 @@ export async function GET() {
       accessToken = refreshData.access_token;
 
       const newExpiresAt = new Date(
-        Date.now() + (refreshData.expires_in ?? 3600) * 1000
+        Date.now() +
+          (refreshData.expires_in ?? 3600) * 1000
       ).toISOString();
 
-      const { error: updateTokenError } = await supabase
-        .from("connected_accounts")
-        .update({
-          access_token: accessToken,
-          token_expires_at: newExpiresAt,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", connection.id)
-        .eq("user_id", user.id);
+      const { error: updateTokenError } =
+        await supabase
+          .from("connected_accounts")
+          .update({
+            access_token: accessToken,
+            token_expires_at: newExpiresAt,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", connection.id)
+          .eq("user_id", user.id);
 
       if (updateTokenError) {
         console.error(
@@ -179,14 +224,13 @@ export async function GET() {
       }
     }
 
-    const contacts: Array<{
-      id: string;
-      name: string;
-      email: string;
-      source: "google";
-    }> = [];
+    const contacts: ZUQENContact[] = [];
 
     let nextPageToken: string | undefined;
+
+    let totalPeopleReported: number | null = null;
+    let pagesLoaded = 0;
+    let peopleReceived = 0;
 
     do {
       const peopleUrl = new URL(
@@ -198,26 +242,34 @@ export async function GET() {
         "names,emailAddresses"
       );
 
-      peopleUrl.searchParams.set("pageSize", "1000");
+      // Google supports pagination. 500 is safely within
+      // the documented range for this endpoint.
+      peopleUrl.searchParams.set(
+        "pageSize",
+        "500"
+      );
 
       if (nextPageToken) {
-        peopleUrl.searchParams.set("pageToken", nextPageToken);
+        peopleUrl.searchParams.set(
+          "pageToken",
+          nextPageToken
+        );
       }
 
-      const peopleResponse = await fetch(peopleUrl.toString(), {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-        cache: "no-store",
-      });
+      const peopleResponse = await fetch(
+        peopleUrl.toString(),
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            Accept: "application/json",
+          },
+          cache: "no-store",
+        }
+      );
 
       const peopleData =
-        (await peopleResponse.json()) as GooglePeopleResponse & {
-          error?: {
-            message?: string;
-          };
-        };
+        (await peopleResponse.json()) as GooglePeopleResponse;
 
       if (!peopleResponse.ok) {
         console.error(
@@ -230,50 +282,69 @@ export async function GET() {
             error:
               peopleData.error?.message ??
               "Unable to load Google contacts.",
+            googleStatus:
+              peopleData.error?.status ?? null,
           },
-          { status: peopleResponse.status }
+          {
+            status: peopleResponse.status,
+          }
         );
       }
 
-      for (const person of peopleData.connections ?? []) {
-        const email =
-          person.emailAddresses?.find(
-            (item) => item.value
-          )?.value?.trim();
+      pagesLoaded += 1;
 
-        if (!email) {
+      const pageConnections =
+        peopleData.connections ?? [];
+
+      peopleReceived += pageConnections.length;
+
+      if (
+        typeof peopleData.totalPeople ===
+        "number"
+      ) {
+        totalPeopleReported =
+          peopleData.totalPeople;
+      }
+
+      for (const person of pageConnections) {
+        const emails =
+          person.emailAddresses ?? [];
+
+        if (emails.length === 0) {
           continue;
         }
 
         const name =
-          person.names?.find(
-            (item) => item.displayName
-          )?.displayName?.trim() || email;
+          person.names
+            ?.find(
+              (item) =>
+                item.displayName?.trim()
+            )
+            ?.displayName?.trim() ?? "";
 
-        contacts.push({
-          id:
-            person.resourceName ??
-            `google-${email.toLowerCase()}`,
-          name,
-          email,
-          source: "google",
-        });
+        for (const emailItem of emails) {
+          const email =
+            emailItem.value?.trim();
+
+          if (!email) {
+            continue;
+          }
+
+          contacts.push({
+            id:
+              person.resourceName ??
+              `google-${email.toLowerCase()}`,
+            name: name || email,
+            email,
+            source: "google",
+          });
+        }
       }
 
-      nextPageToken = peopleData.nextPageToken;
+      nextPageToken =
+        peopleData.nextPageToken;
     } while (nextPageToken);
-console.log("GOOGLE CONTACTS DEBUG:", {
-  rawContacts: contacts.length,
-  uniqueContactsBeforeReturn: Array.from(
-    new Map(
-      contacts.map((contact) => [
-        contact.email.toLowerCase(),
-        contact,
-      ])
-    ).values()
-  ).length,
-  sampleContacts: contacts.slice(0, 10),
-});
+
     const uniqueContacts = Array.from(
       new Map(
         contacts.map((contact) => [
@@ -283,21 +354,58 @@ console.log("GOOGLE CONTACTS DEBUG:", {
       ).values()
     );
 
+    console.log(
+      "GOOGLE CONTACTS RESULT:",
+      {
+        googleAccount:
+          connection.account_email,
+        totalPeopleReported,
+        pagesLoaded,
+        peopleReceived,
+        contactsWithEmail:
+          contacts.length,
+        uniqueContacts:
+          uniqueContacts.length,
+        sampleContacts:
+          uniqueContacts.slice(0, 10).map(
+            (contact) => ({
+              name: contact.name,
+              email: contact.email,
+            })
+          ),
+      }
+    );
+
     return NextResponse.json({
       provider: "google",
+
       account: {
         name: connection.account_name,
         email: connection.account_email,
       },
+
       contacts: uniqueContacts,
+
       count: uniqueContacts.length,
+
+      meta: {
+        totalPeopleReported,
+        pagesLoaded,
+        peopleReceived,
+        contactsWithEmail:
+          contacts.length,
+      },
     });
   } catch (error) {
-    console.error("Google contacts API error:", error);
+    console.error(
+      "Google contacts API error:",
+      error
+    );
 
     return NextResponse.json(
       {
-        error: "Unable to load Google contacts.",
+        error:
+          "Unable to load Google contacts.",
       },
       { status: 500 }
     );
