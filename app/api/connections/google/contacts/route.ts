@@ -262,7 +262,18 @@ export async function GET() {
 
       nextPageToken = peopleData.nextPageToken;
     } while (nextPageToken);
-
+console.log("GOOGLE CONTACTS DEBUG:", {
+  rawContacts: contacts.length,
+  uniqueContactsBeforeReturn: Array.from(
+    new Map(
+      contacts.map((contact) => [
+        contact.email.toLowerCase(),
+        contact,
+      ])
+    ).values()
+  ).length,
+  sampleContacts: contacts.slice(0, 10),
+});
     const uniqueContacts = Array.from(
       new Map(
         contacts.map((contact) => [
