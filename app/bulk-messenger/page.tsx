@@ -137,7 +137,10 @@ export default function BulkMessengerPage() {
 
   const [connectModalApp, setConnectModalApp] =
     useState<Platform | null>(null);
-
+const [telegramBotToken, setTelegramBotToken] =
+  useState("");
+const [telegramConnecting, setTelegramConnecting] =
+  useState(false);
   const [notice, setNotice] = useState<string | null>(
     null
   );
@@ -151,13 +154,14 @@ export default function BulkMessengerPage() {
     RecipientResult[]
   >([]);
 
-  const providerToPlatform: Record<string, string> = {
-    google: "email",
-  };
-
-  const platformToProvider: Record<string, string> = {
-    email: "google",
-  };
+ const providerToPlatform: Record<string, string> = {
+  google: "email",
+  telegram: "telegram",
+};
+ const platformToProvider: Record<string, string> = {
+  email: "google",
+  telegram: "telegram",
+};
 
   useEffect(() => {
     let cancelled = false;
@@ -584,22 +588,101 @@ export default function BulkMessengerPage() {
     setSendStatusByContact({});
   }
 
-  function handleConnect(
-    platform: Platform
-  ) {
+ async function handleConnect(platform: Platform) {
+  if (platform.id === "email") {
     setConnectModalApp(null);
 
-    if (platform.id === "email") {
-      window.location.href =
-        "/api/connections/google/connect";
+    window.location.href =
+      "/api/connections/google/connect";
 
-      return;
-    }
+    return;
+  }
+
+  if (platform.id !== "telegram") {
+    setConnectModalApp(null);
 
     showNotice(
-      `${platform.name} connection will be completed through its official authorization flow.`
+      `${platform.name} connection is not available yet.`
     );
+
+    return;
   }
+
+  const token = telegramBotToken.trim();
+
+  if (!token) {
+    showNotice("Enter your Telegram bot token first.");
+    return;
+  }
+
+  if (telegramConnecting) {
+    return;
+  }
+
+  try {
+    setTelegramConnecting(true);
+
+    const response = await fetch(
+      "/api/connections/telegram/connect",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          botToken: token,
+        }),
+      }
+    );
+
+    const result: {
+      error?: string;
+      success?: boolean;
+      connection?: {
+        providerAccountId?: string;
+        accountName?: string;
+        username?: string | null;
+      };
+    } = await response.json();
+
+    if (!response.ok) {
+      throw new Error(
+        result.error ??
+          "Unable to connect Telegram."
+      );
+    }
+
+    setConnectedApps((current) =>
+      current.includes("telegram")
+        ? current
+        : [...current, "telegram"]
+    );
+
+    setTelegramBotToken("");
+    setConnectModalApp(null);
+
+    showNotice(
+      `Telegram connected successfully${
+        result.connection?.username
+          ? ` as ${result.connection.username}`
+          : ""
+      }.`
+    );
+  } catch (error) {
+    console.error(
+      "Telegram connection error:",
+      error
+    );
+
+    showNotice(
+      error instanceof Error
+        ? error.message
+        : "Unable to connect Telegram."
+    );
+  } finally {
+    setTelegramConnecting(false);
+  }
+}
 
   function handleContactToggle(
     appId: string,
@@ -966,6 +1049,27 @@ export default function BulkMessengerPage() {
   return (
     <main className="min-h-screen bg-[#f7f8fa] text-[#111827]">
       <style jsx global>{`
+      .telegram-token-input {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+  outline: none;
+  font-size: 13px;
+}
+
+.telegram-token-input:focus {
+  border-color: rgba(120, 140, 255, 0.65);
+}
+
+.modal-connect:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
         * {
           box-sizing: border-box;
         }
@@ -2414,14 +2518,36 @@ export default function BulkMessengerPage() {
               {connectModalApp.name}
             </h2>
 
-            <p className="modal-text">
-              You selected{" "}
-              {connectModalApp.name}, but this
-              account is not connected to ZUQEN yet.
-              Connect it through the official
-              authorization system before selecting
-              contacts or sending messages.
-            </p>
+          {connectModalApp.id === "telegram" ? (
+  <>
+    <p className="modal-text">
+      Enter the Bot Token you received from
+      Telegram BotFather. ZUQEN will verify the
+      token with Telegram before saving the
+      connection.
+    </p>
+
+    <input
+      type="password"
+      value={telegramBotToken}
+      onChange={(event) =>
+        setTelegramBotToken(event.target.value)
+      }
+      placeholder="Paste Telegram Bot Token"
+      className="telegram-token-input"
+      autoComplete="off"
+    />
+  </>
+) : (
+  <p className="modal-text">
+    You selected{" "}
+    {connectModalApp.name}, but this
+    account is not connected to ZUQEN yet.
+    Connect it through the official
+    authorization system before selecting
+    contacts or sending messages.
+  </p>
+)}
 
             <div className="modal-actions">
               <button
@@ -2436,18 +2562,25 @@ export default function BulkMessengerPage() {
                 Cancel
               </button>
 
-              <button
-                type="button"
-                className="modal-connect"
-                onClick={() =>
-                  handleConnect(
-                    connectModalApp
-                  )
-                }
-              >
-                Connect{" "}
-                {connectModalApp.name}
-              </button>
+             <button
+  type="button"
+  className="modal-connect"
+  onClick={() =>
+    handleConnect(connectModalApp)
+  }
+  disabled={
+    connectModalApp.id === "telegram" &&
+    (
+      telegramConnecting ||
+      !telegramBotToken.trim()
+    )
+  }
+>
+  {connectModalApp.id === "telegram" &&
+  telegramConnecting
+    ? "Connecting..."
+    : `Connect ${connectModalApp.name}`}
+</button>
             </div>
           </div>
         </div>
