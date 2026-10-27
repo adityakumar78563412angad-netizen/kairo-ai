@@ -13,7 +13,7 @@ type Contact = {
   id: string;
   name: string;
   address: string;
-  source?: "google-contact" | "gmail";
+  source?: "google-contact" | "gmail" | "telegram";
 };
 
 type ConnectionResponse = {
@@ -272,53 +272,46 @@ const [telegramConnecting, setTelegramConnecting] =
       return;
     }
 
-    if (appId !== "email") {
-      setContactsLoadedByApp((current) => ({
-        ...current,
-        [appId]: true,
-      }));
-
-      return;
-    }
-
     try {
       setContactsLoadingByApp((current) => ({
         ...current,
         [appId]: true,
       }));
 
-      const response = await fetch(
-        "/api/connections/google/email-recipients",
-        {
-          method: "GET",
-          cache: "no-store",
-        }
-      );
+      let contacts: Contact[] = [];
 
-      const result: {
-        contacts?: Array<{
-          id: string;
-          name: string;
-          email: string;
-          source?:
-            | "google-contact"
-            | "gmail";
-        }>;
-        googleContactsCount?: number;
-        gmailContactsCount?: number;
-        totalContacts?: number;
-        error?: string;
-      } = await response.json();
-
-      if (!response.ok) {
-        throw new Error(
-          result.error ??
-            "Unable to load email contacts."
+      if (appId === "email") {
+        const response = await fetch(
+          "/api/connections/google/email-recipients",
+          {
+            method: "GET",
+            cache: "no-store",
+          }
         );
-      }
 
-      const contacts: Contact[] =
-        Array.isArray(result.contacts)
+        const result: {
+          contacts?: Array<{
+            id: string;
+            name: string;
+            email: string;
+            source?:
+              | "google-contact"
+              | "gmail";
+          }>;
+          googleContactsCount?: number;
+          gmailContactsCount?: number;
+          totalContacts?: number;
+          error?: string;
+        } = await response.json();
+
+        if (!response.ok) {
+          throw new Error(
+            result.error ??
+              "Unable to load email contacts."
+          );
+        }
+
+        contacts = Array.isArray(result.contacts)
           ? result.contacts
               .filter(
                 (contact) =>
@@ -333,6 +326,69 @@ const [telegramConnecting, setTelegramConnecting] =
                 source: contact.source,
               }))
           : [];
+      } else if (appId === "telegram") {
+        const response = await fetch(
+          "/api/connections/telegram/contacts",
+          {
+            method: "GET",
+            cache: "no-store",
+          }
+        );
+
+        const result: {
+          contacts?: Array<{
+            id: string;
+            name?: string | null;
+            username?: string | null;
+            address?: string | null;
+            chatId?: string | null;
+            isEligible?: boolean;
+          }>;
+          count?: number;
+          error?: string;
+        } = await response.json();
+
+        if (!response.ok) {
+          throw new Error(
+            result.error ??
+              "Unable to load Telegram contacts."
+          );
+        }
+
+        contacts = Array.isArray(result.contacts)
+          ? result.contacts
+              .filter(
+                (contact) =>
+                  contact.address?.trim() &&
+                  contact.isEligible !== false
+              )
+              .map((contact) => ({
+                id: contact.id,
+                name:
+                  contact.name ||
+                  contact.username ||
+                  contact.address ||
+                  "Telegram contact",
+                address:
+                  contact.address ||
+                  contact.chatId ||
+                  "",
+                source: "telegram" as const,
+              }))
+          : [];
+      } else {
+        setContactsByApp((current) => ({
+          ...current,
+          [appId]: [],
+        }));
+
+        setContactsLoadedByApp((current) => ({
+          ...current,
+          [appId]: true,
+        }));
+
+        return;
+      }
 
       setContactsByApp((current) => ({
         ...current,
@@ -345,14 +401,14 @@ const [telegramConnecting, setTelegramConnecting] =
       }));
     } catch (error) {
       console.error(
-        "Unable to load email contacts:",
+        `Unable to load ${appId} contacts:`,
         error
       );
 
       showNotice(
         error instanceof Error
           ? error.message
-          : "Unable to load email contacts."
+          : `Unable to load ${appId} contacts.`
       );
     } finally {
       setContactsLoadingByApp((current) => ({
@@ -2061,17 +2117,15 @@ const [telegramConnecting, setTelegramConnecting] =
                             </div>
 
                             <div className="empty-title">
-                              Loading email
+                              Loading {activePlatform?.name ?? "app"}
                               contacts...
                             </div>
 
                             <p className="empty-text">
-                              ZUQEN is securely
-                              loading real Google
-                              Contacts and Gmail
-                              email interactions
-                              available through
-                              your connected account.
+                              ZUQEN is securely loading eligible
+                              contacts available through your
+                              connected {activePlatform?.name ?? "app"}
+                              account.
                             </p>
                           </div>
                         </div>
@@ -2091,20 +2145,18 @@ const [telegramConnecting, setTelegramConnecting] =
                             </div>
 
                             <div className="empty-title">
-                              No email contacts
+                              No {activePlatform?.name ?? "app"} contacts
                               available
                             </div>
 
                             <p className="empty-text">
-                              No usable email
-                              addresses were found
-                              in Google Contacts or
-                              Gmail message headers
-                              for this account.
-                              Reconnect Google after
-                              granting the required
-                              Gmail permission if
-                              necessary.
+                              No eligible contacts are currently
+                              available for this connected
+                              {activePlatform?.name
+                                ? ` ${activePlatform.name}`
+                                : " app"} account.
+                              Ask a contact to interact with the
+                              connected service if required.
                             </p>
                           </div>
                         </div>
@@ -2164,13 +2216,14 @@ const [telegramConnecting, setTelegramConnecting] =
                                   </div>
                                 </div>
 
-                                {activeApp ===
-                                  "email" && (
+                                {contact.source && (
                                   <span className="contact-source">
                                     {contact.source ===
                                     "google-contact"
                                       ? "Google Contact"
-                                      : "Gmail"}
+                                      : contact.source === "gmail"
+                                        ? "Gmail"
+                                        : "Telegram"}
                                   </span>
                                 )}
 
