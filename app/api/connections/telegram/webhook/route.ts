@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createServerSupabaseClient } from "@/lib/supabase-server";
+import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -60,27 +60,21 @@ export async function POST(request: Request) {
         success: true,
         received: true,
         ignored: true,
-        reason: "No chat in update.",
+        reason: "No chat found in Telegram update.",
       });
     }
 
-    const supabase =
-      await createServerSupabaseClient();
-
     /*
-     * Get all connected Telegram bots.
+     * Telegram does not send a ZUQEN browser session
+     * with webhook requests.
      *
-     * Telegram webhook updates do not contain the bot
-     * token directly, so for the current one-bot-per-user
-     * setup we use the connected Telegram account.
-     *
-     * If multiple Telegram bots are connected later,
-     * webhook secret-token routing should be added.
+     * Therefore this route MUST use the server-only
+     * Supabase admin client.
      */
     const {
       data: connections,
       error: connectionError,
-    } = await supabase
+    } = await supabaseAdmin
       .from("connected_accounts")
       .select(
         "id, user_id, provider, provider_account_id, access_token, status"
@@ -100,6 +94,7 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           success: false,
+          received: true,
           error:
             "Unable to load Telegram connections.",
         },
@@ -109,7 +104,7 @@ export async function POST(request: Request) {
 
     if (!connections || connections.length === 0) {
       console.error(
-        "Telegram webhook received but no connected Telegram bot exists."
+        "Telegram webhook received an update, but no connected Telegram bot was found."
       );
 
       return NextResponse.json({
@@ -121,23 +116,21 @@ export async function POST(request: Request) {
     }
 
     /*
-     * Current ZUQEN setup supports one Telegram bot per
-     * connected user. Pick the first active connection.
-     *
-     * This keeps compatibility with the current database
-     * and existing Telegram connection system.
+     * Current ZUQEN architecture supports one Telegram
+     * bot connection at a time for the webhook.
      */
     const connection = connections[0];
 
     if (!connection?.user_id) {
       console.error(
-        "Telegram connection does not contain a user_id."
+        "Telegram connection has no user_id."
       );
 
       return NextResponse.json({
         success: true,
         received: true,
         ignored: true,
+        reason: "Telegram connection has no user.",
       });
     }
 
@@ -171,12 +164,12 @@ export async function POST(request: Request) {
         : new Date().toISOString();
 
     /*
-     * Save or update the Telegram contact.
+     * Create or update the Telegram contact.
      */
     const {
       data: savedContact,
       error: upsertError,
-    } = await supabase
+    } = await supabaseAdmin
       .from("telegram_contacts")
       .upsert(
         {
@@ -215,10 +208,12 @@ export async function POST(request: Request) {
       .select(
         `
           id,
+          user_id,
           telegram_chat_id,
           username,
           first_name,
           last_name,
+          chat_type,
           is_eligible
         `
       )
@@ -244,19 +239,14 @@ export async function POST(request: Request) {
 
     console.log(
       "Telegram contact saved successfully:",
-      {
-        contactId: savedContact?.id,
-        chatId: telegramChatId,
-        userId: connection.user_id,
-        eligible: savedContact?.is_eligible,
-      }
+      savedContact
     );
 
     return NextResponse.json({
       success: true,
       received: true,
       contactSaved: true,
-      contact: savedContact ?? null,
+      contact: savedContact,
     });
   } catch (error) {
     console.error(
@@ -265,8 +255,8 @@ export async function POST(request: Request) {
     );
 
     /*
-     * Return HTTP 200 to Telegram for malformed/unsupported
-     * updates so Telegram does not continuously retry them.
+     * Return 200 so Telegram does not repeatedly retry
+     * malformed/unsupported updates.
      */
     return NextResponse.json({
       success: true,
