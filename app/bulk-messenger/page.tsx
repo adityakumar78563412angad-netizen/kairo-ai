@@ -35,10 +35,11 @@ type SendStatus =
   | "failed";
 
 type RecipientResult = {
-  email: string;
+  email?: string;
+  chatId?: string;
   name?: string;
   status: "sent" | "failed";
-  messageId?: string;
+  messageId?: string | number;
   threadId?: string;
   error?: string;
 };
@@ -780,281 +781,179 @@ const [telegramConnecting, setTelegramConnecting] =
   }
 
   async function handleSend() {
-    if (sending) {
-      return;
-    }
+    if (sending) return;
 
     if (selectedApps.length === 0) {
-      showNotice(
-        "Select at least one connected app first."
-      );
-
+      showNotice("Select at least one connected app first.");
       return;
     }
 
-    const disconnectedSelectedApp =
-      selectedApps.find(
-        (appId) =>
-          !connectedApps.includes(appId)
-      );
-
+    const disconnectedSelectedApp = selectedApps.find((appId) => !connectedApps.includes(appId));
     if (disconnectedSelectedApp) {
-      const platform = PLATFORMS.find(
-        (item) =>
-          item.id ===
-          disconnectedSelectedApp
-      );
-
-      showNotice(
-        `First connect ${platform?.name ?? "this app"} before sending.`
-      );
-
+      const platform = PLATFORMS.find((item) => item.id === disconnectedSelectedApp);
+      showNotice(`First connect ${platform?.name ?? "this app"} before sending.`);
       return;
     }
 
     if (selectedApps.length > 1) {
-      showNotice(
-        "Real sending is currently enabled for Gmail only. Deselect the other apps and send the Email campaign."
-      );
-
-      return;
-    }
-
-    if (!selectedApps.includes("email")) {
-      showNotice(
-        "Real sending is currently enabled for Gmail only."
-      );
-
-      return;
-    }
-
-    if (selectedEmailContacts.length === 0) {
-      showNotice(
-        "Select at least one eligible email contact first."
-      );
-
-      return;
-    }
-
-    if (selectedEmailContacts.length > 50) {
-      showNotice(
-        "For now, one Gmail send action supports up to 50 recipients."
-      );
-
-      return;
-    }
-
-    if (!subject.trim()) {
-      showNotice(
-        "Enter an email subject first."
-      );
-
+      showNotice("For now, send one channel at a time. Select only Email or Telegram.");
       return;
     }
 
     if (!message.trim()) {
-      showNotice(
-        "Write a message first."
-      );
-
+      showNotice("Write a message first.");
       return;
     }
 
     if (attachmentName) {
-      showNotice(
-        "Attachment sending is not enabled yet. Remove the attachment and send the text-only email."
-      );
-
+      showNotice("Attachment sending is not enabled yet. Remove the attachment and send the text-only message.");
       return;
     }
 
     if (scheduleEnabled) {
-      showNotice(
-        "Scheduled sending is not connected yet. Turn off scheduling to send immediately."
-      );
-
+      showNotice("Scheduled sending is not connected yet. Turn off scheduling to send immediately.");
       return;
     }
 
-    const initialStatuses: Record<
-      string,
-      SendStatus
-    > = {};
+    const activeSendApp = selectedApps[0];
 
-    for (const contact of selectedEmailContacts) {
-      initialStatuses[
-        contact.id
-      ] = "pending";
-    }
+    if (activeSendApp === "telegram") {
+      const selectedTelegramIds = selectedContactsByApp.telegram ?? [];
+      const selectedTelegramContacts = (contactsByApp.telegram ?? []).filter((contact) => selectedTelegramIds.includes(contact.id));
 
-    setSendStatusByContact(
-      initialStatuses
-    );
-
-    setSendResults([]);
-    setSending(true);
-
-    for (const contact of selectedEmailContacts) {
-      setSendStatusByContact(
-        (current) => ({
-          ...current,
-          [contact.id]:
-            "sending",
-        })
-      );
-    }
-
-    try {
-      const response = await fetch(
-        "/api/bulk-messenger/email/send",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type":
-              "application/json",
-          },
-          body: JSON.stringify({
-            subject:
-              subject.trim(),
-            message:
-              message.trim(),
-            recipients:
-              selectedEmailContacts.map(
-                (contact) => ({
-                  id: contact.id,
-                  name: contact.name,
-                  email: contact.address,
-                })
-              ),
-          }),
-        }
-      );
-
-      const result: {
-        error?: string;
-        requiresReconnect?: boolean;
-        results?: RecipientResult[];
-        summary?: {
-          sent: number;
-          failed: number;
-          total: number;
-        };
-      } = await response.json();
-
-      if (!response.ok) {
-        if (
-          result.requiresReconnect
-        ) {
-          showNotice(
-            result.error ??
-              "Reconnect Google to continue."
-          );
-        } else {
-          showNotice(
-            result.error ??
-              "Gmail could not send the messages."
-          );
-        }
-
-        setSendStatusByContact(
-          (current) => {
-            const next = {
-              ...current,
-            };
-
-            for (const contact of selectedEmailContacts) {
-              next[contact.id] =
-                "failed";
-            }
-
-            return next;
-          }
-        );
-
+      if (selectedTelegramContacts.length === 0) {
+        showNotice("Select at least one eligible Telegram contact first.");
+        return;
+      }
+      if (selectedTelegramContacts.length > 50) {
+        showNotice("For now, one Telegram send action supports up to 50 recipients.");
         return;
       }
 
-      const results =
-        Array.isArray(result.results)
-          ? result.results
-          : [];
-
-      setSendResults(results);
-
-      setSendStatusByContact(
-        (current) => {
-          const next = {
-            ...current,
-          };
-
-          for (const contact of selectedEmailContacts) {
-            const resultForContact =
-              results.find(
-                (result) =>
-                  result.email.toLowerCase() ===
-                  contact.address.toLowerCase()
-              );
-
-            next[contact.id] =
-              resultForContact?.status ===
-              "sent"
-                ? "sent"
-                : "failed";
-          }
-
-          return next;
-        }
-      );
-
-      const sent =
-        result.summary?.sent ??
-        results.filter(
-          (item) =>
-            item.status === "sent"
-        ).length;
-
-      const failed =
-        result.summary?.failed ??
-        results.filter(
-          (item) =>
-            item.status === "failed"
-        ).length;
-
-      if (failed === 0) {
-        showNotice(
-          `${sent} email${sent === 1 ? "" : "s"} accepted by Gmail successfully.`
-        );
-      } else {
-        showNotice(
-          `${sent} sent, ${failed} failed. Check the status list below.`
-        );
+      const initialStatuses: Record<string, SendStatus> = {};
+      for (const contact of selectedTelegramContacts) initialStatuses[contact.id] = "pending";
+      setSendStatusByContact(initialStatuses);
+      setSendResults([]);
+      setSending(true);
+      for (const contact of selectedTelegramContacts) {
+        setSendStatusByContact((current) => ({ ...current, [contact.id]: "sending" }));
       }
-    } catch (error) {
-      console.error(
-        "Bulk email sending error:",
-        error
-      );
 
-      setSendStatusByContact(
-        (current) => {
-          const next = {
-            ...current,
-          };
+      try {
+        const response = await fetch("/api/bulk-messenger/telegram/send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: message.trim(), contactIds: selectedTelegramContacts.map((contact) => contact.id) }),
+        });
 
-          for (const contact of selectedEmailContacts) {
-            next[contact.id] =
-              "failed";
-          }
+        const result: { success?: boolean; error?: string; results?: RecipientResult[]; summary?: { requested?: number; eligible?: number; sent?: number; failed?: number } } = await response.json();
 
-          return next;
+        if (!response.ok) {
+          setSendStatusByContact((current) => {
+            const next = { ...current };
+            for (const contact of selectedTelegramContacts) next[contact.id] = "failed";
+            return next;
+          });
+          showNotice(result.error ?? "Telegram could not send the messages.");
+          return;
         }
-      );
 
-      showNotice(
-        error instanceof Error
-          ? error.message
-          : "Network error while sending email."
-      );
+        const results = Array.isArray(result.results) ? result.results : [];
+        setSendResults(results);
+        setSendStatusByContact((current) => {
+          const next = { ...current };
+          for (const contact of selectedTelegramContacts) {
+            const resultForContact = results.find((item) => item.chatId === contact.address);
+            next[contact.id] = resultForContact?.status === "sent" ? "sent" : "failed";
+          }
+          return next;
+        });
+
+        const sent = result.summary?.sent ?? results.filter((item) => item.status === "sent").length;
+        const failed = result.summary?.failed ?? results.filter((item) => item.status === "failed").length;
+        showNotice(failed === 0 ? `${sent} Telegram message${sent === 1 ? "" : "s"} sent successfully.` : `${sent} sent, ${failed} failed. Check the status list below.`);
+      } catch (error) {
+        console.error("Bulk Telegram sending error:", error);
+        setSendStatusByContact((current) => {
+          const next = { ...current };
+          for (const contact of selectedTelegramContacts) next[contact.id] = "failed";
+          return next;
+        });
+        showNotice(error instanceof Error ? error.message : "Network error while sending Telegram messages.");
+      } finally {
+        setSending(false);
+      }
+      return;
+    }
+
+    if (activeSendApp !== "email") {
+      showNotice("Real sending is currently enabled for Email and Telegram.");
+      return;
+    }
+
+    if (selectedEmailContacts.length === 0) {
+      showNotice("Select at least one eligible email contact first.");
+      return;
+    }
+    if (selectedEmailContacts.length > 50) {
+      showNotice("For now, one Gmail send action supports up to 50 recipients.");
+      return;
+    }
+    if (!subject.trim()) {
+      showNotice("Enter an email subject first.");
+      return;
+    }
+
+    const initialStatuses: Record<string, SendStatus> = {};
+    for (const contact of selectedEmailContacts) initialStatuses[contact.id] = "pending";
+    setSendStatusByContact(initialStatuses);
+    setSendResults([]);
+    setSending(true);
+    for (const contact of selectedEmailContacts) {
+      setSendStatusByContact((current) => ({ ...current, [contact.id]: "sending" }));
+    }
+
+    try {
+      const response = await fetch("/api/bulk-messenger/email/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subject: subject.trim(), message: message.trim(), recipients: selectedEmailContacts.map((contact) => ({ id: contact.id, name: contact.name, email: contact.address })) }),
+      });
+
+      const result: { error?: string; requiresReconnect?: boolean; results?: RecipientResult[]; summary?: { sent: number; failed: number; total: number } } = await response.json();
+
+      if (!response.ok) {
+        showNotice(result.error ?? "Gmail could not send the messages.");
+        setSendStatusByContact((current) => {
+          const next = { ...current };
+          for (const contact of selectedEmailContacts) next[contact.id] = "failed";
+          return next;
+        });
+        return;
+      }
+
+      const results = Array.isArray(result.results) ? result.results : [];
+      setSendResults(results);
+      setSendStatusByContact((current) => {
+        const next = { ...current };
+        for (const contact of selectedEmailContacts) {
+          const resultForContact = results.find((item) => item.email?.toLowerCase() === contact.address.toLowerCase());
+          next[contact.id] = resultForContact?.status === "sent" ? "sent" : "failed";
+        }
+        return next;
+      });
+
+      const sent = result.summary?.sent ?? results.filter((item) => item.status === "sent").length;
+      const failed = result.summary?.failed ?? results.filter((item) => item.status === "failed").length;
+      showNotice(failed === 0 ? `${sent} email${sent === 1 ? "" : "s"} accepted by Gmail successfully.` : `${sent} sent, ${failed} failed. Check the status list below.`);
+    } catch (error) {
+      console.error("Bulk email sending error:", error);
+      setSendStatusByContact((current) => {
+        const next = { ...current };
+        for (const contact of selectedEmailContacts) next[contact.id] = "failed";
+        return next;
+      });
+      showNotice(error instanceof Error ? error.message : "Network error while sending email.");
     } finally {
       setSending(false);
     }
@@ -1106,20 +1005,27 @@ const [telegramConnecting, setTelegramConnecting] =
     <main className="min-h-screen bg-[#f7f8fa] text-[#111827]">
       <style jsx global>{`
       .telegram-token-input {
+  display: block;
   width: 100%;
   box-sizing: border-box;
   margin-top: 14px;
   padding: 12px 14px;
   border-radius: 12px;
-  border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--text);
+  border: 1px solid #d0d5dd;
+  background: #ffffff;
+  color: #111827;
   outline: none;
   font-size: 13px;
+  line-height: 1.4;
+}
+
+.telegram-token-input::placeholder {
+  color: #98a2b3;
 }
 
 .telegram-token-input:focus {
-  border-color: rgba(120, 140, 255, 0.65);
+  border-color: #667085;
+  box-shadow: 0 0 0 3px rgba(16, 24, 40, 0.06);
 }
 
 .modal-connect:disabled {
@@ -2278,7 +2184,7 @@ const [telegramConnecting, setTelegramConnecting] =
                     </h2>
 
                     <p className="section-description">
-                      Gmail sending is live.
+                      Gmail and Telegram sending are live.
                       Other channels remain ready
                       for their official API
                       integrations.
@@ -2409,7 +2315,8 @@ const [telegramConnecting, setTelegramConnecting] =
 
                     <p className="section-description">
                       Review the message before
-                      Gmail receives the send request.
+                      the selected channel receives
+                      the send request.
                     </p>
                   </div>
                 </div>
@@ -2469,8 +2376,8 @@ const [telegramConnecting, setTelegramConnecting] =
                       </h2>
 
                       <p className="section-description">
-                        Gmail accepted or rejected each
-                        message individually.
+                        The selected channel reports the result
+                        for each message individually.
                       </p>
                     </div>
                   </div>
@@ -2494,14 +2401,18 @@ const [telegramConnecting, setTelegramConnecting] =
                       (result) => (
                         <div
                           key={
-                            result.email
+                            result.email ??
+                            result.chatId ??
+                            `${result.name ?? "recipient"}-${result.messageId ?? "result"}`
                           }
                           className="result-row"
                         >
                           <div className="result-info">
                             <div className="result-name">
                               {result.name ||
-                                result.email}
+                                result.email ||
+                                result.chatId ||
+                                "Recipient"}
                             </div>
 
                             <div className="result-email">
@@ -2520,10 +2431,8 @@ const [telegramConnecting, setTelegramConnecting] =
 
                             {result.messageId && (
                               <div className="result-message-id">
-                                Gmail message ID:{" "}
-                                {
-                                  result.messageId
-                                }
+                                Message ID:{" "}
+                                {result.messageId}
                               </div>
                             )}
                           </div>
@@ -2589,6 +2498,7 @@ const [telegramConnecting, setTelegramConnecting] =
       placeholder="Paste Telegram Bot Token"
       className="telegram-token-input"
       autoComplete="off"
+      aria-label="Telegram Bot Token"
     />
   </>
 ) : (
