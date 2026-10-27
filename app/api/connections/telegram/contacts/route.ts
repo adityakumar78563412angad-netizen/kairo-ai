@@ -16,7 +16,10 @@ export async function GET() {
     if (userError || !user) {
       return NextResponse.json(
         {
+          success: false,
           error: "Authentication required.",
+          contacts: [],
+          count: 0,
         },
         { status: 401 }
       );
@@ -42,7 +45,6 @@ export async function GET() {
           `
         )
         .eq("user_id", user.id)
-        .eq("is_eligible", true)
         .order("last_message_at", {
           ascending: false,
           nullsFirst: false,
@@ -56,7 +58,10 @@ export async function GET() {
 
       return NextResponse.json(
         {
+          success: false,
           error: "Unable to load Telegram contacts.",
+          contacts: [],
+          count: 0,
         },
         { status: 500 }
       );
@@ -68,7 +73,10 @@ export async function GET() {
           contact.first_name,
           contact.last_name,
         ]
-          .filter(Boolean)
+          .filter(
+            (value): value is string =>
+              Boolean(value?.trim())
+          )
           .join(" ")
           .trim();
 
@@ -81,19 +89,34 @@ export async function GET() {
 
         return {
           id: contact.id,
+
           address: contact.telegram_chat_id,
+
           chatId: contact.telegram_chat_id,
+
           name: displayName,
+
           username: contact.username
             ? `@${contact.username}`
             : null,
+
           chatType: contact.chat_type,
+
           firstName: contact.first_name,
+
           lastName: contact.last_name,
+
           title: contact.title,
+
           lastMessageAt: contact.last_message_at,
+
           lastMessageText: contact.last_message_text,
+
           isEligible: contact.is_eligible,
+
+          createdAt: contact.created_at,
+
+          updatedAt: contact.updated_at,
         };
       }
     );
@@ -111,10 +134,13 @@ export async function GET() {
 
     return NextResponse.json(
       {
+        success: false,
         error:
           error instanceof Error
             ? error.message
             : "Unable to load Telegram contacts.",
+        contacts: [],
+        count: 0,
       },
       { status: 500 }
     );
