@@ -96,24 +96,20 @@ const PLATFORMS: Platform[] = [
 ];
 
 export default function BulkMessengerPage() {
-  const [connectedApps, setConnectedApps] = useState<string[]>(
-    []
-  );
+  const [connectedApps, setConnectedApps] =
+    useState<string[]>([]);
 
-  const [selectedApps, setSelectedApps] = useState<string[]>(
-    []
-  );
+  const [selectedApps, setSelectedApps] =
+    useState<string[]>([]);
 
-  const [activeApp, setActiveApp] = useState<string | null>(
-    null
-  );
+  const [activeApp, setActiveApp] =
+    useState<string | null>(null);
 
   const [connectionsLoading, setConnectionsLoading] =
     useState(true);
 
-  const [contactsByApp, setContactsByApp] = useState<
-    Record<string, Contact[]>
-  >({});
+  const [contactsByApp, setContactsByApp] =
+    useState<Record<string, Contact[]>>({});
 
   const [contactsLoadingByApp, setContactsLoadingByApp] =
     useState<Record<string, boolean>>({});
@@ -133,8 +129,11 @@ export default function BulkMessengerPage() {
   const [scheduleEnabled, setScheduleEnabled] =
     useState(false);
 
-  const [scheduleDate, setScheduleDate] = useState("");
-  const [scheduleTime, setScheduleTime] = useState("");
+  const [scheduleDate, setScheduleDate] =
+    useState("");
+
+  const [scheduleTime, setScheduleTime] =
+    useState("");
 
   const [connectModalApp, setConnectModalApp] =
     useState<Platform | null>(null);
@@ -145,18 +144,17 @@ export default function BulkMessengerPage() {
   const [telegramConnecting, setTelegramConnecting] =
     useState(false);
 
-  const [notice, setNotice] = useState<string | null>(
-    null
-  );
+  const [notice, setNotice] =
+    useState<string | null>(null);
 
-  const [sending, setSending] = useState(false);
+  const [sending, setSending] =
+    useState(false);
 
   const [sendStatusByContact, setSendStatusByContact] =
     useState<Record<string, SendStatus>>({});
 
-  const [sendResults, setSendResults] = useState<
-    RecipientResult[]
-  >([]);
+  const [sendResults, setSendResults] =
+    useState<RecipientResult[]>([]);
 
   const providerToPlatform: Record<string, string> = {
     google: "email",
@@ -205,28 +203,26 @@ export default function BulkMessengerPage() {
           return;
         }
 
-        const realConnectedApps = Array.isArray(
-          result.connections
-        )
-          ? result.connections
-              .filter(
-                (connection) =>
-                  connection.status === "connected"
-              )
-              .map((connection) => {
-                return (
-                  providerToPlatform[
-                    connection.provider
-                  ] ?? null
-                );
-              })
-              .filter(
-                (
-                  platformId: string | null
-                ): platformId is string =>
-                  platformId !== null
-              )
-          : [];
+        const realConnectedApps =
+          Array.isArray(result.connections)
+            ? result.connections
+                .filter(
+                  (connection) =>
+                    connection.status === "connected"
+                )
+                .map(
+                  (connection) =>
+                    providerToPlatform[
+                      connection.provider
+                    ] ?? null
+                )
+                .filter(
+                  (
+                    platformId: string | null
+                  ): platformId is string =>
+                    platformId !== null
+                )
+            : [];
 
         setConnectedApps([
           ...new Set(realConnectedApps),
@@ -597,7 +593,6 @@ export default function BulkMessengerPage() {
 
     if (!isConnected) {
       setConnectModalApp(platform);
-
       return;
     }
 
@@ -649,7 +644,9 @@ export default function BulkMessengerPage() {
     setSendStatusByContact({});
   }
 
-  async function handleConnect(platform: Platform) {
+  async function handleConnect(
+    platform: Platform
+  ) {
     if (platform.id === "email") {
       setConnectModalApp(null);
 
@@ -669,10 +666,14 @@ export default function BulkMessengerPage() {
       return;
     }
 
-    const token = telegramBotToken.trim();
+    const token =
+      telegramBotToken.trim();
 
     if (!token) {
-      showNotice("Enter your Telegram bot token first.");
+      showNotice(
+        "Enter your Telegram bot token first."
+      );
+
       return;
     }
 
@@ -688,7 +689,8 @@ export default function BulkMessengerPage() {
         {
           method: "POST",
           headers: {
-            "Content-Type": "application/json",
+            "Content-Type":
+              "application/json",
           },
           body: JSON.stringify({
             botToken: token,
@@ -762,16 +764,15 @@ export default function BulkMessengerPage() {
         const existing =
           current[appId] ?? [];
 
-        const next = existing.includes(
-          contactId
-        )
-          ? existing.filter(
-              (id) => id !== contactId
-            )
-          : [
-              ...existing,
-              contactId,
-            ];
+        const next =
+          existing.includes(contactId)
+            ? existing.filter(
+                (id) => id !== contactId
+              )
+            : [
+                ...existing,
+                contactId,
+              ];
 
         return {
           ...current,
@@ -785,12 +786,15 @@ export default function BulkMessengerPage() {
   }
 
   async function handleSend() {
-    if (sending) return;
+    if (sending) {
+      return;
+    }
 
     if (selectedApps.length === 0) {
       showNotice(
         "Select at least one connected app first."
       );
+
       return;
     }
 
@@ -801,15 +805,17 @@ export default function BulkMessengerPage() {
       );
 
     if (disconnectedSelectedApp) {
-      const platform = PLATFORMS.find(
-        (item) =>
-          item.id ===
-          disconnectedSelectedApp
-      );
+      const platform =
+        PLATFORMS.find(
+          (item) =>
+            item.id ===
+            disconnectedSelectedApp
+        );
 
       showNotice(
         `First connect ${
-          platform?.name ?? "this app"
+          platform?.name ??
+          "this app"
         } before sending.`
       );
 
@@ -820,6 +826,7 @@ export default function BulkMessengerPage() {
       showNotice(
         "For now, send one channel at a time. Select only Email or Telegram."
       );
+
       return;
     }
 
@@ -827,6 +834,7 @@ export default function BulkMessengerPage() {
       showNotice(
         "Write a message first."
       );
+
       return;
     }
 
@@ -834,6 +842,7 @@ export default function BulkMessengerPage() {
       showNotice(
         "Attachment sending is not enabled yet. Remove the attachment and send the text-only message."
       );
+
       return;
     }
 
@@ -841,13 +850,23 @@ export default function BulkMessengerPage() {
       showNotice(
         "Scheduled sending is not connected yet. Turn off scheduling to send immediately."
       );
+
       return;
     }
 
     const activeSendApp =
       selectedApps[0];
 
-    if (activeSendApp === "telegram") {
+    /*
+     * ============================================================
+     * TELEGRAM SEND
+     * ============================================================
+     */
+
+    if (
+      activeSendApp ===
+      "telegram"
+    ) {
       const selectedTelegramIds =
         selectedContactsByApp.telegram ??
         [];
@@ -869,6 +888,7 @@ export default function BulkMessengerPage() {
         showNotice(
           "Select at least one eligible Telegram contact first."
         );
+
         return;
       }
 
@@ -879,6 +899,7 @@ export default function BulkMessengerPage() {
         showNotice(
           "For now, one Telegram send action supports up to 50 recipients."
         );
+
         return;
       }
 
@@ -887,9 +908,13 @@ export default function BulkMessengerPage() {
         SendStatus
       > = {};
 
-      for (const contact of selectedTelegramContacts) {
-        initialStatuses[contact.id] =
-          "pending";
+      for (
+        const contact of
+        selectedTelegramContacts
+      ) {
+        initialStatuses[
+          contact.id
+        ] = "pending";
       }
 
       setSendStatusByContact(
@@ -899,7 +924,10 @@ export default function BulkMessengerPage() {
       setSendResults([]);
       setSending(true);
 
-      for (const contact of selectedTelegramContacts) {
+      for (
+        const contact of
+        selectedTelegramContacts
+      ) {
         setSendStatusByContact(
           (current) => ({
             ...current,
@@ -919,6 +947,7 @@ export default function BulkMessengerPage() {
                 "Content-Type":
                   "application/json",
               },
+              cache: "no-store",
               body: JSON.stringify({
                 message:
                   message.trim(),
@@ -933,15 +962,15 @@ export default function BulkMessengerPage() {
 
         /*
          * IMPORTANT:
-         * Do not call response.json() directly here.
-         * If Next.js/Vercel returns an HTML error page,
-         * response.json() throws:
-         *
+         * Do not directly call response.json().
+         * If Vercel/Next returns an HTML 404/500 page,
+         * response.json() itself throws:
          * Unexpected token '<'
          *
-         * We read the raw response first and then
-         * safely parse JSON.
+         * Reading text first lets us display the real
+         * server response safely.
          */
+
         const responseText =
           await response.text();
 
@@ -955,23 +984,34 @@ export default function BulkMessengerPage() {
             sent?: number;
             failed?: number;
           };
-        };
+        } = {};
 
-        try {
-          result = responseText
-            ? JSON.parse(
+        if (responseText.trim()) {
+          try {
+            result =
+              JSON.parse(
                 responseText
-              )
-            : {};
-        } catch {
-          result = {
-            error:
-              `Server returned an invalid response (HTTP ${response.status}). ` +
-              responseText.slice(
-                0,
-                500
-              ),
-          };
+              );
+          } catch {
+            const cleanResponse =
+              responseText
+                .replace(
+                  /<[^>]*>/g,
+                  " "
+                )
+                .replace(
+                  /\s+/g,
+                  " "
+                )
+                .trim()
+                .slice(0, 500);
+
+            result = {
+              error:
+                `Server returned an invalid response (HTTP ${response.status}). ` +
+                cleanResponse,
+            };
+          }
         }
 
         if (!response.ok) {
@@ -981,9 +1021,13 @@ export default function BulkMessengerPage() {
                 ...current,
               };
 
-              for (const contact of selectedTelegramContacts) {
-                next[contact.id] =
-                  "failed";
+              for (
+                const contact of
+                selectedTelegramContacts
+              ) {
+                next[
+                  contact.id
+                ] = "failed";
               }
 
               return next;
@@ -1005,7 +1049,9 @@ export default function BulkMessengerPage() {
             ? result.results
             : [];
 
-        setSendResults(results);
+        setSendResults(
+          results
+        );
 
         setSendStatusByContact(
           (current) => {
@@ -1013,7 +1059,10 @@ export default function BulkMessengerPage() {
               ...current,
             };
 
-            for (const contact of selectedTelegramContacts) {
+            for (
+              const contact of
+              selectedTelegramContacts
+            ) {
               const resultForContact =
                 results.find(
                   (item) =>
@@ -1021,7 +1070,9 @@ export default function BulkMessengerPage() {
                     contact.address
                 );
 
-              next[contact.id] =
+              next[
+                contact.id
+              ] =
                 resultForContact?.status ===
                 "sent"
                   ? "sent"
@@ -1033,8 +1084,7 @@ export default function BulkMessengerPage() {
         );
 
         const sent =
-          result.summary
-            ?.sent ??
+          result.summary?.sent ??
           results.filter(
             (item) =>
               item.status ===
@@ -1042,8 +1092,7 @@ export default function BulkMessengerPage() {
           ).length;
 
         const failed =
-          result.summary
-            ?.failed ??
+          result.summary?.failed ??
           results.filter(
             (item) =>
               item.status ===
@@ -1071,9 +1120,13 @@ export default function BulkMessengerPage() {
               ...current,
             };
 
-            for (const contact of selectedTelegramContacts) {
-              next[contact.id] =
-                "failed";
+            for (
+              const contact of
+              selectedTelegramContacts
+            ) {
+              next[
+                contact.id
+              ] = "failed";
             }
 
             return next;
@@ -1092,7 +1145,16 @@ export default function BulkMessengerPage() {
       return;
     }
 
-    if (activeSendApp !== "email") {
+    /*
+     * ============================================================
+     * EMAIL SEND
+     * ============================================================
+     */
+
+    if (
+      activeSendApp !==
+      "email"
+    ) {
       showNotice(
         "Real sending is currently enabled for Email and Telegram."
       );
@@ -1135,9 +1197,13 @@ export default function BulkMessengerPage() {
       SendStatus
     > = {};
 
-    for (const contact of selectedEmailContacts) {
-      initialStatuses[contact.id] =
-        "pending";
+    for (
+      const contact of
+      selectedEmailContacts
+    ) {
+      initialStatuses[
+        contact.id
+      ] = "pending";
     }
 
     setSendStatusByContact(
@@ -1147,7 +1213,10 @@ export default function BulkMessengerPage() {
     setSendResults([]);
     setSending(true);
 
-    for (const contact of selectedEmailContacts) {
+    for (
+      const contact of
+      selectedEmailContacts
+    ) {
       setSendStatusByContact(
         (current) => ({
           ...current,
@@ -1167,6 +1236,7 @@ export default function BulkMessengerPage() {
               "Content-Type":
                 "application/json",
             },
+            cache: "no-store",
             body: JSON.stringify({
               subject:
                 subject.trim(),
@@ -1186,7 +1256,10 @@ export default function BulkMessengerPage() {
           }
         );
 
-      const result: {
+      const responseText =
+        await response.text();
+
+      let result: {
         error?: string;
         requiresReconnect?: boolean;
         results?: RecipientResult[];
@@ -1195,7 +1268,21 @@ export default function BulkMessengerPage() {
           failed: number;
           total: number;
         };
-      } = await response.json();
+      } = {};
+
+      if (responseText.trim()) {
+        try {
+          result =
+            JSON.parse(
+              responseText
+            );
+        } catch {
+          result = {
+            error:
+              `Server returned an invalid response (HTTP ${response.status}).`,
+          };
+        }
+      }
 
       if (!response.ok) {
         showNotice(
@@ -1209,9 +1296,13 @@ export default function BulkMessengerPage() {
               ...current,
             };
 
-            for (const contact of selectedEmailContacts) {
-              next[contact.id] =
-                "failed";
+            for (
+              const contact of
+              selectedEmailContacts
+            ) {
+              next[
+                contact.id
+              ] = "failed";
             }
 
             return next;
@@ -1228,7 +1319,9 @@ export default function BulkMessengerPage() {
           ? result.results
           : [];
 
-      setSendResults(results);
+      setSendResults(
+        results
+      );
 
       setSendStatusByContact(
         (current) => {
@@ -1236,7 +1329,10 @@ export default function BulkMessengerPage() {
             ...current,
           };
 
-          for (const contact of selectedEmailContacts) {
+          for (
+            const contact of
+            selectedEmailContacts
+          ) {
             const resultForContact =
               results.find(
                 (item) =>
@@ -1244,7 +1340,9 @@ export default function BulkMessengerPage() {
                   contact.address.toLowerCase()
               );
 
-            next[contact.id] =
+            next[
+              contact.id
+            ] =
               resultForContact?.status ===
               "sent"
                 ? "sent"
@@ -1292,9 +1390,13 @@ export default function BulkMessengerPage() {
             ...current,
           };
 
-          for (const contact of selectedEmailContacts) {
-            next[contact.id] =
-              "failed";
+          for (
+            const contact of
+            selectedEmailContacts
+          ) {
+            next[
+              contact.id
+            ] = "failed";
           }
 
           return next;
@@ -1377,8 +1479,7 @@ export default function BulkMessengerPage() {
 
         .telegram-token-input:focus {
           border-color: #667085;
-          box-shadow: 0 0 0 3px
-            rgba(16, 24, 40, 0.06);
+          box-shadow: 0 0 0 3px rgba(16, 24, 40, 0.06);
         }
 
         .modal-connect:disabled {
@@ -1449,8 +1550,7 @@ export default function BulkMessengerPage() {
           background: rgba(255, 255, 255, 0.88);
           border: 1px solid #e4e7ec;
           border-radius: 20px;
-          box-shadow: 0 10px 35px
-            rgba(16, 24, 40, 0.045);
+          box-shadow: 0 10px 35px rgba(16, 24, 40, 0.045);
         }
 
         .apps-panel {
@@ -1480,10 +1580,7 @@ export default function BulkMessengerPage() {
 
         .apps-grid {
           display: grid;
-          grid-template-columns: repeat(
-            4,
-            minmax(0, 1fr)
-          );
+          grid-template-columns: repeat(4, minmax(0, 1fr));
           gap: 12px;
         }
 
@@ -1504,8 +1601,7 @@ export default function BulkMessengerPage() {
         .app-card:hover {
           transform: translateY(-1px);
           border-color: #c7ccd5;
-          box-shadow: 0 8px 22px
-            rgba(16, 24, 40, 0.07);
+          box-shadow: 0 8px 22px rgba(16, 24, 40, 0.07);
         }
 
         .app-card.selected {
@@ -1769,8 +1865,7 @@ export default function BulkMessengerPage() {
 
         .subject-input:focus {
           border-color: #98a2b3;
-          box-shadow: 0 0 0 3px
-            rgba(16, 24, 40, 0.06);
+          box-shadow: 0 0 0 3px rgba(16, 24, 40, 0.06);
         }
 
         .textarea {
@@ -1788,8 +1883,7 @@ export default function BulkMessengerPage() {
 
         .textarea:focus {
           border-color: #98a2b3;
-          box-shadow: 0 0 0 3px
-            rgba(16, 24, 40, 0.06);
+          box-shadow: 0 0 0 3px rgba(16, 24, 40, 0.06);
         }
 
         .composer-actions {
@@ -2025,8 +2119,7 @@ export default function BulkMessengerPage() {
           color: #fff;
           border-radius: 13px;
           padding: 13px 15px;
-          box-shadow: 0 18px 50px
-            rgba(16, 24, 40, 0.2);
+          box-shadow: 0 18px 50px rgba(16, 24, 40, 0.2);
           font-size: 13px;
         }
 
@@ -2046,8 +2139,7 @@ export default function BulkMessengerPage() {
           border-radius: 20px;
           background: #fff;
           border: 1px solid #eaecf0;
-          box-shadow: 0 25px 80px
-            rgba(16, 24, 40, 0.22);
+          box-shadow: 0 25px 80px rgba(16, 24, 40, 0.22);
           padding: 24px;
         }
 
@@ -2105,10 +2197,7 @@ export default function BulkMessengerPage() {
 
         @media (max-width: 1050px) {
           .apps-grid {
-            grid-template-columns: repeat(
-              2,
-              minmax(0, 1fr)
-            );
+            grid-template-columns: repeat(2, minmax(0, 1fr));
           }
 
           .main-grid {
@@ -2396,9 +2485,9 @@ export default function BulkMessengerPage() {
                             </div>
 
                             <p className="empty-text">
-                              ZUQEN is securely loading eligible
-                              contacts available through your
-                              connected{" "}
+                              ZUQEN is securely loading
+                              eligible contacts available
+                              through your connected{" "}
                               {activePlatform?.name ??
                                 "app"}{" "}
                               account.
@@ -2424,19 +2513,17 @@ export default function BulkMessengerPage() {
                               No{" "}
                               {activePlatform?.name ??
                                 "app"}{" "}
-                              contacts
-                              available
+                              contacts available
                             </div>
 
                             <p className="empty-text">
-                              No eligible contacts are currently
-                              available for this connected
+                              No eligible contacts are
+                              currently available for this
+                              connected{" "}
                               {activePlatform?.name
                                 ? ` ${activePlatform.name}`
                                 : " app"}{" "}
-                              account. Ask a contact to interact
-                              with the connected service if
-                              required.
+                              account.
                             </p>
                           </div>
                         </div>
@@ -2859,15 +2946,19 @@ export default function BulkMessengerPage() {
             "telegram" ? (
               <>
                 <p className="modal-text">
-                  Enter the Bot Token you received from
-                  Telegram BotFather. ZUQEN will verify the
-                  token with Telegram before saving the
-                  connection.
+                  Enter the Bot Token you
+                  received from Telegram
+                  BotFather. ZUQEN will
+                  verify the token with
+                  Telegram before saving
+                  the connection.
                 </p>
 
                 <input
                   type="password"
-                  value={telegramBotToken}
+                  value={
+                    telegramBotToken
+                  }
                   onChange={(event) =>
                     setTelegramBotToken(
                       event.target.value
@@ -2882,11 +2973,14 @@ export default function BulkMessengerPage() {
             ) : (
               <p className="modal-text">
                 You selected{" "}
-                {connectModalApp.name}, but this
-                account is not connected to ZUQEN yet.
-                Connect it through the official
-                authorization system before selecting
-                contacts or sending messages.
+                {connectModalApp.name},
+                but this account is not
+                connected to ZUQEN yet.
+                Connect it through the
+                official authorization
+                system before selecting
+                contacts or sending
+                messages.
               </p>
             )}
 
@@ -2914,8 +3008,10 @@ export default function BulkMessengerPage() {
                 disabled={
                   connectModalApp.id ===
                     "telegram" &&
-                  (telegramConnecting ||
-                    !telegramBotToken.trim())
+                  (
+                    telegramConnecting ||
+                    !telegramBotToken.trim()
+                  )
                 }
               >
                 {connectModalApp.id ===
