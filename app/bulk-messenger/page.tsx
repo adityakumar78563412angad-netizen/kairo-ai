@@ -138,10 +138,13 @@ export default function BulkMessengerPage() {
 
   const [connectModalApp, setConnectModalApp] =
     useState<Platform | null>(null);
-const [telegramBotToken, setTelegramBotToken] =
-  useState("");
-const [telegramConnecting, setTelegramConnecting] =
-  useState(false);
+
+  const [telegramBotToken, setTelegramBotToken] =
+    useState("");
+
+  const [telegramConnecting, setTelegramConnecting] =
+    useState(false);
+
   const [notice, setNotice] = useState<string | null>(
     null
   );
@@ -155,14 +158,15 @@ const [telegramConnecting, setTelegramConnecting] =
     RecipientResult[]
   >([]);
 
- const providerToPlatform: Record<string, string> = {
-  google: "email",
-  telegram: "telegram",
-};
- const platformToProvider: Record<string, string> = {
-  email: "google",
-  telegram: "telegram",
-};
+  const providerToPlatform: Record<string, string> = {
+    google: "email",
+    telegram: "telegram",
+  };
+
+  const platformToProvider: Record<string, string> = {
+    email: "google",
+    telegram: "telegram",
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -645,101 +649,101 @@ const [telegramConnecting, setTelegramConnecting] =
     setSendStatusByContact({});
   }
 
- async function handleConnect(platform: Platform) {
-  if (platform.id === "email") {
-    setConnectModalApp(null);
+  async function handleConnect(platform: Platform) {
+    if (platform.id === "email") {
+      setConnectModalApp(null);
 
-    window.location.href =
-      "/api/connections/google/connect";
+      window.location.href =
+        "/api/connections/google/connect";
 
-    return;
-  }
-
-  if (platform.id !== "telegram") {
-    setConnectModalApp(null);
-
-    showNotice(
-      `${platform.name} connection is not available yet.`
-    );
-
-    return;
-  }
-
-  const token = telegramBotToken.trim();
-
-  if (!token) {
-    showNotice("Enter your Telegram bot token first.");
-    return;
-  }
-
-  if (telegramConnecting) {
-    return;
-  }
-
-  try {
-    setTelegramConnecting(true);
-
-    const response = await fetch(
-      "/api/connections/telegram/connect",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          botToken: token,
-        }),
-      }
-    );
-
-    const result: {
-      error?: string;
-      success?: boolean;
-      connection?: {
-        providerAccountId?: string;
-        accountName?: string;
-        username?: string | null;
-      };
-    } = await response.json();
-
-    if (!response.ok) {
-      throw new Error(
-        result.error ??
-          "Unable to connect Telegram."
-      );
+      return;
     }
 
-    setConnectedApps((current) =>
-      current.includes("telegram")
-        ? current
-        : [...current, "telegram"]
-    );
+    if (platform.id !== "telegram") {
+      setConnectModalApp(null);
 
-    setTelegramBotToken("");
-    setConnectModalApp(null);
+      showNotice(
+        `${platform.name} connection is not available yet.`
+      );
 
-    showNotice(
-      `Telegram connected successfully${
-        result.connection?.username
-          ? ` as ${result.connection.username}`
-          : ""
-      }.`
-    );
-  } catch (error) {
-    console.error(
-      "Telegram connection error:",
-      error
-    );
+      return;
+    }
 
-    showNotice(
-      error instanceof Error
-        ? error.message
-        : "Unable to connect Telegram."
-    );
-  } finally {
-    setTelegramConnecting(false);
+    const token = telegramBotToken.trim();
+
+    if (!token) {
+      showNotice("Enter your Telegram bot token first.");
+      return;
+    }
+
+    if (telegramConnecting) {
+      return;
+    }
+
+    try {
+      setTelegramConnecting(true);
+
+      const response = await fetch(
+        "/api/connections/telegram/connect",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            botToken: token,
+          }),
+        }
+      );
+
+      const result: {
+        error?: string;
+        success?: boolean;
+        connection?: {
+          providerAccountId?: string;
+          accountName?: string;
+          username?: string | null;
+        };
+      } = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          result.error ??
+            "Unable to connect Telegram."
+        );
+      }
+
+      setConnectedApps((current) =>
+        current.includes("telegram")
+          ? current
+          : [...current, "telegram"]
+      );
+
+      setTelegramBotToken("");
+      setConnectModalApp(null);
+
+      showNotice(
+        `Telegram connected successfully${
+          result.connection?.username
+            ? ` as ${result.connection.username}`
+            : ""
+        }.`
+      );
+    } catch (error) {
+      console.error(
+        "Telegram connection error:",
+        error
+      );
+
+      showNotice(
+        error instanceof Error
+          ? error.message
+          : "Unable to connect Telegram."
+      );
+    } finally {
+      setTelegramConnecting(false);
+    }
   }
-}
 
   function handleContactToggle(
     appId: string,
@@ -784,176 +788,524 @@ const [telegramConnecting, setTelegramConnecting] =
     if (sending) return;
 
     if (selectedApps.length === 0) {
-      showNotice("Select at least one connected app first.");
+      showNotice(
+        "Select at least one connected app first."
+      );
       return;
     }
 
-    const disconnectedSelectedApp = selectedApps.find((appId) => !connectedApps.includes(appId));
+    const disconnectedSelectedApp =
+      selectedApps.find(
+        (appId) =>
+          !connectedApps.includes(appId)
+      );
+
     if (disconnectedSelectedApp) {
-      const platform = PLATFORMS.find((item) => item.id === disconnectedSelectedApp);
-      showNotice(`First connect ${platform?.name ?? "this app"} before sending.`);
+      const platform = PLATFORMS.find(
+        (item) =>
+          item.id ===
+          disconnectedSelectedApp
+      );
+
+      showNotice(
+        `First connect ${
+          platform?.name ?? "this app"
+        } before sending.`
+      );
+
       return;
     }
 
     if (selectedApps.length > 1) {
-      showNotice("For now, send one channel at a time. Select only Email or Telegram.");
+      showNotice(
+        "For now, send one channel at a time. Select only Email or Telegram."
+      );
       return;
     }
 
     if (!message.trim()) {
-      showNotice("Write a message first.");
+      showNotice(
+        "Write a message first."
+      );
       return;
     }
 
     if (attachmentName) {
-      showNotice("Attachment sending is not enabled yet. Remove the attachment and send the text-only message.");
+      showNotice(
+        "Attachment sending is not enabled yet. Remove the attachment and send the text-only message."
+      );
       return;
     }
 
     if (scheduleEnabled) {
-      showNotice("Scheduled sending is not connected yet. Turn off scheduling to send immediately.");
+      showNotice(
+        "Scheduled sending is not connected yet. Turn off scheduling to send immediately."
+      );
       return;
     }
 
-    const activeSendApp = selectedApps[0];
+    const activeSendApp =
+      selectedApps[0];
 
     if (activeSendApp === "telegram") {
-      const selectedTelegramIds = selectedContactsByApp.telegram ?? [];
-      const selectedTelegramContacts = (contactsByApp.telegram ?? []).filter((contact) => selectedTelegramIds.includes(contact.id));
+      const selectedTelegramIds =
+        selectedContactsByApp.telegram ??
+        [];
 
-      if (selectedTelegramContacts.length === 0) {
-        showNotice("Select at least one eligible Telegram contact first.");
+      const selectedTelegramContacts =
+        (
+          contactsByApp.telegram ??
+          []
+        ).filter((contact) =>
+          selectedTelegramIds.includes(
+            contact.id
+          )
+        );
+
+      if (
+        selectedTelegramContacts.length ===
+        0
+      ) {
+        showNotice(
+          "Select at least one eligible Telegram contact first."
+        );
         return;
       }
-      if (selectedTelegramContacts.length > 50) {
-        showNotice("For now, one Telegram send action supports up to 50 recipients.");
+
+      if (
+        selectedTelegramContacts.length >
+        50
+      ) {
+        showNotice(
+          "For now, one Telegram send action supports up to 50 recipients."
+        );
         return;
       }
 
-      const initialStatuses: Record<string, SendStatus> = {};
-      for (const contact of selectedTelegramContacts) initialStatuses[contact.id] = "pending";
-      setSendStatusByContact(initialStatuses);
+      const initialStatuses: Record<
+        string,
+        SendStatus
+      > = {};
+
+      for (const contact of selectedTelegramContacts) {
+        initialStatuses[contact.id] =
+          "pending";
+      }
+
+      setSendStatusByContact(
+        initialStatuses
+      );
+
       setSendResults([]);
       setSending(true);
+
       for (const contact of selectedTelegramContacts) {
-        setSendStatusByContact((current) => ({ ...current, [contact.id]: "sending" }));
+        setSendStatusByContact(
+          (current) => ({
+            ...current,
+            [contact.id]:
+              "sending",
+          })
+        );
       }
 
       try {
-        const response = await fetch("/api/bulk-messenger/telegram/send", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message: message.trim(), contactIds: selectedTelegramContacts.map((contact) => contact.id) }),
-        });
+        const response =
+          await fetch(
+            "/api/bulk-messenger/telegram/send",
+            {
+              method: "POST",
+              headers: {
+                "Content-Type":
+                  "application/json",
+              },
+              body: JSON.stringify({
+                message:
+                  message.trim(),
+                contactIds:
+                  selectedTelegramContacts.map(
+                    (contact) =>
+                      contact.id
+                  ),
+              }),
+            }
+          );
 
-        const result: { success?: boolean; error?: string; results?: RecipientResult[]; summary?: { requested?: number; eligible?: number; sent?: number; failed?: number } } = await response.json();
+        /*
+         * IMPORTANT:
+         * Do not call response.json() directly here.
+         * If Next.js/Vercel returns an HTML error page,
+         * response.json() throws:
+         *
+         * Unexpected token '<'
+         *
+         * We read the raw response first and then
+         * safely parse JSON.
+         */
+        const responseText =
+          await response.text();
+
+        let result: {
+          success?: boolean;
+          error?: string;
+          results?: RecipientResult[];
+          summary?: {
+            requested?: number;
+            eligible?: number;
+            sent?: number;
+            failed?: number;
+          };
+        };
+
+        try {
+          result = responseText
+            ? JSON.parse(
+                responseText
+              )
+            : {};
+        } catch {
+          result = {
+            error:
+              `Server returned an invalid response (HTTP ${response.status}). ` +
+              responseText.slice(
+                0,
+                500
+              ),
+          };
+        }
 
         if (!response.ok) {
-          setSendStatusByContact((current) => {
-            const next = { ...current };
-            for (const contact of selectedTelegramContacts) next[contact.id] = "failed";
-            return next;
-          });
-          showNotice(result.error ?? "Telegram could not send the messages.");
+          setSendStatusByContact(
+            (current) => {
+              const next = {
+                ...current,
+              };
+
+              for (const contact of selectedTelegramContacts) {
+                next[contact.id] =
+                  "failed";
+              }
+
+              return next;
+            }
+          );
+
+          showNotice(
+            result.error ??
+              `Telegram send request failed (HTTP ${response.status}).`
+          );
+
           return;
         }
 
-        const results = Array.isArray(result.results) ? result.results : [];
-        setSendResults(results);
-        setSendStatusByContact((current) => {
-          const next = { ...current };
-          for (const contact of selectedTelegramContacts) {
-            const resultForContact = results.find((item) => item.chatId === contact.address);
-            next[contact.id] = resultForContact?.status === "sent" ? "sent" : "failed";
-          }
-          return next;
-        });
+        const results =
+          Array.isArray(
+            result.results
+          )
+            ? result.results
+            : [];
 
-        const sent = result.summary?.sent ?? results.filter((item) => item.status === "sent").length;
-        const failed = result.summary?.failed ?? results.filter((item) => item.status === "failed").length;
-        showNotice(failed === 0 ? `${sent} Telegram message${sent === 1 ? "" : "s"} sent successfully.` : `${sent} sent, ${failed} failed. Check the status list below.`);
+        setSendResults(results);
+
+        setSendStatusByContact(
+          (current) => {
+            const next = {
+              ...current,
+            };
+
+            for (const contact of selectedTelegramContacts) {
+              const resultForContact =
+                results.find(
+                  (item) =>
+                    item.chatId ===
+                    contact.address
+                );
+
+              next[contact.id] =
+                resultForContact?.status ===
+                "sent"
+                  ? "sent"
+                  : "failed";
+            }
+
+            return next;
+          }
+        );
+
+        const sent =
+          result.summary
+            ?.sent ??
+          results.filter(
+            (item) =>
+              item.status ===
+              "sent"
+          ).length;
+
+        const failed =
+          result.summary
+            ?.failed ??
+          results.filter(
+            (item) =>
+              item.status ===
+              "failed"
+          ).length;
+
+        showNotice(
+          failed === 0
+            ? `${sent} Telegram message${
+                sent === 1
+                  ? ""
+                  : "s"
+              } sent successfully.`
+            : `${sent} sent, ${failed} failed. Check the status list below.`
+        );
       } catch (error) {
-        console.error("Bulk Telegram sending error:", error);
-        setSendStatusByContact((current) => {
-          const next = { ...current };
-          for (const contact of selectedTelegramContacts) next[contact.id] = "failed";
-          return next;
-        });
-        showNotice(error instanceof Error ? error.message : "Network error while sending Telegram messages.");
+        console.error(
+          "Bulk Telegram sending error:",
+          error
+        );
+
+        setSendStatusByContact(
+          (current) => {
+            const next = {
+              ...current,
+            };
+
+            for (const contact of selectedTelegramContacts) {
+              next[contact.id] =
+                "failed";
+            }
+
+            return next;
+          }
+        );
+
+        showNotice(
+          error instanceof Error
+            ? error.message
+            : "Network error while sending Telegram messages."
+        );
       } finally {
         setSending(false);
       }
+
       return;
     }
 
     if (activeSendApp !== "email") {
-      showNotice("Real sending is currently enabled for Email and Telegram.");
+      showNotice(
+        "Real sending is currently enabled for Email and Telegram."
+      );
+
       return;
     }
 
-    if (selectedEmailContacts.length === 0) {
-      showNotice("Select at least one eligible email contact first.");
+    if (
+      selectedEmailContacts.length ===
+      0
+    ) {
+      showNotice(
+        "Select at least one eligible email contact first."
+      );
+
       return;
     }
-    if (selectedEmailContacts.length > 50) {
-      showNotice("For now, one Gmail send action supports up to 50 recipients.");
+
+    if (
+      selectedEmailContacts.length >
+      50
+    ) {
+      showNotice(
+        "For now, one Gmail send action supports up to 50 recipients."
+      );
+
       return;
     }
+
     if (!subject.trim()) {
-      showNotice("Enter an email subject first.");
+      showNotice(
+        "Enter an email subject first."
+      );
+
       return;
     }
 
-    const initialStatuses: Record<string, SendStatus> = {};
-    for (const contact of selectedEmailContacts) initialStatuses[contact.id] = "pending";
-    setSendStatusByContact(initialStatuses);
+    const initialStatuses: Record<
+      string,
+      SendStatus
+    > = {};
+
+    for (const contact of selectedEmailContacts) {
+      initialStatuses[contact.id] =
+        "pending";
+    }
+
+    setSendStatusByContact(
+      initialStatuses
+    );
+
     setSendResults([]);
     setSending(true);
+
     for (const contact of selectedEmailContacts) {
-      setSendStatusByContact((current) => ({ ...current, [contact.id]: "sending" }));
+      setSendStatusByContact(
+        (current) => ({
+          ...current,
+          [contact.id]:
+            "sending",
+        })
+      );
     }
 
     try {
-      const response = await fetch("/api/bulk-messenger/email/send", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ subject: subject.trim(), message: message.trim(), recipients: selectedEmailContacts.map((contact) => ({ id: contact.id, name: contact.name, email: contact.address })) }),
-      });
+      const response =
+        await fetch(
+          "/api/bulk-messenger/email/send",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+            body: JSON.stringify({
+              subject:
+                subject.trim(),
+              message:
+                message.trim(),
+              recipients:
+                selectedEmailContacts.map(
+                  (contact) => ({
+                    id: contact.id,
+                    name:
+                      contact.name,
+                    email:
+                      contact.address,
+                  })
+                ),
+            }),
+          }
+        );
 
-      const result: { error?: string; requiresReconnect?: boolean; results?: RecipientResult[]; summary?: { sent: number; failed: number; total: number } } = await response.json();
+      const result: {
+        error?: string;
+        requiresReconnect?: boolean;
+        results?: RecipientResult[];
+        summary?: {
+          sent: number;
+          failed: number;
+          total: number;
+        };
+      } = await response.json();
 
       if (!response.ok) {
-        showNotice(result.error ?? "Gmail could not send the messages.");
-        setSendStatusByContact((current) => {
-          const next = { ...current };
-          for (const contact of selectedEmailContacts) next[contact.id] = "failed";
-          return next;
-        });
+        showNotice(
+          result.error ??
+            "Gmail could not send the messages."
+        );
+
+        setSendStatusByContact(
+          (current) => {
+            const next = {
+              ...current,
+            };
+
+            for (const contact of selectedEmailContacts) {
+              next[contact.id] =
+                "failed";
+            }
+
+            return next;
+          }
+        );
+
         return;
       }
 
-      const results = Array.isArray(result.results) ? result.results : [];
-      setSendResults(results);
-      setSendStatusByContact((current) => {
-        const next = { ...current };
-        for (const contact of selectedEmailContacts) {
-          const resultForContact = results.find((item) => item.email?.toLowerCase() === contact.address.toLowerCase());
-          next[contact.id] = resultForContact?.status === "sent" ? "sent" : "failed";
-        }
-        return next;
-      });
+      const results =
+        Array.isArray(
+          result.results
+        )
+          ? result.results
+          : [];
 
-      const sent = result.summary?.sent ?? results.filter((item) => item.status === "sent").length;
-      const failed = result.summary?.failed ?? results.filter((item) => item.status === "failed").length;
-      showNotice(failed === 0 ? `${sent} email${sent === 1 ? "" : "s"} accepted by Gmail successfully.` : `${sent} sent, ${failed} failed. Check the status list below.`);
+      setSendResults(results);
+
+      setSendStatusByContact(
+        (current) => {
+          const next = {
+            ...current,
+          };
+
+          for (const contact of selectedEmailContacts) {
+            const resultForContact =
+              results.find(
+                (item) =>
+                  item.email?.toLowerCase() ===
+                  contact.address.toLowerCase()
+              );
+
+            next[contact.id] =
+              resultForContact?.status ===
+              "sent"
+                ? "sent"
+                : "failed";
+          }
+
+          return next;
+        }
+      );
+
+      const sent =
+        result.summary?.sent ??
+        results.filter(
+          (item) =>
+            item.status ===
+            "sent"
+        ).length;
+
+      const failed =
+        result.summary?.failed ??
+        results.filter(
+          (item) =>
+            item.status ===
+            "failed"
+        ).length;
+
+      showNotice(
+        failed === 0
+          ? `${sent} email${
+              sent === 1
+                ? ""
+                : "s"
+            } accepted by Gmail successfully.`
+          : `${sent} sent, ${failed} failed. Check the status list below.`
+      );
     } catch (error) {
-      console.error("Bulk email sending error:", error);
-      setSendStatusByContact((current) => {
-        const next = { ...current };
-        for (const contact of selectedEmailContacts) next[contact.id] = "failed";
-        return next;
-      });
-      showNotice(error instanceof Error ? error.message : "Network error while sending email.");
+      console.error(
+        "Bulk email sending error:",
+        error
+      );
+
+      setSendStatusByContact(
+        (current) => {
+          const next = {
+            ...current,
+          };
+
+          for (const contact of selectedEmailContacts) {
+            next[contact.id] =
+              "failed";
+          }
+
+          return next;
+        }
+      );
+
+      showNotice(
+        error instanceof Error
+          ? error.message
+          : "Network error while sending email."
+      );
     } finally {
       setSending(false);
     }
@@ -1004,34 +1356,36 @@ const [telegramConnecting, setTelegramConnecting] =
   return (
     <main className="min-h-screen bg-[#f7f8fa] text-[#111827]">
       <style jsx global>{`
-      .telegram-token-input {
-  display: block;
-  width: 100%;
-  box-sizing: border-box;
-  margin-top: 14px;
-  padding: 12px 14px;
-  border-radius: 12px;
-  border: 1px solid #d0d5dd;
-  background: #ffffff;
-  color: #111827;
-  outline: none;
-  font-size: 13px;
-  line-height: 1.4;
-}
+        .telegram-token-input {
+          display: block;
+          width: 100%;
+          box-sizing: border-box;
+          margin-top: 14px;
+          padding: 12px 14px;
+          border-radius: 12px;
+          border: 1px solid #d0d5dd;
+          background: #ffffff;
+          color: #111827;
+          outline: none;
+          font-size: 13px;
+          line-height: 1.4;
+        }
 
-.telegram-token-input::placeholder {
-  color: #98a2b3;
-}
+        .telegram-token-input::placeholder {
+          color: #98a2b3;
+        }
 
-.telegram-token-input:focus {
-  border-color: #667085;
-  box-shadow: 0 0 0 3px rgba(16, 24, 40, 0.06);
-}
+        .telegram-token-input:focus {
+          border-color: #667085;
+          box-shadow: 0 0 0 3px
+            rgba(16, 24, 40, 0.06);
+        }
 
-.modal-connect:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
+        .modal-connect:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+
         * {
           box-sizing: border-box;
         }
@@ -1095,7 +1449,8 @@ const [telegramConnecting, setTelegramConnecting] =
           background: rgba(255, 255, 255, 0.88);
           border: 1px solid #e4e7ec;
           border-radius: 20px;
-          box-shadow: 0 10px 35px rgba(16, 24, 40, 0.045);
+          box-shadow: 0 10px 35px
+            rgba(16, 24, 40, 0.045);
         }
 
         .apps-panel {
@@ -1125,7 +1480,10 @@ const [telegramConnecting, setTelegramConnecting] =
 
         .apps-grid {
           display: grid;
-          grid-template-columns: repeat(4, minmax(0, 1fr));
+          grid-template-columns: repeat(
+            4,
+            minmax(0, 1fr)
+          );
           gap: 12px;
         }
 
@@ -1146,7 +1504,8 @@ const [telegramConnecting, setTelegramConnecting] =
         .app-card:hover {
           transform: translateY(-1px);
           border-color: #c7ccd5;
-          box-shadow: 0 8px 22px rgba(16, 24, 40, 0.07);
+          box-shadow: 0 8px 22px
+            rgba(16, 24, 40, 0.07);
         }
 
         .app-card.selected {
@@ -1410,7 +1769,8 @@ const [telegramConnecting, setTelegramConnecting] =
 
         .subject-input:focus {
           border-color: #98a2b3;
-          box-shadow: 0 0 0 3px rgba(16, 24, 40, 0.06);
+          box-shadow: 0 0 0 3px
+            rgba(16, 24, 40, 0.06);
         }
 
         .textarea {
@@ -1428,7 +1788,8 @@ const [telegramConnecting, setTelegramConnecting] =
 
         .textarea:focus {
           border-color: #98a2b3;
-          box-shadow: 0 0 0 3px rgba(16, 24, 40, 0.06);
+          box-shadow: 0 0 0 3px
+            rgba(16, 24, 40, 0.06);
         }
 
         .composer-actions {
@@ -1664,7 +2025,8 @@ const [telegramConnecting, setTelegramConnecting] =
           color: #fff;
           border-radius: 13px;
           padding: 13px 15px;
-          box-shadow: 0 18px 50px rgba(16, 24, 40, 0.2);
+          box-shadow: 0 18px 50px
+            rgba(16, 24, 40, 0.2);
           font-size: 13px;
         }
 
@@ -1684,7 +2046,8 @@ const [telegramConnecting, setTelegramConnecting] =
           border-radius: 20px;
           background: #fff;
           border: 1px solid #eaecf0;
-          box-shadow: 0 25px 80px rgba(16, 24, 40, 0.22);
+          box-shadow: 0 25px 80px
+            rgba(16, 24, 40, 0.22);
           padding: 24px;
         }
 
@@ -1742,7 +2105,10 @@ const [telegramConnecting, setTelegramConnecting] =
 
         @media (max-width: 1050px) {
           .apps-grid {
-            grid-template-columns: repeat(2, minmax(0, 1fr));
+            grid-template-columns: repeat(
+              2,
+              minmax(0, 1fr)
+            );
           }
 
           .main-grid {
@@ -2023,14 +2389,18 @@ const [telegramConnecting, setTelegramConnecting] =
                             </div>
 
                             <div className="empty-title">
-                              Loading {activePlatform?.name ?? "app"}
+                              Loading{" "}
+                              {activePlatform?.name ??
+                                "app"}{" "}
                               contacts...
                             </div>
 
                             <p className="empty-text">
                               ZUQEN is securely loading eligible
                               contacts available through your
-                              connected {activePlatform?.name ?? "app"}
+                              connected{" "}
+                              {activePlatform?.name ??
+                                "app"}{" "}
                               account.
                             </p>
                           </div>
@@ -2051,7 +2421,10 @@ const [telegramConnecting, setTelegramConnecting] =
                             </div>
 
                             <div className="empty-title">
-                              No {activePlatform?.name ?? "app"} contacts
+                              No{" "}
+                              {activePlatform?.name ??
+                                "app"}{" "}
+                              contacts
                               available
                             </div>
 
@@ -2060,9 +2433,10 @@ const [telegramConnecting, setTelegramConnecting] =
                               available for this connected
                               {activePlatform?.name
                                 ? ` ${activePlatform.name}`
-                                : " app"} account.
-                              Ask a contact to interact with the
-                              connected service if required.
+                                : " app"}{" "}
+                              account. Ask a contact to interact
+                              with the connected service if
+                              required.
                             </p>
                           </div>
                         </div>
@@ -2127,7 +2501,8 @@ const [telegramConnecting, setTelegramConnecting] =
                                     {contact.source ===
                                     "google-contact"
                                       ? "Google Contact"
-                                      : contact.source === "gmail"
+                                      : contact.source ===
+                                          "gmail"
                                         ? "Gmail"
                                         : "Telegram"}
                                   </span>
@@ -2416,9 +2791,9 @@ const [telegramConnecting, setTelegramConnecting] =
                             </div>
 
                             <div className="result-email">
-                              {
-                                result.email
-                              }
+                              {result.email ||
+                                result.chatId ||
+                                ""}
                             </div>
 
                             {result.error && (
@@ -2480,37 +2855,40 @@ const [telegramConnecting, setTelegramConnecting] =
               {connectModalApp.name}
             </h2>
 
-          {connectModalApp.id === "telegram" ? (
-  <>
-    <p className="modal-text">
-      Enter the Bot Token you received from
-      Telegram BotFather. ZUQEN will verify the
-      token with Telegram before saving the
-      connection.
-    </p>
+            {connectModalApp.id ===
+            "telegram" ? (
+              <>
+                <p className="modal-text">
+                  Enter the Bot Token you received from
+                  Telegram BotFather. ZUQEN will verify the
+                  token with Telegram before saving the
+                  connection.
+                </p>
 
-    <input
-      type="password"
-      value={telegramBotToken}
-      onChange={(event) =>
-        setTelegramBotToken(event.target.value)
-      }
-      placeholder="Paste Telegram Bot Token"
-      className="telegram-token-input"
-      autoComplete="off"
-      aria-label="Telegram Bot Token"
-    />
-  </>
-) : (
-  <p className="modal-text">
-    You selected{" "}
-    {connectModalApp.name}, but this
-    account is not connected to ZUQEN yet.
-    Connect it through the official
-    authorization system before selecting
-    contacts or sending messages.
-  </p>
-)}
+                <input
+                  type="password"
+                  value={telegramBotToken}
+                  onChange={(event) =>
+                    setTelegramBotToken(
+                      event.target.value
+                    )
+                  }
+                  placeholder="Paste Telegram Bot Token"
+                  className="telegram-token-input"
+                  autoComplete="off"
+                  aria-label="Telegram Bot Token"
+                />
+              </>
+            ) : (
+              <p className="modal-text">
+                You selected{" "}
+                {connectModalApp.name}, but this
+                account is not connected to ZUQEN yet.
+                Connect it through the official
+                authorization system before selecting
+                contacts or sending messages.
+              </p>
+            )}
 
             <div className="modal-actions">
               <button
@@ -2525,25 +2903,27 @@ const [telegramConnecting, setTelegramConnecting] =
                 Cancel
               </button>
 
-             <button
-  type="button"
-  className="modal-connect"
-  onClick={() =>
-    handleConnect(connectModalApp)
-  }
-  disabled={
-    connectModalApp.id === "telegram" &&
-    (
-      telegramConnecting ||
-      !telegramBotToken.trim()
-    )
-  }
->
-  {connectModalApp.id === "telegram" &&
-  telegramConnecting
-    ? "Connecting..."
-    : `Connect ${connectModalApp.name}`}
-</button>
+              <button
+                type="button"
+                className="modal-connect"
+                onClick={() =>
+                  handleConnect(
+                    connectModalApp
+                  )
+                }
+                disabled={
+                  connectModalApp.id ===
+                    "telegram" &&
+                  (telegramConnecting ||
+                    !telegramBotToken.trim())
+                }
+              >
+                {connectModalApp.id ===
+                  "telegram" &&
+                telegramConnecting
+                  ? "Connecting..."
+                  : `Connect ${connectModalApp.name}`}
+              </button>
             </div>
           </div>
         </div>
