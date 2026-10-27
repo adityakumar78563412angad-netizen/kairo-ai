@@ -16,6 +16,11 @@ type TelegramGetMeResponse = {
   };
 };
 
+type TelegramSetWebhookResponse = {
+  ok?: boolean;
+  description?: string;
+};
+
 export async function POST(request: Request) {
   try {
     const supabase = await createServerSupabaseClient();
@@ -72,6 +77,10 @@ export async function POST(request: Request) {
       );
     }
 
+    // --------------------------------------------------
+    // 1. Verify the Telegram bot token
+    // --------------------------------------------------
+
     const telegramResponse = await fetch(
       `https://api.telegram.org/bot${encodeURIComponent(
         botToken
@@ -117,14 +126,20 @@ export async function POST(request: Request) {
 
     const scopes = ["telegram.bot"];
 
-    const { data: existingConnection, error: lookupError } =
-      await supabase
-        .from("connected_accounts")
-        .select("id")
-        .eq("user_id", user.id)
-        .eq("provider", "telegram")
-        .eq("provider_account_id", String(bot.id))
-        .maybeSingle();
+    // --------------------------------------------------
+    // 2. Save/update the Telegram connection
+    // --------------------------------------------------
+
+    const {
+      data: existingConnection,
+      error: lookupError,
+    } = await supabase
+      .from("connected_accounts")
+      .select("id")
+      .eq("user_id", user.id)
+      .eq("provider", "telegram")
+      .eq("provider_account_id", String(bot.id))
+      .maybeSingle();
 
     if (lookupError) {
       console.error(
@@ -203,8 +218,60 @@ export async function POST(request: Request) {
       }
     }
 
+    // --------------------------------------------------
+    // 3. Automatically register the Telegram webhook
+    // --------------------------------------------------
+
+    const webhookUrl =
+      "https://zuqen.vercel.app/api/connections/telegram/webhook";
+
+    const webhookResponse = await fetch(
+      `https://api.telegram.org/bot${encodeURIComponent(
+        botToken
+      )}/setWebhook`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          url: webhookUrl,
+          allowed_updates: ["message"],
+          drop_pending_updates: false,
+        }),
+        cache: "no-store",
+      }
+    );
+
+    const webhookData =
+      (await webhookResponse.json()) as TelegramSetWebhookResponse;
+
+    if (
+      !webhookResponse.ok ||
+      !webhookData.ok
+    ) {
+      console.error(
+        "Telegram webhook setup failed:",
+        webhookData
+      );
+
+      return NextResponse.json(
+        {
+          error:
+            webhookData.description ??
+            "Telegram connected, but webhook setup failed.",
+        },
+        { status: 502 }
+      );
+    }
+
+    // --------------------------------------------------
+    // 4. Everything succeeded
+    // --------------------------------------------------
+
     return NextResponse.json({
       success: true,
+
       connection: {
         provider: "telegram",
         providerAccountId: String(bot.id),
@@ -212,6 +279,11 @@ export async function POST(request: Request) {
         username: bot.username
           ? `@${bot.username}`
           : null,
+      },
+
+      webhook: {
+        configured: true,
+        url: webhookUrl,
       },
     });
   } catch (error) {
