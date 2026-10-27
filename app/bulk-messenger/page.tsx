@@ -938,10 +938,7 @@ export default function BulkMessengerPage() {
       }
 
       try {
-        const response =
-          await fetch(
-            "/api/bulk-messenger/telegram/send",
-            {
+       const response = await fetch("/api/connections/telegram/send", {
               method: "POST",
               headers: {
                 "Content-Type":
